@@ -1,0 +1,23 @@
+{
+  "host": "127.0.0.1",
+  "port": 1234,
+  "sampleRate": 960000,
+  "freqMhz": 821.2375,
+  "gainDb": 15.7,
+  "ppm": 1,
+  "bwKhz": 35.0,
+  "blockSize": 65536,
+  "dcOffsetHz": 50000.0,
+  "owrxMode": false,
+  "rssiThresholdDb": -55.0,
+  "rssiHystDb": 4.0,
+  "rssiHoldMs": 700.0,
+  "afcEnable": true,
+  "afcMaxHz": 8000.0,
+  "afcGain": 0.45,
+  "keepAfcAfterPacket": false,
+  "userKm": null,
+  "routeKm": [],
+  "etaMaxMin": 360.0,
+  "spectrumMode": "graph"
+}
