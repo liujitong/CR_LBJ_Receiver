@@ -9,6 +9,18 @@ from __future__ import annotations
 
 from cr_lbj.runtime import *  # noqa: F401,F403
 
+def setFormRowVisible(form: QFormLayout, field: QWidget, visible: bool):
+    """隐藏/恢复 QFormLayout 的一整行（标签 + 字段）。
+
+    USB 直连不需要主机/端口，这两行要在选择「本机 USB (直连)」时整行收起。
+    Qt 的 QFormLayout 没有行级可见性 API，只能分别操作标签与字段。
+    """
+    lab = form.labelForField(field)
+    if lab is not None:
+        lab.setVisible(visible)
+    field.setVisible(visible)
+
+
 class DeviceDetectThread(QThread):
     """后台检测 RTL-SDR 设备，避免阻塞界面。
 
@@ -83,14 +95,22 @@ class SourceEditDialog(QDialog):
         self.dcSpin.setSuffix(' Hz')
         self.dcSpin.setValue(float(src.get('dcOffsetHz', 50000.0)))
 
+        self.usbHint = QLabel(
+            'USB 直连：程序自动查找本机 RTL-SDR，无需主机与端口。\n'
+            '插上棒子后点主配置页的「检测设备」确认 tuner 并应用推荐参数。')
+        self.usbHint.setWordWrap(True)
+        self.usbHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
+
         form.addRow('名称:', self.nameEdit)
         form.addRow('类型:', self.typeCombo)
+        form.addRow(self.usbHint)
         form.addRow('主机:', self.hostEdit)
         form.addRow('端口:', self.portSpin)
         form.addRow('采样率:', self.srCombo)
         form.addRow('增益:', self.gainSpin)
         form.addRow('PPM:', self.ppmSpin)
         form.addRow('DC 偏移:', self.dcSpin)
+        self._form = form
 
         btns = QHBoxLayout()
         btns.addStretch()
@@ -115,6 +135,11 @@ class SourceEditDialog(QDialog):
             self.dcSpin.setValue(0)
         elif self.dcSpin.value() < 1:
             self.dcSpin.setValue(50000)
+        # USB 直连没有「主机/端口」的概念，整行收起，避免让人误以为要填
+        direct = (t == 'rtl_usb')
+        setFormRowVisible(self._form, self.hostEdit, not direct)
+        setFormRowVisible(self._form, self.portSpin, not direct)
+        self.usbHint.setVisible(direct)
 
     def getSource(self) -> dict:
         return {
@@ -254,11 +279,20 @@ class ConfigPanel(QWidget):
         self.dcSpin.setSuffix(' Hz')
         self.dcSpin.setValue(config.dcOffsetHz)
 
+        self.usbHint = QLabel(
+            'USB 直连：程序自动查找本机 RTL-SDR，无需主机与端口。'
+            '插上棒子后点上方「检测设备」确认 tuner 并应用推荐参数；'
+            '多支棒子用「设备序号」区分。')
+        self.usbHint.setWordWrap(True)
+        self.usbHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
+
+        connForm.addRow(self.usbHint)
         connForm.addRow('主机:', self.hostEdit)
         connForm.addRow('端口:', self.portSpin)
         connForm.addRow('采样率:', self.srCombo)
         connForm.addRow('块大小:', self.blockSpin)
         connForm.addRow('DC 偏移:', self.dcSpin)
+        self._connForm = connForm
 
         page('数据源配置').addWidget(connGroup)
 
@@ -548,6 +582,18 @@ class ConfigPanel(QWidget):
             self.srcTypeCombo.setCurrentIndex(max(0, ti))
         finally:
             self._updating_mode = False
+        # 切换数据源时主机/端口行的显隐要跟着类型走（上面的
+        # currentIndexChanged 因 _updating_mode 被跳过了）
+        self._updateEndpointRows()
+
+    def _updateEndpointRows(self):
+        """USB 直连没有「主机/端口」的概念：整行收起并显示设备查找提示。"""
+        if not hasattr(self, '_connForm'):
+            return
+        direct = (self.srcTypeCombo.currentData() == 'rtl_usb')
+        setFormRowVisible(self._connForm, self.hostEdit, not direct)
+        setFormRowVisible(self._connForm, self.portSpin, not direct)
+        self.usbHint.setVisible(direct)
 
     def _storeFieldsToSource(self, idx: int):
         if not (0 <= idx < len(self._sources)):
@@ -582,6 +628,7 @@ class ConfigPanel(QWidget):
             self.dcSpin.setValue(0)
         elif abs(self.dcSpin.value()) < 1:
             self.dcSpin.setValue(50000)
+        self._updateEndpointRows()
         self._storeFieldsToSource(self._activeSource)
 
     def _browseRtlTcp(self):
