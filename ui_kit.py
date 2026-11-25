@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import theme as TH
 
-from PySide6.QtCore import Qt, QObject, QEvent
+from PySide6.QtCore import Qt, QObject, QEvent, Signal
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
@@ -221,6 +221,30 @@ def cardColor() -> str:
     return TH.c('panel', '#191c21')
 
 
+def paintBackground(w: QWidget, color: str = None) -> None:
+    """给对话框/容器铺一层实底。
+
+    不能只靠 QSS：`theme._QSS` 里 `QWidget { background-color: transparent }` 排在
+    `QDialog { background-color: $bg }` 之后，且 QDialog 也是 QWidget，
+    同优先级下后写的赢——结果是对话框根本不刷底色，底下露出系统的白色，
+    做法：调色板兜底 + **控件自己**的 ID 选择器样式（优先级高于应用级 QSS）。
+    颜色写成 `rgb(r,g,b)` 而不是 `#RRGGBB`，避免换肤时被
+    `_restyleWidgets()` 的「旧色→新色」批量替换误伤。
+    """
+    try:
+        col = QColor(color or TH.c('bg', '#14161a'))
+        pal = w.palette()
+        pal.setColor(QPalette.Window, col)
+        w.setPalette(pal)
+        w.setAutoFillBackground(True)
+        name = w.objectName() or 'paneBg'
+        w.setObjectName(name)
+        w.setStyleSheet(
+            f'#{name} {{ background-color: rgb({col.red()}, {col.green()}, {col.blue()}); }}')
+    except Exception:
+        pass
+
+
 def textColor() -> str:
     return TH.c('text', '#d8dee6')
 
@@ -243,10 +267,23 @@ def accentColor() -> str:
 if FLUENT:
     _FC = ComboBox
     _FT = TableWidget
+    _FLE = LineEdit
 
     class ComboBox(_FC):  # noqa: F811
         def addItem(self, text, userData=None, icon=None):
             super().addItem(str(text), icon=icon, userData=userData)
+
+    class LineEdit(_FLE):  # noqa: F811
+        """`QLineEdit('初始文本')` 这类老写法在这里继续有效。
+
+        qfluentwidgets 的 LineEdit 只收 parent，把字符串当 parent 传给 QLineEdit
+        会直接 ValueError；配置面板一构造就会崩，所以必须补这一层。
+        """
+
+        def __init__(self, text: str = '', parent: QWidget = None):
+            super().__init__(parent)
+            if text:
+                self.setText(str(text))
 
     class TableWidget(_FT):  # noqa: F811
         def __init__(self, rows: int = 0, cols: int = 0, parent: QWidget = None):
@@ -259,6 +296,10 @@ if FLUENT:
 else:
     class ComboBox(_QtCombo):  # noqa: F811
         pass
+
+    class LineEdit(_QtLineEdit):  # noqa: F811
+        def __init__(self, text: str = '', parent: QWidget = None):
+            super().__init__(str(text or ''), parent)
 
     class TableWidget(_QtTable):  # noqa: F811
         pass
@@ -359,7 +400,7 @@ def combo(parent: QWidget = None) -> QWidget:
 
 
 def line_edit(parent: QWidget = None, placeholder: str = '') -> QWidget:
-    e = LineEdit(parent) if FLUENT else _QtLineEdit(parent)
+    e = LineEdit('', parent)
     if placeholder:
         e.setPlaceholderText(placeholder)
     return e
@@ -395,6 +436,45 @@ def segmented(parent: QWidget = None) -> QWidget:
     """分段选择器（Fluent 的「图形 / 终端」切换）。"""
     s = SegmentedWidget(parent) if FLUENT else QWidget(parent)
     return s
+
+
+if FLUENT:
+    _FSW = SwitchButton
+else:
+    class _FSW(_QtCheck):  # noqa: F811
+        """原生降级：给 QCheckBox 补一个同名的 checkedChanged 信号。"""
+
+        checkedChanged = Signal(bool)
+
+        def __init__(self, parent: QWidget = None):
+            super().__init__(parent)
+            self.toggled.connect(self.checkedChanged.emit)
+
+        def setOnText(self, text: str) -> None:
+            self._onText = text
+
+        def setOffText(self, text: str) -> None:
+            self._offText = text
+
+
+def switch(text: str = '接收', on_text: str = '', off_text: str = '',
+           parent: QWidget = None) -> QWidget:
+    """开关（代替「开始 / 停止」两个按钮）。
+
+    开启时文字用 `on_text`、关闭时用 `off_text`，一眼能看出当前状态；
+    信号名统一为 `checkedChanged(bool)`，降级实现也补齐了这个名字。
+    """
+    sw = _FSW(parent) if not FLUENT else _FSW(text, parent)
+    try:
+        sw.setOffText(off_text or text)
+        sw.setOnText(on_text or (text + '中'))
+        sw.setText(off_text or text)
+    except Exception:
+        pass
+    if not FLUENT:
+        sw.setText(off_text or text)
+    sw.setCursor(Qt.PointingHandCursor)
+    return sw
 
 
 # ---------------------------------------------------------------------------

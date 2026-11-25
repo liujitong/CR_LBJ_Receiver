@@ -58,8 +58,9 @@ def themeColors() -> dict:
 
 # PySide6
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QUrl, QObject
-from PySide6.QtGui import (QColor, QBrush, QFont, QTextCursor, QIcon, QAction,
-                           QPixmap, QImage, QDesktopServices)
+from PySide6.QtGui import (QColor, QBrush, QFont, QFontMetrics, QTextCursor,
+                           QIcon, QAction, QPixmap, QImage, QDesktopServices,
+                           QCursor, QGuiApplication)
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
@@ -941,7 +942,7 @@ class LogTail(QWidget):
         self._level = 'info'
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(spx(8), 0, spx(8), 0)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(spx(8))
 
         self.dot = QLabel('●')
@@ -1090,20 +1091,16 @@ class RxStatusStrip(QWidget):
         self._brief = '尚未开始接收'
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(spx(8), 0, spx(8), 0)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(spx(8))
         self.dot = QLabel('●')
-        col = QVBoxLayout()
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(0)
         self.mainLabel = QLabel(self._main)
-        self.mainLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.mainLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.briefLabel = QLabel(self._brief)
         self.briefLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        col.addWidget(self.mainLabel)
-        col.addWidget(self.briefLabel)
         lay.addWidget(self.dot, 0, Qt.AlignVCenter)
-        lay.addLayout(col, 1)
+        lay.addWidget(self.mainLabel, 0, Qt.AlignVCenter)
+        lay.addWidget(self.briefLabel, 1, Qt.AlignVCenter)
         self.applyTheme()
 
     # ------------------------------------------------------------------
@@ -1121,16 +1118,18 @@ class RxStatusStrip(QWidget):
             f' font-size: {px:.1f}px; font-weight: 600;')
         self.briefLabel.setStyleSheet(
             f'background: transparent; color: {CLR("dim")};'
-            f' font-size: {max(9.0, px * 0.66):.1f}px;')
+            f' font-size: {max(10.0, px * 0.72):.1f}px;')
         self._elide()
 
     def _elide(self):
+        # 一行排开：结论优先保宽度，读数按剩余宽度省略
         fm = self.mainLabel.fontMetrics()
-        w = max(60, self.mainLabel.width() - spx(4))
-        self.mainLabel.setText(fm.elidedText(self._main, Qt.ElideRight, w))
+        self.mainLabel.setText(self._main)
+        used = fm.horizontalAdvance(self._main) + spx(24)
         fm2 = self.briefLabel.fontMetrics()
+        avail = max(40, self.width() - used)
         self.briefLabel.setText(
-            fm2.elidedText(self._brief, Qt.ElideRight, max(60, self.briefLabel.width() - spx(4))))
+            fm2.elidedText(self._brief, Qt.ElideRight, avail))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1632,7 +1631,9 @@ class LocoDetailDialog(QDialog):
         self.setMinimumSize(560, 520)
         self.resize(640, 640)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setAutoFillBackground(True)
+        # 底色自己铺：QSS 里的 QDialog 规则会被后面的 QWidget{transparent} 盖掉，
+        # 不铺就会露出系统白底，深色主题下按钮直接看不见
+        K.paintBackground(self)
 
         self._loco_info = loco_info or {}
         self._nam: Optional[QNetworkAccessManager] = None
@@ -1772,37 +1773,125 @@ class LocoDetailDialog(QDialog):
 # 记录详情对话框 (双击历史/当前列表弹出)
 # ===========================================================================
 class RecordDetailDialog(QDialog):
-    """展示单条记录的完整解码结果、原始数据和解码过程推演。"""
+    """单条记录的完整详情：分成几个页签，不再是一条长滚动条。
+
+    v2.5 改成分页（解码结果 / 原始数据 / BCD / 解码过程 / 纠错码字）——
+    原来的做法是把五块全塞进一个对话框，字段挤成四列，标签和值互相压字，
+    右边还冒出一条横向滚动条。分页之后每页都能用满宽度，也不会互相挤。
+    """
 
     def __init__(self, record: dict, parent=None):
         super().__init__(parent)
+        self._record = record
         train = record.get('train', '----')
         time_str = record.get('timeStr', record.get('time', ''))
         self.setWindowTitle(f'记录详情 — {train} ({time_str})')
-        self.setMinimumSize(720, 640)
-        self.resize(820, 720)
+        self.setMinimumSize(760, 600)
+        self.resize(880, 700)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setAutoFillBackground(True)
+        # 底色自己铺：QSS 里的 QDialog 规则会被后面的 QWidget{transparent} 盖掉，
+        # 不铺就会露出系统白底，深色主题下按钮直接看不见
+        K.paintBackground(self)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(6)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(spx(6))
+        layout.setContentsMargins(spx(10), spx(10), spx(10), spx(8))
 
-        # ===== 1. 解码结果 (2 列网格) =====
-        resultGroup = QGroupBox('解码结果')
-        resultGrid = QGridLayout(resultGroup)
-        resultGrid.setSpacing(4)
-        resultGrid.setContentsMargins(8, 16, 8, 4)
+        self.detailTabs = QTabWidget()
+        self.detailTabs.setDocumentMode(True)
+        layout.addWidget(self.detailTabs, 1)
 
+        self._buildResultPage(record)
+        self._buildRawPage(record)
+        self._buildBcdPage(record)
+        self._buildProcessPage(record)
+        self._buildCodewordPage(record)
+
+        # ===== 按钮 =====
+        btnLayout = QHBoxLayout()
+        btnLayout.addStretch()
+        mapBtn = K.button('在地图中查看')
+        hasCoord = isinstance(record.get('latitude'), (int, float)) and \
+            isinstance(record.get('longitude'), (int, float))
+        mapBtn.setEnabled(hasCoord)
+        mapBtn.clicked.connect(lambda: self._openMap(record))
+        btnLayout.addWidget(mapBtn)
+        closeBtn = K.button('关闭', primary=True)
+        closeBtn.clicked.connect(self.accept)
+        btnLayout.addWidget(closeBtn)
+        layout.addLayout(btnLayout)
+
+        # 启动 12306 后台查询（仅详细报文）
+        if record.get('isDetailed'):
+            self._startTrainQuery(record)
+        else:
+            self._trainQueryLabel.setText('非详细报文，不查询')
+            K.setLabelStyle(self._trainQueryLabel, color=CLR('faint'))
+
+    # ------------------------------------------------------------------
+    # 版面小工具
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _pairGrid(items, lab_color: str, host: QWidget = None) -> QWidget:
+        """把 (标签, 值) 两两排成两列，标签定宽右对齐、值占满剩余。
+
+        原来是 divmod 直接往 4 列里塞，没有列宽约束，字段一长就互相压字。
+        """
+        host = host or QWidget()
+        g = QGridLayout(host)
+        g.setContentsMargins(spx(10), spx(8), spx(10), spx(8))
+        g.setHorizontalSpacing(spx(10))
+        g.setVerticalSpacing(spx(7))
+        # 标签列定宽（两个标签列同宽），值列吃掉所有剩余宽度
+        for col in (0, 2):
+            g.setColumnMinimumWidth(col, spx(76))
+            g.setColumnStretch(col, 0)
+        for col in (1, 3):
+            g.setColumnStretch(col, 1)
+        for i, (k, v) in enumerate(items):
+            r, c = divmod(i, 2)
+            lab = QLabel(f'{k}')
+            lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            K.setLabelStyle(lab, color=lab_color, bold=True)
+            val = QLabel(str(v))
+            val.setWordWrap(True)
+            val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            K.setLabelStyle(val, color=CLR('text'))
+            g.addWidget(lab, r, c * 2)
+            g.addWidget(val, r, c * 2 + 1)
+        return host
+
+    @staticmethod
+    def _monoText(text: str, color: str, px: float = 11.5) -> QTextEdit:
+        """等宽只读文本框（BCD / 过程推演 / 码字共用）。"""
+        t = QTextEdit()
+        t.setReadOnly(True)
+        t.setLineWrapMode(QTextEdit.NoWrap)
+        t.setStyleSheet(
+            'font-family: Consolas, "Courier New", monospace;'
+            f' font-size: {K.fontPx(px)}px;'
+            f' background-color: {CLR("status")}; color: {color};'
+            f' border: 1px solid {CLR("border")};')
+        t.setPlainText(text)
+        return t
+
+    def _addPage(self, title: str, body: QWidget) -> None:
+        self.detailTabs.addTab(body, title)
+
+    # ------------------------------------------------------------------
+    # ① 解码结果
+    # ------------------------------------------------------------------
+    def _buildResultPage(self, record: dict) -> None:
         func_str = self._funcLabel(record.get('rawFunc', record.get('raw_func', 0)))
         msg_type = self._msgTypeLabel(record)
 
-        # 机车信息
         loco_number = record.get('loco', '')
         loco_code = record.get('locoCode', record.get('loco_code', ''))
         loco_info = lookup_loco(loco_code=loco_code, loco_number=loco_number)
+        self._locoInfoData: Optional[dict] = loco_info
+        self._locoNumberStr = loco_number or ''
 
-        result_items = [
+        items = [
             ('时间', record.get('timeStr', record.get('time', ''))),
             ('车次', record.get('train', '----')),
             ('纯数字车次', record.get('baseTrain', '----')),
@@ -1810,182 +1899,145 @@ class RecordDetailDialog(QDialog):
             ('方向', record.get('direction', '未知')),
             ('速度', f"{record.get('speed', '---')} km/h"),
             ('公里标', f"{record.get('position', '---.-')} km"),
+            ('线路', record.get('route', '----')),
             ('机车号', loco_number or '----'),
             ('机车代号', loco_code or '---'),
-            ('线路', record.get('route', '----')),
-            ('经度', f"{record.get('longitude'):.6f}" if isinstance(record.get('longitude'), (int, float)) else '----'),
-            ('纬度', f"{record.get('latitude'):.6f}" if isinstance(record.get('latitude'), (int, float)) else '----'),
             ('类别', record.get('category', '未知')),
             ('报文类型', msg_type),
+            ('经度', f"{record.get('longitude'):.6f}"
+             if isinstance(record.get('longitude'), (int, float)) else '----'),
+            ('纬度', f"{record.get('latitude'):.6f}"
+             if isinstance(record.get('latitude'), (int, float)) else '----'),
             ('线路校验', '通过' if record.get('routeValid', record.get('route_valid', False)) else '未通过'),
-            ('BCH纠错', '有错误' if record.get('msgTypeError', False) else '正常'),
+            ('BCH 纠错', '有错误' if record.get('msgTypeError', False) else '正常'),
             ('预计到达', record.get('etaTime', record.get('eta_time', '--:--:--'))),
             ('预计距离', f"{record.get('etaDistanceKm', record.get('eta_distance_km', '---'))} km"
              if record.get('etaDistanceKm', record.get('eta_distance_km')) else '---'),
         ]
-        for i, (k, v) in enumerate(result_items):
-            r, c = divmod(i, 2)
-            lab = QLabel(f'{k}:')
-            lab.setStyleSheet(f'color: {CLR("accent")}; font-weight: bold; font-size: 12px;')
-            val = QLabel(str(v))
-            val.setStyleSheet(f'color: {CLR("text")}; font-size: 12px;')
-            val.setWordWrap(True)
-            resultGrid.addWidget(lab, r, c * 2)
-            resultGrid.addWidget(val, r, c * 2 + 1)
 
-        # 机车简介（左侧文字 + 右侧"机车详情"按钮，类似 12306 时刻表按钮）
-        loco_row = (len(result_items) + 1) // 2
-        loco_intro = QLabel('机车简介:')
-        loco_intro.setStyleSheet(f'color: {CLR("accent")}; font-weight: bold; font-size: 12px;')
-        self._locoIntroLabel = QLabel('')
-        self._locoIntroLabel.setStyleSheet(
-            f'color: {CLR("text")}; font-size: 11px; padding: 3px; '
-            f'background-color: {CLR("panel")}; border-radius: 3px;')
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(spx(6))
+        v.addWidget(self._pairGrid(items, CLR('accent')))
+
+        # 机车简介：整行铺开，右侧挂「机车详情」
+        locoBox = QWidget()
+        hl = QHBoxLayout(locoBox)
+        hl.setContentsMargins(spx(10), 0, spx(10), spx(4))
+        hl.setSpacing(spx(8))
+        self._locoIntroLabel = QLabel(
+            (f"{loco_info.get('name', '')}  |  {loco_info.get('type', '')}  |  "
+             f"{loco_info.get('power', '')}  |  {loco_info.get('speed', '')}\n"
+             f"{loco_info.get('brief', '')}") if loco_info else '暂无该车型资料')
         self._locoIntroLabel.setWordWrap(True)
-        self._locoInfoData: Optional[dict] = loco_info
-        self._locoNumberStr = loco_number or ''
-        if loco_info:
-            self._locoIntroLabel.setText(
-                f"{loco_info.get('name', '')}  |  {loco_info.get('type', '')}  |  "
-                f"{loco_info.get('power', '')}  |  {loco_info.get('speed', '')}\n"
-                f"{loco_info.get('brief', '')}"
-            )
-        else:
-            self._locoIntroLabel.setText('暂无该车型资料')
-        # 机车详情按钮 (双击效果: 弹出图片+详细信息)
-        self._locoDetailBtn = K.small_button('机车详情', h=24, px=11)
+        K.setLabelStyle(self._locoIntroLabel, color=CLR('text'))
+        self._locoDetailBtn = K.small_button('机车详情', h=26, px=11.5)
         self._locoDetailBtn.setEnabled(bool(loco_info))
-        self._locoDetailBtn.clicked.connect(self._openLocoDetail)
-        resultGrid.addWidget(loco_intro, loco_row, 0)
-        resultGrid.addWidget(self._locoIntroLabel, loco_row, 1, 1, 2)
-        resultGrid.addWidget(self._locoDetailBtn, loco_row, 3)
+        self._locoDetailBtn.clicked.connect(lambda: self._openLocoDetail())
+        hl.addWidget(self._locoIntroLabel, 1)
+        hl.addWidget(self._locoDetailBtn, 0, Qt.AlignTop)
+        v.addWidget(locoBox)
 
-        # 12306 查询结果（仅详细报文查询，放在机车简介下一行）
-        row = loco_row + 1
-        self._trainQueryLabel = QLabel('12306: 查询中...')
-        self._trainQueryLabel.setStyleSheet(
-            f'color: {CLR("accent2")}; font-size: 11px; font-weight: bold; padding: 2px;')
+        # 12306 查询结论
+        qBox = QWidget()
+        ql = QHBoxLayout(qBox)
+        ql.setContentsMargins(spx(10), 0, spx(10), spx(6))
+        ql.setSpacing(spx(8))
+        qTag = QLabel('12306')
+        K.setLabelStyle(qTag, color=CLR('accent2'), bold=True)
+        self._trainQueryLabel = QLabel('查询中...')
         self._trainQueryLabel.setWordWrap(True)
-        self._trainQueryBtn = K.small_button('时刻表', h=24, px=11)
+        K.setLabelStyle(self._trainQueryLabel, color=CLR('accent2'))
+        self._trainQueryBtn = K.small_button('时刻表', h=26, px=11.5)
         self._trainQueryBtn.setEnabled(False)
         self._trainQueryData: Optional[dict] = None
         self._trainQueryBtn.clicked.connect(self._openTrainQueryResult)
-        resultGrid.addWidget(QLabel('12306:'), row, 0)
-        resultGrid.addWidget(self._trainQueryLabel, row, 1, 1, 2)
-        resultGrid.addWidget(self._trainQueryBtn, row, 3)
+        ql.addWidget(qTag, 0, Qt.AlignTop)
+        ql.addWidget(self._trainQueryLabel, 1)
+        ql.addWidget(self._trainQueryBtn, 0, Qt.AlignTop)
+        v.addWidget(qBox)
+        v.addStretch(1)
 
-        layout.addWidget(resultGroup)
+        self._addPage('解码结果', page)
 
-        # 启动 12306 后台查询（仅详细报文）
-        if record.get('isDetailed'):
-            self._startTrainQuery(record)
-        else:
-            self._trainQueryLabel.setText('非详细报文，不查询')
-            self._trainQueryLabel.setStyleSheet(f'color: {CLR("faint")}; font-size: 11px;')
-
-        # ===== 2. 原始数据 (2 列网格) =====
-        rawGroup = QGroupBox('原始数据')
-        rawGrid = QGridLayout(rawGroup)
-        rawGrid.setSpacing(4)
-        rawGrid.setContentsMargins(8, 16, 8, 4)
-
-        rssi_val = record.get('rssi', record.get('rssi', -140.0))
+    # ------------------------------------------------------------------
+    # ② 原始数据
+    # ------------------------------------------------------------------
+    def _buildRawPage(self, record: dict) -> None:
+        func_str = self._funcLabel(record.get('rawFunc', record.get('raw_func', 0)))
+        rssi_val = record.get('rssi', -140.0)
         afc_hz = record.get('afcHz', record.get('afc_hz', 0.0))
         ferr = record.get('afcErrHz', record.get('afc_err_hz', 0.0))
         score = record.get('afcScore', record.get('afc_score', 0.0))
         raw_addr = record.get('rawAddr', record.get('raw_addr', 0))
-        raw_func = record.get('rawFunc', record.get('raw_func', 0))
 
-        raw_items = [
+        items = [
             ('报文地址', str(raw_addr)),
             ('功能码', func_str),
             ('信号强度', f"{rssi_val:.1f} dB" if isinstance(rssi_val, (int, float)) else str(rssi_val)),
-            ('AFC补偿', f"{afc_hz:+.0f} Hz" if isinstance(afc_hz, (int, float)) else str(afc_hz)),
+            ('AFC 补偿', f"{afc_hz:+.0f} Hz" if isinstance(afc_hz, (int, float)) else str(afc_hz)),
             ('频率误差', f"{ferr:+.0f} Hz" if isinstance(ferr, (int, float)) else str(ferr)),
-            ('AFC置信度', f"{score:.2f}" if isinstance(score, (int, float)) else str(score)),
+            ('AFC 置信度', f"{score:.2f}" if isinstance(score, (int, float)) else str(score)),
             ('短报文', '是' if record.get('rawIsShort', False) else '否'),
             ('合并报文', '是' if record.get('rawIsMerged', False) else '否'),
             ('独立长报文', '是' if record.get('rawIsStandalone', False) else '否'),
             ('到达状态', record.get('etaStatus', record.get('eta_status', '等待信号'))),
         ]
-        for i, (k, v) in enumerate(raw_items):
-            r, c = divmod(i, 2)
-            lab = QLabel(f'{k}:')
-            lab.setStyleSheet(f'color: {CLR("warn")}; font-weight: bold; font-size: 12px;')
-            val = QLabel(str(v))
-            val.setStyleSheet(f'color: {CLR("text")}; font-size: 12px;')
-            rawGrid.addWidget(lab, r, c * 2)
-            rawGrid.addWidget(val, r, c * 2 + 1)
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(self._pairGrid(items, CLR('warn')))
+        v.addStretch(1)
+        self._addPage('原始数据', page)
 
-        layout.addWidget(rawGroup)
-
-        # ===== 3. BCD 原始数据 =====
-        bcdGroup = QGroupBox('BCD 原始数据')
-        bcdLayout = QVBoxLayout(bcdGroup)
-        bcdLayout.setContentsMargins(8, 16, 8, 4)
-        bcdText = QTextEdit()
-        bcdText.setReadOnly(True)
-        bcdText.setStyleSheet(
-            'font-family: Consolas, "Courier New", monospace; font-size: 12px; '
-            f'background-color: {CLR("status")}; color: {CLR("ok")}; border: 1px solid {CLR("border")};')
-        bcdText.setMaximumHeight(120)
+    # ------------------------------------------------------------------
+    # ③ BCD 原始数据
+    # ------------------------------------------------------------------
+    def _buildBcdPage(self, record: dict) -> None:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(spx(10), spx(10), spx(10), spx(10))
         bcd_raw = record.get('rawBcd', record.get('raw_bcd', ''))
         if bcd_raw:
-            lines = [bcd_raw[i:i + 10] for i in range(0, len(bcd_raw), 10)]
-            bcd_display = f'长度: {len(bcd_raw)} 字符\n\n' + \
-                '\n'.join(f'{i * 10:4d}: {line}' for i, line in enumerate(lines))
-            bcdText.setPlainText(bcd_display)
+            lines = [bcd_raw[i:i + 20] for i in range(0, len(bcd_raw), 20)]
+            text = (f'长度：{len(bcd_raw)} 字符（BCD 十进制数，每 2 位 1 字节）\n\n'
+                    + '\n'.join(f'{i * 20:4d}: {ln}' for i, ln in enumerate(lines)))
         else:
-            bcdText.setPlainText('（无 BCD 数据）')
-        bcdLayout.addWidget(bcdText)
-        layout.addWidget(bcdGroup)
+            text = '（无 BCD 数据）'
+        v.addWidget(self._monoText(text, CLR('ok')))
+        self._addPage('BCD 原始数据', page)
 
-        # ===== 4. 解码过程推演 =====
-        procGroup = QGroupBox('解码过程推演')
-        procLayout = QVBoxLayout(procGroup)
-        procLayout.setContentsMargins(8, 16, 8, 4)
-        procText = QTextEdit()
-        procText.setReadOnly(True)
-        procText.setStyleSheet(
-            'font-family: Consolas, "Courier New", monospace; font-size: 11px; '
-            f'background-color: {CLR("status")}; color: {CLR("dim")}; border: 1px solid {CLR("border")};')
-        procText.setPlainText(self._buildDecodeProcess(record))
-        procLayout.addWidget(procText)
-        layout.addWidget(procGroup)
+    # ------------------------------------------------------------------
+    # ④ 解码过程推演
+    # ------------------------------------------------------------------
+    def _buildProcessPage(self, record: dict) -> None:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(spx(10), spx(10), spx(10), spx(10))
+        v.addWidget(self._monoText(self._buildDecodeProcess(record), CLR('dim')))
+        self._addPage('解码过程', page)
 
-        # ===== 5. 码字列表 =====
-        codewords = record.get('rawCodewords', [])
+    # ------------------------------------------------------------------
+    # ⑤ 纠错后码字
+    # ------------------------------------------------------------------
+    def _buildCodewordPage(self, record: dict) -> None:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(spx(10), spx(10), spx(10), spx(10))
+        codewords = record.get('rawCodewords', []) or []
         if codewords:
-            cwGroup = QGroupBox(f'纠错后码字 ({len(codewords)} 个)')
-            cwLayout = QVBoxLayout(cwGroup)
-            cwLayout.setContentsMargins(8, 16, 8, 4)
-            cwText = QTextEdit()
-            cwText.setReadOnly(True)
-            cwText.setStyleSheet(
-                'font-family: Consolas, "Courier New", monospace; font-size: 11px; '
-                f'background-color: {CLR("status")}; color: {CLR("warn")}; border: 1px solid {CLR("border")};')
-            cwText.setMaximumHeight(100)
-            cw_lines = []
+            lines = []
             for i, cw in enumerate(codewords):
-                cw_bin = format(cw, '031b') if isinstance(cw, int) else str(cw)
-                cw_lines.append(f'  [{i:2d}] {cw_bin}  (0x{cw:08X})' if isinstance(cw, int) else f'  [{i:2d}] {cw}')
-            cwText.setPlainText('\n'.join(cw_lines))
-            cwLayout.addWidget(cwText)
-            layout.addWidget(cwGroup)
-
-        # ===== 按钮 =====
-        btnLayout = QHBoxLayout()
-        btnLayout.addStretch()
-        mapBtn = QPushButton('在地图中查看')
-        hasCoord = isinstance(record.get('latitude'), (int, float)) and \
-            isinstance(record.get('longitude'), (int, float))
-        mapBtn.setEnabled(hasCoord)
-        mapBtn.clicked.connect(lambda: self._openMap(record))
-        btnLayout.addWidget(mapBtn)
-        closeBtn = QPushButton('关闭')
-        closeBtn.clicked.connect(self.accept)
-        btnLayout.addWidget(closeBtn)
-        layout.addLayout(btnLayout)
+                if isinstance(cw, int):
+                    lines.append(f'  [{i:2d}] {format(cw, "031b")}  (0x{cw:08X})')
+                else:
+                    lines.append(f'  [{i:2d}] {cw}')
+            text = f'共 {len(codewords)} 个码字（BCH(31,21) 纠错后）\n\n' + '\n'.join(lines)
+        else:
+            text = '（本条记录没有保存码字）'
+        v.addWidget(self._monoText(text, CLR('warn')))
+        self._addPage('纠错码字', page)
 
     def _openMap(self, record: dict):
         """用高德 URI API 在浏览器中定位该列车。"""
@@ -2071,6 +2123,14 @@ class RecordDetailDialog(QDialog):
         lines = []
         addr = record.get('rawAddr', record.get('raw_addr', 0))
         func = record.get('rawFunc', record.get('raw_func', 0))
+        try:                       # 数据库里可能存成文本，格式化前先归一
+            addr_i = int(addr)
+        except (TypeError, ValueError):
+            addr_i = 0
+        try:
+            func_i = int(func)
+        except (TypeError, ValueError):
+            func_i = 0
         bcd = record.get('rawBcd', record.get('raw_bcd', ''))
         is_detailed = record.get('isDetailed', False)
         is_short = record.get('rawIsShort', False)
@@ -2103,8 +2163,8 @@ class RecordDetailDialog(QDialog):
         lines.append('')
         lines.append('=== 3. 帧同步 ===')
         lines.append(f'  搜索 LBJ 帧同步字 (18 bit 地址 + 2 bit 功能码)')
-        lines.append(f'  地址码: {addr} (0x{addr:05X})')
-        lines.append(f'  功能码: {func} ({self._funcLabel(func)})')
+        lines.append(f'  地址码: {addr_i} (0x{addr_i:05X})')
+        lines.append(f'  功能码: {func_i} ({self._funcLabel(func_i)})')
 
         lines.append('')
         lines.append('=== 4. BCH(31,21) 译码 ===')
@@ -2285,6 +2345,10 @@ SOURCE_TYPE_LABELS = [
     ('局域网 / 本地 RTL-TCP', 'rtl_tcp'),
     ('OWRX (OpenWebRX)', 'owrx'),
 ]
+
+#: 配置分页名（与 ConfigPanel 里的 page(...) 名字一一对应）。
+#: 「配置」菜单直接列这几项，点哪项就单独开哪一页，不再用页签切换。
+CONFIG_PAGES = ['数据源配置', '射频设置', '到达估算', '地图与车次', '解码与界面', '外观主题']
 
 
 class DeviceDetectThread(QThread):
@@ -2989,22 +3053,40 @@ class ConfigPanel(QWidget):
 # 配置对话框
 # ===========================================================================
 class ConfigDialog(QDialog):
-    """配置对话框：弹出式编辑运行配置。"""
+    """配置对话框：一次只显示一页（由「配置」菜单的分项决定），不再用页签翻。"""
 
-    def __init__(self, config: CoreConfig, parent=None):
+    def __init__(self, config: CoreConfig, parent=None, page: str = None):
         super().__init__(parent)
-        self.setWindowTitle('SDR-LBJ 配置')
-        self.setMinimumSize(760, 640)
-        self.resize(860, 760)
+        self.setWindowTitle('配置 · ' + (page or CONFIG_PAGES[0]))
+        self.setMinimumSize(720, 560)
+        self.resize(820, 660)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setAutoFillBackground(True)
+        # 底色自己铺：QSS 里的 QDialog 规则会被后面的 QWidget{transparent} 盖掉，
+        # 不铺就会露出系统白底，深色主题下按钮直接看不见
+        K.paintBackground(self)
         layout = QVBoxLayout(self)
         self.panel = ConfigPanel(config)
         self.panel.saveBtn.hide()
         self.panel.hotBtn.hide()
         self.panel.restartBtn.hide()
+
+        # 只留请求的那一页：把页签条藏掉，选中对应索引
+        tabs = self.panel.cfgTabs
+        idx = 0
+        if page:
+            for i in range(tabs.count()):
+                if tabs.tabText(i) == page:
+                    idx = i
+                    break
+        tabs.setCurrentIndex(idx)
+        try:
+            tabs.tabBar().hide()
+        except Exception:
+            pass
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(self.panel)
         layout.addWidget(scroll, 1)
         btnLayout = QHBoxLayout()
@@ -3519,7 +3601,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v2.4  ·  2026-11')
+        ver = QLabel('v2.5  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)
@@ -3666,7 +3748,9 @@ class TimetableDialog(QDialog):
         self.setMinimumSize(560, 560)
         self.resize(620, 640)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setAutoFillBackground(True)
+        # 底色自己铺：QSS 里的 QDialog 规则会被后面的 QWidget{transparent} 盖掉，
+        # 不铺就会露出系统白底，深色主题下按钮直接看不见
+        K.paintBackground(self)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(6)
@@ -4026,10 +4110,14 @@ class MainWindow(QMainWindow):
         self._logWindow: Optional[LogWindow] = None
         self._dashWindow = None
         self._isFullScreen = False
+        # 多屏混合 DPI：记录窗口当前所在屏，换屏时重新适配（见 _onScreenChanged）
+        self._lastScreen = None
+        self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.4')
-        # 下限放低一点：1024×600 的老上网本也能用，布局会自己收（FieldGrid 换列）
-        self.setMinimumSize(spx(880), spx(560))
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.5')
+        # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
+        # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
+        self._applyMinSizeForScreen()
         self._applyWindowGeometry()
         if os.path.exists(ICON_PATH):
             self.setWindowIcon(QIcon(ICON_PATH))
@@ -4048,24 +4136,114 @@ class MainWindow(QMainWindow):
         # 自动启动
         QTimer.singleShot(500, self.startDsp)
 
-    # ---- 窗口几何 / 全屏 ----
-    def _applyWindowGeometry(self):
-        """按可用屏幕自适应：小屏铺满，大屏留边，避免 4K 下窗口过大或小屏溢出。"""
+    # ---- 多屏 / 混合 DPI 适配（v2.5） ----
+    def _currentScreen(self):
+        """窗口实际所在屏。窗口还没 show 时用鼠标所在屏兜底。
+
+        旧版一律用 primaryScreen()：本机主屏 1920×1080@100%，笔记本副屏
+        1280×800@200%(dpr=2.0)。按主屏算出的窗口拖到副屏会被 Qt 再放大一倍，
+        于是右下整片被裁。这里改成跟着窗口走。
+        """
         try:
-            scr = QApplication.primaryScreen()
-            if scr is None:
-                self.resize(spx(1280), spx(820))
+            h = self.windowHandle()
+            if h is not None and h.screen() is not None:
+                return h.screen()
+        except Exception:
+            pass
+        try:
+            s = QApplication.screenAt(QCursor.pos())
+            if s is not None:
+                return s
+        except Exception:
+            pass
+        return QApplication.primaryScreen()
+
+    def _applyMinSizeForScreen(self, scr=None):
+        """按所在屏的**逻辑**可用区收紧窗口下限。
+
+        200% 缩放屏的逻辑可用区可能只有 640×400，写死 spx(880)×spx(560)
+        会把窗口顶出屏幕，Qt 布局再怎么自适应都救不回来。
+        """
+        try:
+            s = scr or self._currentScreen()
+            avail = s.availableGeometry() if s is not None else None
+            if avail is None:
+                self.setMinimumSize(spx(880), spx(560))
                 return
-            avail = scr.availableGeometry()
+            self.setMinimumSize(
+                min(spx(880), max(320, avail.width() - spx(8))),
+                min(spx(560), max(240, avail.height() - spx(8))))
+        except Exception:
+            self.setMinimumSize(spx(880), spx(560))
+
+    def _applyWindowGeometry(self, scr=None):
+        """按**窗口所在屏**的可用区自适应，窗口永远不超出这块屏。"""
+        try:
+            s = scr or self._currentScreen()
+            if s is None:
+                self.resize(spx(1000), spx(660))
+                return
+            avail = s.availableGeometry()
             w = min(int(avail.width() * 0.94), spx(1600))
             h = min(int(avail.height() * 0.92), spx(1000))
-            w = max(w, spx(1000))
-            h = max(h, spx(660))
+            # 下限想要大窗口，但绝不能超过这块屏：旧版 max() 会把窗口顶出去
+            w = min(max(w, spx(1000)), avail.width())
+            h = min(max(h, spx(660)), avail.height())
             self.resize(w, h)
             self.move(avail.x() + max(0, (avail.width() - w) // 2),
                       avail.y() + max(0, (avail.height() - h) // 3))
         except Exception:
-            self.resize(spx(1280), spx(820))
+            self.resize(spx(1000), spx(660))
+
+    def _onScreenChanged(self, scr=None):
+        """换屏或首次显示：收紧尺寸、重排三段、让地图重绘。
+
+        注意 UI_SCALE 故意**不**跟着屏幕变：所有 spx() 尺寸在构造时已烘焙进
+        控件，动态改倍率只会让部分控件变、部分不变，反而更乱。逻辑布局两屏
+        保持一致，物理大小交给 Qt 按各自 dpr 渲染，这才是系统级正确行为。
+        """
+        if self._geomBusy:
+            return
+        s = scr or self._currentScreen()
+        if s is None:
+            return
+        self._lastScreen = s
+        self._geomBusy = True
+        try:
+            g = s.availableGeometry()
+            cur = self.geometry()
+            nw = min(cur.width(), int(g.width() * 0.94))
+            nh = min(cur.height(), int(g.height() * 0.92))
+            nx, ny = cur.x(), cur.y()
+            # 只有窗口已经跑到这块屏外面时，才把它挪回屏内；否则保留用户拖的位置
+            if (nx + nw > g.right() or nx < g.x() or
+                    ny + nh > g.bottom() or ny < g.y()):
+                nx = g.x() + max(0, (g.width() - nw) // 2)
+                ny = g.y() + max(0, (g.height() - nh) // 3)
+            self.setGeometry(nx, ny, nw, nh)
+            self._applyMinSizeForScreen(s)
+            self._applyResponsive(force=True)
+            QTimer.singleShot(60, self._afterFullScreen)
+        finally:
+            self._geomBusy = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 窗口句柄在首次显示后才有效，这时才拿得到真正的所在屏
+        QTimer.singleShot(0, self._initScreenFit)
+
+    def _initScreenFit(self):
+        try:
+            h = self.windowHandle()
+            if h is not None:
+                h.screenChanged.connect(self._onScreenChanged)
+        except Exception:
+            pass
+        s = self._currentScreen()
+        if s is not None:
+            self._onScreenChanged(s)
+
+    # ---- 窗口几何 / 全屏 ----
 
     def toggleFullScreen(self, on: Optional[bool] = None):
         """全屏切换 (F11)。全屏时隐藏菜单栏以最大化内容区。"""
@@ -4109,8 +4287,10 @@ class MainWindow(QMainWindow):
         """
         if not hasattr(self, 'mainSplit'):
             return
-        w = max(640, self.width())
-        h = max(480, self.height())
+        # 用真实窗口尺寸。旧版 max(640/480) 会在窗口被拖小（或高 DPI 屏
+        # 逻辑区本来就小）时按 640 宽去分配左右列，把子控件顶出父窗口。
+        w = max(320, self.width())
+        h = max(240, self.height())
         key = (w // 160, h // 120)
         if not force and key == getattr(self, '_respKey', None):
             return
@@ -4118,40 +4298,63 @@ class MainWindow(QMainWindow):
 
         chrome = spx(96)                       # 工具栏 + 状态栏
         avail = max(spx(300), h - chrome)
-        # ③ 输出区（底栏）：只放一行日志 + 一句状态，压到 8% 左右（56~88），
-        #    省下来的高度全给上段——底栏就是个底栏，图要大。
-        outH = int(min(max(avail * 0.085, spx(56)), spx(88)))
+        # ③ 底栏：只有一行文字，不需要卡片标题，压到 34~46 px
+        outH = int(min(max(avail * 0.045, spx(34)), spx(46)))
         rest = max(spx(240), avail - outH)
-        # ② 中段（频谱 | 车次 | 机车）：约 34%，夹在 110~260
-        band2H = int(min(max(rest * 0.34, spx(110)), spx(260)))
-        # ① 上段吃掉剩下的
+        # ② 中段（频谱 | 车次 | 机车）：能看清就行，约 24%，夹在 96~180
+        band2H = int(min(max(rest * 0.24, spx(96)), spx(180)))
+        # ① 上段（地图 + 解码）吃掉剩下的——这一块才是主战场
         band1H = max(spx(180), rest - band2H)
+        # 极小逻辑窗（如 200% 缩放下的 400×400 逻辑屏）：中段三张卡片
+        # 已经装不下内容，直接收起，把全部高度让给地图与解码——
+        # 这也符合「上段优先」的设计。
+        ultraTiny = (w < spx(620) or h < spx(500))
+        if ultraTiny:
+            outH = min(outH, spx(28))
+            band2H = 0
+            band1H = max(spx(120), avail - outH)
         self.mainSplit.setSizes([band1H, band2H, outH])
+        if hasattr(self, 'band2'):
+            self.band2.setVisible(not ultraTiny)
+
+        # 所有下限都要跟着当前窗口/所在屏收紧，否则高 DPI 小逻辑屏会被
+        # 一堆「最小宽/高」联手顶出屏幕（v2.5 修）。
+        mapMinW = min(spx(240) if w < spx(1100) else spx(320),
+                      max(spx(140), int(w * 0.42)))
+        cardMinH = min(spx(104), max(spx(52), int(h * 0.18)))
+        maxCardW = max(spx(110), int(w / 3.6))
+        # 极小逻辑窗口（如 200% 缩放下的 400×400 逻辑屏）：再压一档下限，
+        # 否则一堆「最小宽/高」联手把子控件顶出父窗口。
+        if w < spx(700) or h < spx(520):
+            mapMinW = min(mapMinW, max(spx(100), int(w * 0.35)))
+            cardMinH = min(cardMinH, max(spx(28), int(h * 0.10)))
+            maxCardW = max(spx(80), int(w / 4.2))
 
         # ① 左右比例：地图约 62%
         if hasattr(self, 'band1'):
             self.band1.setSizes([int(w * 0.62), w - int(w * 0.62)])
         if hasattr(self, 'mapPanel'):
-            self.mapPanel.setMinimumWidth(spx(240) if w < spx(1100) else spx(320))
+            self.mapPanel.setMinimumWidth(mapMinW)
 
         # ② 三块比例：频谱 5 : 车次 3 : 机车 3
         if hasattr(self, 'band2'):
             unit = w / 11.0
             self.band2.setSizes([int(unit * 5), int(unit * 3), int(unit * 3)])
-            # 中段三块都有下限：矮窗口里宁可压上段，也别把频谱压成一条缝
             for card in (getattr(self, 'specCard', None),
                          getattr(self, 'queryCard', None),
                          getattr(self, 'locoCard', None)):
                 if card is not None:
-                    card.setMinimumHeight(spx(126))
+                    card.setMinimumHeight(cardMinH)
 
         # 窄窗口收紧最小宽度，否则整窗被顶宽（出现横向滚动条）
         narrow = w < spx(1100)
         if hasattr(self, 'specCard'):
-            self.specCard.setMinimumWidth(spx(200) if narrow else spx(300))
+            self.specCard.setMinimumWidth(
+                min(spx(200) if narrow else spx(300), maxCardW))
         for card in (getattr(self, 'queryCard', None), getattr(self, 'locoCard', None)):
             if card is not None:
-                card.setMinimumWidth(spx(168) if narrow else spx(210))
+                card.setMinimumWidth(
+                    min(spx(168) if narrow else spx(210), maxCardW))
 
         # 很窄时收起左上角标题，把宽度让给频率与连接状态
         if hasattr(self, 'titleLabel'):
@@ -4163,6 +4366,18 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._applyResponsive()
+
+    def moveEvent(self, event):
+        """窗口被拖到另一块屏时（screenChanged 有时滞后）兜底触发一次适配。"""
+        super().moveEvent(event)
+        if self._geomBusy:
+            return
+        try:
+            s = self._currentScreen()
+            if s is not None and s is not self._lastScreen:
+                self._onScreenChanged(s)
+        except Exception:
+            pass
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F11:
@@ -4233,10 +4448,14 @@ class MainWindow(QMainWindow):
             scaleMenu.addAction(act)
             self._scaleActions.append((val, act))
 
+        # 配置菜单：直接列出各分项，点哪项就开哪一页，不再用页签让人翻
         configMenu = menubar.addMenu('配置(&C)')
-        actConfig = QAction('配置...', self, shortcut='Ctrl+,')
-        actConfig.triggered.connect(self._openConfig)
-        configMenu.addAction(actConfig)
+        for _i, _name in enumerate(CONFIG_PAGES):
+            _act = QAction(_name + '...', self)
+            if _i == 0:
+                _act.setShortcut('Ctrl+,')
+            _act.triggered.connect(lambda _c=False, n=_name: self._openConfig(n))
+            configMenu.addAction(_act)
 
         helpMenu = menubar.addMenu('帮助(&H)')
         actManual = QAction('使用手册', self)
@@ -4278,6 +4497,8 @@ class MainWindow(QMainWindow):
 
     def _buildUi(self):
         central = QWidget()
+        central.setObjectName('centralPane')
+        central.setAttribute(Qt.WA_StyledBackground, True)
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(spx(4), spx(4), spx(4), spx(2))
@@ -4289,32 +4510,25 @@ class MainWindow(QMainWindow):
         self.titleLabel = QLabel('中国铁路 LBJ 列车预警器')
         self.titleLabel.setStyleSheet(
             f'color: {CLR("accent")}; font-size: {spx(15)}px; font-weight: bold;')
-        self.titleLabel.setToolTip('中国铁路 LBJ 列车预警器解码程序 v2.4')
-        # 标题固定成文字宽度：既不会被拉伸成一大块空白，也不给窗口垫出多余的宽度下限
-        _titleW = self.titleLabel.fontMetrics().horizontalAdvance(
-            self.titleLabel.text()) + spx(10)
+        self.titleLabel.setToolTip('中国铁路 LBJ 列车预警器解码程序 v2.5')
+        # 按 QSS 的真实字号量宽度：widget 的 fontMetrics() 此刻还是应用默认
+        # 字体（QSS 尚未 polish），旧版算出的 156px 小于实际需要的 192px，
+        # 结果标题被 setMaximumWidth 截断。这里显式按 spx(15) 构造字体度量。
+        _tf = QFont(self.titleLabel.font())
+        _tf.setPixelSize(spx(15))
+        _titleW = QFontMetrics(_tf).horizontalAdvance(
+            self.titleLabel.text()) + spx(16)
         self.titleLabel.setMinimumWidth(0)
         self.titleLabel.setMaximumWidth(_titleW)
         self.titleLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         header.addWidget(self.titleLabel, 0)
 
-        # 按钮外观全部交给 Fluent：开始用强调色主按钮，其余为常规按钮
-        self.btnStart = K.button('▶  开始', primary=True)
-        self.btnStart.setToolTip('启动 DSP 接收 (Ctrl+R)')
-        self.btnStart.clicked.connect(self.startDsp)
-        self.btnStop = K.button('■  停止')
-        self.btnStop.setToolTip('停止接收 (Ctrl+R)')
-        self.btnStop.clicked.connect(self.stopDsp)
-        header.addWidget(self.btnStart)
-        header.addWidget(self.btnStop)
-        header.addSpacing(spx(10))
-
-        self.freqLabel = QLabel('频率: -- MHz')
-        self.freqLabel.setStyleSheet(
-            f'background: transparent; color: {CLR("accent")};'
-            f' font-weight: bold; font-size: {spx(14)}px;')
-        header.addWidget(self.freqLabel)
-        header.addSpacing(spx(10))
+        # 接收开关：一个开关代替原来的「开始 / 停止」两个按钮，状态一眼可见
+        self.rxSwitch = K.switch('接收', on_text='接收中')
+        self.rxSwitch.setToolTip('启动 / 停止 DSP 接收 (Ctrl+R)')
+        self.rxSwitch.checkedChanged.connect(self._onRxSwitch)
+        header.addWidget(self.rxSwitch)
+        header.addSpacing(spx(12))
 
         self.connIndicator = QLabel('● 未连接')
         self.connIndicator.setStyleSheet(
@@ -4421,23 +4635,28 @@ class MainWindow(QMainWindow):
         self.band2 = band2
         mainSplit.addWidget(band2)
 
-        # ---- ③ 底栏：输出 1（最新一条日志） | 输出 2（状态提示） ----
+        # ---- ③ 底栏：只有一行——左边最新一条日志，右边一句话状态 ----
+        #   v2.5：取消「输出 1 / 输出 2」两张卡片和它们的标题，
+        #   左边日志、右边状态提示直接并进同一条细底栏，省下的高度全给上段。
         self.logTail = LogTail()
         self.statusStrip = RxStatusStrip()
         self.statusStrip.clicked.connect(self.openDashboard)
+        self.statusStrip.setToolTip('点击打开运行状态仪表板 (Ctrl+D)')
 
-        self.out1Card = CardBox('输出 1 · 日志', self.logTail, margins=(8, 3, 8, 4))
-        self.out2Card = CardBox('输出 2 · 接收状态', self.statusStrip, margins=(8, 3, 8, 4))
-        self.out2Card.setToolTip('点击打开运行状态仪表板 (Ctrl+D)')
-        for _c in (self.out1Card, self.out2Card):
-            _c.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.barSep = QFrame()
+        self.barSep.setFrameShape(QFrame.VLine)
+        self.barSep.setFixedWidth(1)
+        self.barSep.setStyleSheet(f'background-color: {CLR("border")}; border: none;')
 
         bottomBar = QWidget()
+        bottomBar.setObjectName('bottomBar')
+        bottomBar.setAttribute(Qt.WA_StyledBackground, True)
         bl = QHBoxLayout(bottomBar)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(spx(6))
-        bl.addWidget(self.out1Card, 1)
-        bl.addWidget(self.out2Card, 1)
+        bl.setContentsMargins(spx(10), spx(2), spx(10), spx(2))
+        bl.setSpacing(spx(10))
+        bl.addWidget(self.logTail, 1)
+        bl.addWidget(self.barSep, 0)
+        bl.addWidget(self.statusStrip, 1)
         self.bottomBar = bottomBar
         mainSplit.addWidget(bottomBar)
 
@@ -4448,10 +4667,12 @@ class MainWindow(QMainWindow):
         root.addWidget(mainSplit, 1)
         self.logBus.lineAdded.connect(self._onLogLine)
 
-        # 状态栏
-        self.statusBar().showMessage('就绪')
+        # 状态栏：底栏已经承担了状态显示，这里彻底不显示——
+        # 留一条空的状态栏只会多出那条“黑条”（重绘跟不上时是纯黑）
+        self.statusBar().hide()
         self._applyTouchTweaks()
         self._syncThemeButton()
+        self._syncRxSwitch(False)
         # 首次布局完成后按实际窗口尺寸定一次比例
         QTimer.singleShot(0, lambda: self._applyResponsive(force=True))
 
@@ -4643,8 +4864,28 @@ class MainWindow(QMainWindow):
 
 
     # ---- DSP 控制 ----
+    def _onRxSwitch(self, on: bool):
+        """工具栏接收开关：开=启动 DSP，关=停止。"""
+        if on:
+            self.startDsp()
+        else:
+            self.stopDsp()
+
+    def _syncRxSwitch(self, on: bool):
+        """把开关状态同步成实际运行状态（不触发 start/stop）。"""
+        sw = getattr(self, 'rxSwitch', None)
+        if sw is None:
+            return
+        try:
+            sw.blockSignals(True)
+            sw.setChecked(bool(on))
+            sw.blockSignals(False)
+        except Exception:
+            pass
+
     def startDsp(self):
         if self.worker and self.worker.isRunning():
+            self._syncRxSwitch(True)
             return
         self.spectrumPanel.setSampleRate(self.config.sampleRate)
         self.terminalSpectrumPanel.setSampleRate(self.config.sampleRate)
@@ -4657,6 +4898,7 @@ class MainWindow(QMainWindow):
         self.worker.diagnosticsUpdated.connect(self._onDiagnostics)
         self.worker.interferenceAlert.connect(self._onInterference)
         self.worker.start()
+        self._syncRxSwitch(True)
         self.statusBar().showMessage('DSP 运行中')
 
     def stopDsp(self):
@@ -4664,6 +4906,7 @@ class MainWindow(QMainWindow):
             self.worker.stop()
             self.worker.wait(3000)
         self.worker = None
+        self._syncRxSwitch(False)
         self._onConnection(False)  # 立即更新 UI 为断开状态
         self.statusBar().showMessage('已停止')
 
@@ -4705,14 +4948,13 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-    def _openConfig(self):
-        """打开配置对话框。"""
-        dlg = ConfigDialog(self.config, self)
+    def _openConfig(self, page: str = None):
+        """打开配置对话框（只显示 `page` 这一页，None 则取第一页）。"""
+        dlg = ConfigDialog(self.config, self, page)
         if dlg.exec() == QDialog.Accepted:
             new = dlg.getConfig()
             if new is not None:
                 if new.save(CONFIG_PATH):
-                    self.configPanel.config = new  # 同步面板内部引用
                     self._onConfigChanged(new)
                     self.logPanel.appendLog('[配置] 已保存到文件')
                 else:
@@ -4721,10 +4963,7 @@ class MainWindow(QMainWindow):
     # ---- 信号槽 ----
     def _onStatus(self, st: dict):
         self.statusStrip.updateStatus(st)
-        # 更新频率标签
-        freqMhz = st.get('freqMhz', 0)
-        if freqMhz:
-            self.freqLabel.setText(f'频率: {freqMhz:.4f} MHz')
+        # 频率是写死的常量（821.2375 MHz），工具栏不再显示，避免占地方也避免误以为可调
         # 更新频谱上的 RSSI 阈值线
         rssiThresh = st.get('rssiThreshold', DEFAULT_RSSI_THRESHOLD_DB)
         if rssiThresh != self.spectrumPanel._rssiThresholdDb:
@@ -5196,7 +5435,10 @@ def main():
     if args.gain:
         config.gainDb = args.gain
 
-    # 高 DPI：允许非整数缩放（125%/150% 更平滑）。必须在 QApplication 之前设置
+    # 高 DPI：允许非整数缩放（125%/150% 更平滑）。必须在 QApplication 之前设置。
+    # Qt6 在 Windows 上默认按显示器分别处理 DPI（per-monitor v2），
+    # 本机两块屏 dpr 可能一个 1.0 一个 2.0 —— 窗口几何/最小尺寸必须跟着
+    # 窗口所在屏走，见 MainWindow._onScreenChanged()。
     try:
         from PySide6.QtGui import QGuiApplication
         QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -5231,9 +5473,15 @@ def main():
     if args.no_autostart:
         window.statusBar().showMessage('点击 文件 → 启动 DSP 开始')
     window.show()
+    try:
+        _scr = window._currentScreen()
+        _dpr = round(float(_scr.devicePixelRatio()), 2) if _scr is not None else 0
+        _scrTxt = f'，屏幕 {_scr.name()} dpr={_dpr}' if _scr is not None else ''
+    except Exception:
+        _scrTxt = ''
     window.logBus.appendLog(
         f'[启动] 主题 {resolved_theme}（{getattr(config, "theme", "dark")}），'
-        f'界面缩放 {UI_SCALE:.2f}x，去重窗口 {config.dedupeWindow:.1f}s')
+        f'界面缩放 {UI_SCALE:.2f}x{_scrTxt}，去重窗口 {config.dedupeWindow:.1f}s')
 
     sys.exit(app.exec())
 

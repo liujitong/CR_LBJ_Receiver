@@ -217,8 +217,16 @@ QWidget#chip {
     background-color: $panel2; border: 1px solid $border; border-radius: 3px;
 }
 
+/* v2.5 底栏：一整条，左边日志右边状态，不再拆成两张卡片 */
+QWidget#bottomBar {
+    background-color: $panel; border: 1px solid $border; border-radius: 5px;
+}
+/* 中央容器显式铺底色：不铺的话窗口缩小时这块区域会留一条没重绘的黑边 */
+QWidget#centralPane { background-color: $bg; }
+
 QStatusBar { background-color: $status; border-top: 1px solid $border; }
 QStatusBar::item { border: none; }
+QStatusBar QLabel { color: $dim; background: transparent; }
 QSplitter::handle { background-color: $border; }
 QSplitter::handle:horizontal { width: 3px; }
 QSplitter::handle:vertical { height: 3px; }

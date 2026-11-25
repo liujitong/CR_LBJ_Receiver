@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""build.py — CR-LBJ-Receiver 一键构建（v2.4）
+"""build.py — CR-LBJ-Receiver 一键构建（v2.5）
 
 用法:
     python build.py                # 清理 -> 打包 -> 清理过程文件 -> 校验
