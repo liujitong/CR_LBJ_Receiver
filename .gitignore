@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -48,3 +48,14 @@ android/_verify/
 # 对拍录制产物（大文件/调试）
 android/tools/duipai/*.iq
 android/tools/duipai/*_dbg.jsonl
+# 本地构建 / 调试日志（build.py、gradlew 的输出重定向）
+_build_*.log
+_build_*.txt
+
+# 离屏冒烟临时脚本（跑完即删，防止误入库）
+_smoke*.py
+_verify_*.py
+_probe_*.py
+
+# 一次性脚本 / 中间稿（agent 调用的临时产物）
+_tmp_*

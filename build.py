@@ -33,9 +33,10 @@ DIST = os.path.join(ROOT, 'dist')
 BUILD = os.path.join(ROOT, 'build')
 EXE_NAME = 'CR-LBJ-Receiver.exe'
 
-# 构建产物中必须存在的文档（相对 dist/docs）
-REQUIRED_DOCS = ['用户手册.md', '高德地图配置手册.md', '技术参考.md',
-                 '架构说明.md', '调研-USB直连与设备自适应连接.md']
+# 构建产物中必须存在的文档（相对 dist/docs）。v3.0：高德手册下线，新增地图/查询/安卓/更新记录。
+REQUIRED_DOCS = ['用户手册.md', '技术参考.md', '架构说明.md',
+                 '地图与图源.md', '车次与配属查询.md', '安卓构建与环境.md',
+                 'CHANGELOG.md', '调研-USB直连与设备自适应连接.md']
 
 
 def log(msg: str) -> None:
@@ -154,7 +155,34 @@ def verify() -> bool:
     cfg = os.path.join(DIST, 'lbj_config.json')
     if os.path.exists(cfg):
         log('已保留 dist/lbj_config.json（如需重置：python build.py --reset-config）')
+    # v3.0：两端共用的地图页与数据必须真的进了包（漏了地图会降级成"缺少页面文件"）
+    if not _check_shared_in_exe(exe):
+        ok = False
     return ok
+
+
+def _check_shared_in_exe(exe: str) -> bool:
+    """检查 onefile 包的 CArchive 里有没有 shared/ 资源（不打解包直接读目录表）。"""
+    need = ['shared' + os.sep + 'web' + os.sep + 'railmap.html',
+            'shared' + os.sep + 'data' + os.sep + 'loco_roster.csv',
+            'shared' + os.sep + 'data' + os.sep + 'loco_types.csv',
+            'shared' + os.sep + 'data' + os.sep + 'loco_specs.json',
+            'shared' + os.sep + 'data' + os.sep + 'places.csv',
+            'shared' + os.sep + 'web' + os.sep + 'vendor' + os.sep + 'leaflet' + os.sep + 'leaflet.js',
+            ]
+    try:
+        from PyInstaller.archive.readers import CArchiveReader
+        names = set(CArchiveReader(exe).toc.keys())
+    except Exception as e:                                # pragma: no cover
+        log(f'读取包内目录失败（跳过 shared 校验）：{e}')
+        return True
+    missing = [n for n in need if n not in names]
+    if missing:
+        log('包内缺少共享资源（地图/配属数据会降级）：' + ', '.join(missing))
+        return False
+    n_shared = sum(1 for n in names if n.startswith('shared' + os.sep))
+    log(f'共享资源 shared/ 已入包（{n_shared} 个文件）')
+    return True
 
 
 def summary() -> None:

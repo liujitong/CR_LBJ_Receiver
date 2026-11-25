@@ -9,11 +9,18 @@ from __future__ import annotations
 
 from cr_lbj.runtime import *  # noqa: F401,F403
 
+from cr_lbj.ui import config_ext
+from cr_lbj.ui import data_update
+
+
 class MainWindow(QMainWindow):
     """主窗口。"""
 
     def __init__(self, config: CoreConfig):
         super().__init__()
+        # v3.0 的配置字段（底图/铁路图层/天地图 tk/车次数据源/数据自动更新）
+        # 由 UI 层兜底补到实例上，老配置文件不用手改也不会读空
+        config_ext.ensure(config)
         self.config = config
         self.worker: Optional[DspBridge] = None
 
@@ -22,12 +29,15 @@ class MainWindow(QMainWindow):
         self.logPanel = self.logBus          # 兼容旧调用点
         self._logWindow: Optional[LogWindow] = None
         self._dashWindow = None
+        self._queryWindow = None
+        self._dataThread = None
+        self._dataBox = None
         self._isFullScreen = False
         # 多屏混合 DPI：记录窗口当前所在屏，换屏时重新适配（见 _onScreenChanged）
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.6.1')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.0.0')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -182,12 +192,18 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(60, self._afterFullScreen)
 
     def _afterFullScreen(self):
+        """尺寸变化后让地图重算视口（Leaflet 必须收到 resize，否则瓦片错位）。"""
         try:
-            if hasattr(self, 'mapPanel') and self.mapPanel._view is not None:
-                self.mapPanel._view.page().runJavaScript(
-                    'window.LBJ && window.LBJ.resize();')
+            if hasattr(self, 'mapPanel'):
+                self.mapPanel.host.resize()
         except Exception:
             pass
+
+    def _onMapConsoleLine(self, message: str):
+        """地图页面的 JS 控制台 → 日志（JS 报错不再无声无息）。"""
+        text = str(message or '').strip()
+        if text:
+            self.logPanel.appendLog(text)
 
     # ---- 自适应布局（v2.2） ----
     def _applyResponsive(self, force: bool = False):
@@ -343,6 +359,36 @@ class MainWindow(QMainWindow):
         self.actMapNight.toggled.connect(self._onMenuMapNight)
         viewMenu.addAction(self.actMapNight)
 
+        # ---- v3.0：铁路图层开关 + 底图子菜单（与地图工具栏双向同步） ----
+        self.actRail = QAction('铁路图层（OpenRailwayMap）', self)
+        self.actRail.setCheckable(True)
+        self.actRail.setChecked(
+            config_ext.normalize_rail(config_ext.get(self.config, 'mapRail',
+                                                     'orm_standard')) != 'off')
+        self.actRail.setToolTip('叠加 OpenRailwayMap 铁路图层（WGS-84 栅格瓦片）')
+        self.actRail.toggled.connect(self._onMenuRail)
+        viewMenu.addAction(self.actRail)
+
+        baseMenu = viewMenu.addMenu('底图')
+        self._baseActs = {}
+        try:
+            from PySide6.QtGui import QActionGroup
+            grp = QActionGroup(self)
+            grp.setExclusive(True)
+        except Exception:
+            grp = None
+        cur_base = config_ext.normalize_base(
+            config_ext.get(self.config, 'mapBase', 'osm'))
+        for _lid, _name in config_ext.BASE_LAYERS:
+            _act = QAction(_name, self)
+            _act.setCheckable(True)
+            _act.setChecked(_lid == cur_base)
+            if grp is not None:
+                grp.addAction(_act)
+            _act.triggered.connect(lambda _c=False, lid=_lid: self._onMenuBase(lid))
+            baseMenu.addAction(_act)
+            self._baseActs[_lid] = _act
+
         actToggleMap = QAction('显示/隐藏地图', self)
         actToggleMap.triggered.connect(self._toggleMapVisible)
         viewMenu.addAction(actToggleMap)
@@ -366,6 +412,24 @@ class MainWindow(QMainWindow):
                 _act.setShortcut('Ctrl+,')
             _act.triggered.connect(lambda _c=False, n=_name: self._openConfig(n))
             configMenu.addAction(_act)
+
+        # 工具菜单（v3.0）：车次查询 / 机车配属查询 / 第三方数据更新
+        toolsMenu = menubar.addMenu('工具(&T)')
+        self.actTrainQuery = QAction('车次查询...', self, shortcut='Ctrl+F')
+        self.actTrainQuery.setToolTip('按车次号查等级、担当局、配属段与时刻表 (Ctrl+F)')
+        self.actTrainQuery.triggered.connect(lambda: self.openQueryDialog('train'))
+        toolsMenu.addAction(self.actTrainQuery)
+
+        self.actLocoQuery = QAction('机车配属查询...', self, shortcut='Ctrl+G')
+        self.actLocoQuery.setToolTip('按型号 + 机车号查配属局段与车型参数 (Ctrl+G)')
+        self.actLocoQuery.triggered.connect(lambda: self.openQueryDialog('loco'))
+        toolsMenu.addAction(self.actLocoQuery)
+        toolsMenu.addSeparator()
+
+        self.actDataUpdate = QAction('检查数据更新（机车配属表）', self)
+        self.actDataUpdate.setToolTip('从上游拉取配属号段表增量（校验通过才替换）')
+        self.actDataUpdate.triggered.connect(lambda: self.checkDataUpdate(True))
+        toolsMenu.addAction(self.actDataUpdate)
 
         helpMenu = menubar.addMenu('帮助(&H)')
         actManual = QAction('使用手册', self)
@@ -435,6 +499,149 @@ class MainWindow(QMainWindow):
             self.mapPanel.setNightMode(checked)
         self.config.mapNight = bool(checked)
 
+    # ---- v3.0：地图图层（菜单 ↔ 工具栏 ↔ 页面内下拉 三方同步） ----
+    def _onMenuRail(self, checked: bool):
+        if hasattr(self, 'mapPanel'):
+            self.mapPanel.setRailVisible(bool(checked))
+        self._syncMapLayerMenu()
+
+    def _onMenuBase(self, layer_id: str):
+        if not hasattr(self, 'mapPanel'):
+            return
+        if layer_id in config_ext.TDT_LAYERS and not str(
+                config_ext.get(self.config, 'tdtKey', '') or '').strip():
+            self.logPanel.appendLog(
+                '[地图] 天地图需要「浏览器端」tk：请到 配置 → 地图与车次 填写后再选。')
+            self._syncMapLayerMenu()
+            return
+        self.mapPanel.setBase(layer_id)
+        self._syncMapLayerMenu()
+
+    def _syncMapLayerMenu(self):
+        """把当前的底图/铁路图层状态同步到「视图」菜单的勾选状态。"""
+        base = config_ext.normalize_base(
+            config_ext.get(self.config, 'mapBase', 'osm'))
+        rail = config_ext.normalize_rail(
+            config_ext.get(self.config, 'mapRail', 'orm_standard'))
+        for lid, act in getattr(self, '_baseActs', {}).items():
+            act.blockSignals(True)
+            act.setChecked(lid == base)
+            act.blockSignals(False)
+        act = getattr(self, 'actRail', None)
+        if act is not None:
+            act.blockSignals(True)
+            act.setChecked(rail != 'off')
+            act.blockSignals(False)
+
+    def _onMapLayersChanged(self, info: dict):
+        """地图面板那边（含页面内下拉）改了图层 → 回写配置并刷菜单。"""
+        if not isinstance(info, dict):
+            return
+        base = info.get('base')
+        rail = info.get('rail')
+        if base:
+            self.config.mapBase = str(base)
+        if rail:
+            self.config.mapRail = str(rail)
+        self._syncMapLayerMenu()
+
+    def _onRailAutoOff(self, auto: bool):
+        """页面因「GCJ 底图 + WGS 铁路图层不混叠」自动关了铁路图层。
+
+        只把菜单勾去掉（配置里的 mapRail 保留用户偏好），换回 WGS 底图时页面
+        会自己恢复图层，那一步会走 `_onMapLayersChanged` 把菜单勾回来。
+        """
+        if not auto:
+            return
+        act = getattr(self, 'actRail', None)
+        if act is not None:
+            act.blockSignals(True)
+            act.setChecked(False)
+            act.blockSignals(False)
+        if not getattr(self, '_railOffNoted', False):
+            self._railOffNoted = True
+            self.logPanel.appendLog(
+                '[地图] 当前底图是 GCJ-02，与 WGS-84 的 OpenRailwayMap 图层不能混叠，'
+                '已自动关闭铁路图层；换回 OSM/Carto/Esri 底图会自动恢复。')
+
+    # ---- v3.0：车次 / 配属查询与第三方数据更新 ----
+    def openQueryDialog(self, tab: str = 'train', train: str = '', loco: str = ''):
+        """打开查询对话框（两个页签，可预填车次/机车并自动查询）。"""
+        dlg = QueryDialog(self.config, self, tab=tab, train=train, loco=loco)
+        self._queryWindow = dlg
+        dlg.setModal(False)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def _openQueryForRecord(self, record: Optional[dict], tab: str = 'train'):
+        """从表格右键菜单查车次/配属。"""
+        record = record or {}
+        train = str(record.get('train') or '').strip()
+        if tab == 'train':
+            if not train or train in ('----', '未知'):
+                self.logPanel.appendLog('[查询] 该行没有车次号，无法查车次')
+                return
+            self.openQueryDialog('train', train=train)
+        else:
+            loco = str(record.get('loco') or '').strip()
+            if not loco or loco in ('----', '未知'):
+                self.logPanel.appendLog('[查询] 该行没有机车号，无法查配属')
+                return
+            self.openQueryDialog('loco', loco=loco)
+
+    def checkDataUpdate(self, force: bool = True):
+        """检查配属号段表更新（后台线程；失败只记日志，界面不崩）。"""
+        if self._dataThread is not None and self._dataThread.isRunning():
+            self.logPanel.appendLog('[数据] 上一次检查还没结束，稍候…')
+            return
+        self.logPanel.appendLog('[数据] 正在检查配属号段表更新…')
+        self._dataThread = data_update.DataUpdateThread(
+            force=bool(force),
+            interval_days=data_update.interval_days(self.config),
+            parent=None)     # 不挂 parent：线程自注册保活，关窗口也不会被析构
+        self._dataThread.done.connect(
+            lambda res: self._onDataUpdateDone(res, manual=bool(force)))
+        self._dataThread.start()
+
+    def _onDataUpdateDone(self, res: dict, manual: bool = True):
+        text = data_update.result_text(res)
+        ok = bool((res or {}).get('ok'))
+        self.logPanel.appendLog('[数据] %s' % text)
+        if (res or {}).get('updated'):
+            # 数据换了，机车卡与查询缓存都要重算
+            self.logPanel.appendLog('[数据] %s' % data_update.last_check_text())
+            try:
+                self.locoPanel.refreshRoster()
+            except Exception:
+                pass
+        if not manual:
+            return                       # 自动检查：静默，成功也只在日志里
+        # 手动检查：非模态提示（不挡主界面，也不阻塞 DSP）
+        try:
+            self._showDataBox(ok, text)
+        except Exception:
+            pass
+
+    def _showDataBox(self, ok: bool, text: str):
+        box = QMessageBox(self)
+        box.setWindowTitle('数据更新')
+        box.setIcon(QMessageBox.Information if ok else QMessageBox.Warning)
+        box.setText(text)
+        box.setInformativeText(data_update.status_text_multiline())
+        box.setStandardButtons(QMessageBox.Ok)
+        box.setModal(False)
+        self._dataBox = box                # 非模态也要保住引用，否则被 GC 掉
+        box.show()
+
+    def _autoCheckDataUpdate(self):
+        """启动 20 秒后自动检查一次（配置关闭则不动，失败只记日志）。"""
+        if not data_update.auto_enabled(self.config):
+            self.logPanel.appendLog('[数据] 已关闭自动检查（配置 → 数据更新）')
+            return
+        self.checkDataUpdate(False)
+
     def _toggleMapVisible(self):
         if not hasattr(self, 'mapPanel'):
             return
@@ -473,6 +680,9 @@ class MainWindow(QMainWindow):
         self.mapPanel = MapPanel(self.config)
         self.mapPanel.setMinimumWidth(spx(320))
         self.mapPanel.followChanged.connect(self._onMapFollowChanged)
+        self.mapPanel.layersChanged.connect(self._onMapLayersChanged)
+        self.mapPanel.railAutoOff.connect(self._onRailAutoOff)
+        self.mapPanel.consoleMessage.connect(self._onMapConsoleLine)
         band1.addWidget(self.mapPanel)
 
         self.tabs = QTabWidget()
@@ -580,8 +790,76 @@ class MainWindow(QMainWindow):
         self.statusBar().hide()
         self._applyTouchTweaks()
         self._syncRxSwitch(False)
+        self._installQueryMenus()
         # 首次布局完成后按实际窗口尺寸定一次比例
         QTimer.singleShot(0, lambda: self._applyResponsive(force=True))
+        # v3.0：启动 20 秒后在后台检查一次第三方数据（失败静默，只进日志）
+        QTimer.singleShot(20000, self._autoCheckDataUpdate)
+
+    # ---- v3.0：表格右键菜单（查车次 / 查配属） ----
+    def _installQueryMenus(self):
+        """给「当前解码」「历史记录」两张表挂右键菜单。
+
+        双击行已经是「记录详情」，不再抢它；查询走右键，两条路互不影响。
+        """
+        try:
+            for panel in (getattr(self, 'currentPanel', None),
+                          getattr(self, 'historyPanel', None)):
+                table = getattr(panel, 'table', None)
+                if table is None:
+                    continue
+                table.setContextMenuPolicy(Qt.CustomContextMenu)
+                table.customContextMenuRequested.connect(
+                    lambda pos, t=table, p=panel: self._showRecordMenu(t, p, pos))
+        except Exception:
+            pass
+
+    def _recordAtRow(self, panel, row: int) -> Optional[dict]:
+        """表格行 → 记录字典（两个面板的存储方式不同，各自取）。"""
+        if row < 0:
+            return None
+        try:
+            if panel is getattr(self, 'currentPanel', None):
+                # CurrentPanel.records 是正序 [(ts, d)]，表格倒序显示
+                records = list(getattr(panel, 'records', []) or [])
+                idx = len(records) - 1 - row
+                return records[idx][1] if 0 <= idx < len(records) else None
+            if panel is getattr(self, 'historyPanel', None):
+                ids = list(getattr(panel, '_rowIds', []) or [])
+                if 0 <= row < len(ids):
+                    return panel.db.queryById(ids[row])
+        except Exception:
+            return None
+        return None
+
+    def _showRecordMenu(self, table, panel, pos):
+        try:
+            idx = table.indexAt(pos)
+            row = idx.row()
+        except Exception:
+            row = -1
+        record = self._recordAtRow(panel, row)
+        menu = QMenu(self)
+        actDetail = menu.addAction('记录详情…')
+        menu.addSeparator()
+        actTrain = menu.addAction('查该车次…')
+        actLoco = menu.addAction('查该机车配属…')
+        has_train = bool(record and str(record.get('train') or '') not in
+                         ('', '----', '未知'))
+        has_loco = bool(record and str(record.get('loco') or '') not in
+                        ('', '----', '未知'))
+        actTrain.setEnabled(bool(has_train))
+        actLoco.setEnabled(bool(has_loco))
+        actDetail.setEnabled(bool(record))
+        chosen = menu.exec(table.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen is actDetail and record:
+            RecordDetailDialog(record, self).exec()
+        elif chosen is actTrain:
+            self._openQueryForRecord(record, 'train')
+        elif chosen is actLoco:
+            self._openQueryForRecord(record, 'loco')
 
     # ---- 触屏 / 高 DPI 细节 ----
     def _applyTouchTweaks(self):
@@ -745,13 +1023,27 @@ class MainWindow(QMainWindow):
             pass
 
     def _openLocoDetail(self, d: dict):
-        """打开机车详情对话框。"""
+        """「机车信息」卡片的按钮：打开配属查询对话框并预填当前机车。
+
+        v3.0 起这里不再是只读的机车参数窗口——用户更常问的是「这车配属哪个
+        机务段」，所以直接进「机车配属查询」页，参数卡也在同一页里。
+        """
         if not d:
+            self.openQueryDialog('loco')
             return
-        loco_number = d.get('loco', '')
-        loco_code = d.get('locoCode', d.get('loco_code', ''))
-        info = lookup_loco(loco_code=loco_code, loco_number=loco_number)
-        LocoDetailDialog(info, loco_number, self).exec()
+        loco_number = str(d.get('loco', '') or '')
+        loco_code = str(d.get('locoCode', d.get('loco_code', '')) or '')
+        text = loco_number.strip()
+        if not text or text in ('----', '未知'):
+            # 只有机车代号（如 240）时先用代号换型号名，再预填
+            name = ''
+            try:
+                from cr_lbj.data import loco_roster
+                name = loco_roster.type_name(loco_code)
+            except Exception:
+                name = ''
+            text = name
+        self.openQueryDialog('loco', loco=text)
 
 
     # ---- DSP 控制 ----
@@ -809,6 +1101,7 @@ class MainWindow(QMainWindow):
     def _onConfigChanged(self, new: CoreConfig):
         """配置变更：区分热更新与重启。"""
         old = self.config
+        config_ext.ensure(new)           # v3.0 字段（底图/铁路/车次源/数据更新）
         # 保留频谱显示模式偏好 (配置对话框不包含此字段)
         new.spectrumMode = old.spectrumMode
         restartFields = ['host', 'port', 'sampleRate', 'freqMhz', 'gainDb', 'ppm',
@@ -818,6 +1111,7 @@ class MainWindow(QMainWindow):
         needRestart = any(getattr(old, f) != getattr(new, f) for f in restartFields)
         try:
             self.mapPanel.setConfig(new)
+            self._syncMapLayerMenu()
         except Exception:
             pass
         if needRestart:
@@ -1057,7 +1351,39 @@ class MainWindow(QMainWindow):
         kv('地图列车', '%d 辆' % len(getattr(self.mapPanel, '_trains', {}) or {}),
            'ok' if getattr(self.mapPanel, '_trains', None) else '')
 
+        group('地图与数据')
+        mp = getattr(self, 'mapPanel', None)
+        mp_st = dict(getattr(mp, '_status', {}) or {}) if mp is not None else {}
+        kv('底图', config_ext.base_name(
+            config_ext.normalize_base(config_ext.get(cfg, 'mapBase', 'osm'))))
+        kv('铁路图层', config_ext.rail_name(
+            config_ext.normalize_rail(config_ext.get(cfg, 'mapRail',
+                                                     'orm_standard'))))
+        ready = bool(mp is not None and getattr(mp, 'hasMap', False))
+        kv('地图页面', '就绪' if ready else '降级 / 未加载', 'ok' if ready else 'warn')
+        if ready:
+            total = int(mp_st.get('tilesTotal') or 0)
+            failed = int(mp_st.get('tilesFailed') or 0)
+            kv('瓦片', '%d 张，失败 %d' % (total, failed),
+               'warn' if failed else '')
+            kv('坐标基准', 'GCJ-02（已纠偏）'
+               if str(mp_st.get('coord') or 'wgs') == 'gcj' else 'WGS-84')
+        try:
+            dstat = data_update.status()
+        except Exception:
+            dstat = {}
+        kv('配属号段表', '%d 行 / %d 型号' % (int(dstat.get('rows') or 0),
+                                            int(dstat.get('models') or 0)))
+        bundled = bool(dstat.get('isBundled', True))
+        kv('数据版本', '内置快照' if bundled else '已更新（用户目录）',
+           '' if bundled else 'ok')
+        kv('上次数据更新', str(dstat.get('fetchedAt') or '—')[:16].replace('T', ' ')
+           or '—')
+        kv('自动检查', '开（%d 天）' % data_update.interval_days(self.config)
+           if data_update.auto_enabled(self.config) else '关')
+
         group('界面')
+        kv('版本', 'v3.0.0')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(
@@ -1092,6 +1418,15 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(3000)
+        # v3.0：短任务线程（12306 查询 / 数据更新检查）可能还在等网络超时。
+        # 退出时若不收尾，Python 会先销毁 QThread 对象 → Qt qFatal 崩在退出路径上。
+        try:
+            from cr_lbj.ui.ui_threads import wait_all
+            left = wait_all(1500)
+            if left:
+                self.logBus.appendLog('[退出] 仍有 %d 个后台请求未结束，已强制终止' % left)
+        except Exception:
+            pass
         # 保存配置
         self.config.save(CONFIG_PATH)
         event.accept()

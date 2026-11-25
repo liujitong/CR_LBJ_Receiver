@@ -149,35 +149,46 @@ class ManualDialog(QDialog):
         sep4.setStyleSheet(f'background-color: {CLR("border")};')
         contentLayout.addWidget(sep4)
 
-        # ---- 地图 ----
-        title5 = QLabel('五、高德地图与经纬度')
+        # ---- 地图（v3.0：Leaflet + OpenRailwayMap，免 Key） ----
+        title5 = QLabel('五、地图：OpenRailwayMap 铁路图源与底图切换')
         title5.setStyleSheet(f'color: {CLR("accent2")}; font-size: 15px; font-weight: bold;')
         contentLayout.addWidget(title5)
         text5 = QLabel(
-            '<p><b>经纬度来源：</b>只有扩展长报文（地址 1234002 / 1234001）携带经纬度；'
+            '<p><b>先决条件：</b>只有扩展长报文（地址 1234002 / 1234001）携带经纬度；'
             '基础帧 1234000 只有车次/速度/公里标。因此地图上出现标记的前提是：'
             '<b>收到同一列车的基础帧 + 长报文</b>。</p>'
-            '<p><b>配置步骤：</b></p>'
-            '<p>1. 打开 <a href="https://console.amap.com/dev/key/app">高德开放平台控制台</a>，'
-            '创建应用并添加 Key，服务平台选择 <b>Web端(JS API)</b>。</p>'
-            '<p>2. 复制 <b>Key</b> 与旁边的 <b>安全密钥</b>，填入“配置 → 地图与车次规则”。</p>'
-            '<p>3. 同一页的 <b>默认中心</b> 填一个地名（如 <code>南昌站</code>）——'
-            '不用填经纬度，程序启动时用高德<b>地理编码</b>把它解析成坐标再把视图挪过去，'
-            '<b>不会在图上加任何标记</b>；留空则显示全国概览（不再默认北京）。'
-            '解析结果会缓存，断网也能回到上次的位置。</p>'
-            '<p>4. 保存后地图立即重建，无需重启 DSP；上段左侧就是实时地图；'
-            '点击标记可查看车次、时间、速度、公里标、线路、机车与坐标。'
-            '地图卡片上的「中心」按钮可随时回到默认中心。</p>'
-            '<p><b>说明：</b>LBJ 经纬度为 WGS-84，高德底图为 GCJ-02。程序在落点前会自动做 '
-            'WGS-84 → GCJ-02 纠偏，标记可贴合道路；详情里仍显示原始 WGS-84 坐标。</p>'
-            '<p><b>视野与跟随：</b>标签下方的小白球就是<b>真正的坐标点</b>（球心压在报文经纬度上）。'
-            '「跟随」只在列车真的移动约 30 米以上时才重新居中；'
+            '<p><b>v3.0 换了地图引擎：</b>不再需要高德 Key。地图页由 '
+            '<code>shared/web/railmap.html</code>（Leaflet）提供，'
+            '<b>桌面版与安卓版共用同一份页面</b>，'
+            '铁路图源是 <b>OpenRailwayMap</b>（免 Key、WGS-84 栅格瓦片）。</p>'
+            '<p><b>怎么换底图：</b>地图卡片左上角的「底图」下拉，或'
+            '「视图 → 底图」子菜单。可选 OSM 标准 / Carto 浅色 / Carto 深色 / '
+            'Carto 路由 / Esri 卫星 / Esri 街道 / OpenTopoMap 地形 / 天地图（矢量、影像）'
+            '/ 高德（街道、卫星）。也可以直接点地图右上角的「图层」面板改，'
+            '三种入口互相同步。</p>'
+            '<p><b>铁路图层：</b>地图卡片上的「铁路」勾选框（或「视图 → 铁路图层」）'
+            '控制是否叠加 OpenRailwayMap；在「配置 → 地图与车次」里还能选'
+            '<b>图层样式</b>（标准/限速/信号/电气化/轨距）和<b>不透明度</b>（20%~100%）。</p>'
+            '<p><b>坐标系不混叠：</b>OpenRailwayMap 与 OSM/Carto/Esri/天地图都是 WGS-84，'
+            '标记直接用报文原始坐标；<b>高德底图是 GCJ-02</b>，两者不能叠（栅格会错位），'
+            '所以选中高德底图时程序会自动关掉铁路图层并提示，标记也会自动加偏对齐道路。</p>'
+            '<p><b>天地图 tk：</b>只有天地图底图需要。到 '
+            '<a href="https://console.tianditu.gov.cn/">console.tianditu.gov.cn</a> '
+            '免费申请，应用类型必须选「<b>浏览器端</b>」，把 tk 填到'
+            '「配置 → 地图与车次 → 天地图 tk」。</p>'
+            '<p><b>底图打不开时：</b>地图工具栏的状态文字会变成红色的'
+            '「底图不可达，换一张」——通常是当前网络连不上该瓦片服务（境外瓦片居多），'
+            '换 OSM 或 Carto 即可；不需要改任何配置。</p>'
+            '<p><b>默认中心：</b>「配置 → 地图与车次 → 默认中心」选预设城市会自动填好'
+            '经纬度（也可以手改）；它只用于开机时把视野带到该地区，'
+            '<b>不会在地图上加标记</b>。地图卡片上的「中心」按钮可随时回去。</p>'
+            '<p><b>视野与跟随：</b>「跟随」只在当前列车真的移动约 30 米以上时才重新居中；'
             '<b>你一拖动地图或用滚轮缩放，跟随会自动暂停</b>（按钮同步取消勾选），'
             '点一下「跟随」即可恢复。</p>'
-            '<p><b>完整文档：</b>程序目录 <code>docs/</code> 下有三份手册——'
-            '<code>用户手册.md</code>（操作与排障）、'
-            '<code>高德地图配置手册.md</code>（Key 申请与标注开发）、'
-            '<code>技术参考.md</code>（报文结构、DSP 链路与车次规则全表）。</p>'
+            '<p><b>轨迹：</b>同一列车收到多个详细报文时，页面按“移动超过约 6 米或间隔超过 '
+            '3 秒”记录一个点，最多保留 240 点并画成折线；点标记可看轨迹点数与里程。</p>'
+            '<p><b>完整文档：</b>程序目录 <code>docs/</code> 下有用户手册、技术参考与'
+            '百度/开源地图相关手册；地图页面源码在 <code>shared/web/railmap.html</code>。</p>'
         )
         text5.setWordWrap(True)
         text5.setOpenExternalLinks(True)
@@ -214,7 +225,7 @@ class ManualDialog(QDialog):
         contentLayout.addWidget(sep6)
 
         # ---- v2.3 界面与操作 ----
-        title7 = QLabel('七、界面与操作（v2.3）')
+        title7 = QLabel('七、界面与操作')
         title7.setStyleSheet(f'color: {CLR("accent2")}; font-size: 15px; font-weight: bold;')
         contentLayout.addWidget(title7)
         text7 = QLabel(
@@ -237,7 +248,7 @@ class ManualDialog(QDialog):
             '字段列数与标题显隐，不需要手拖分隔条；启动时还会按屏幕尺寸选一个合适的界面缩放基准。'
             '手动「视图 → 界面缩放」仍然保留，作为偏好覆盖。</p>'
             '<p><b>配置分页：</b>配置窗口按「数据源配置 / 射频设置 / 到达估算 / 地图与车次 / '
-            '解码与界面 / 外观主题」六页分开，不再是一条长滚动条。</p>'
+            '解码与界面 / 外观主题 / 数据更新」七页分开，不再是一条长滚动条。</p>'
             '<p><b>外观主题：</b>内置中国铁路标准色——主色 CR 红 #DA291C（Pantone 485C）、'
             '辅色 CR 蓝 #003DA5（Pantone 286C）。'
             '工具栏右上角的 <b>「日间 / 夜间」按钮</b>（或 Ctrl+T、或「视图 → 切换日间 / 夜间」）'
@@ -304,6 +315,48 @@ class ManualDialog(QDialog):
         text9.setStyleSheet('font-size: 13px; line-height: 1.5;')
         contentLayout.addWidget(text9)
 
+        sep9b = QFrame()
+        sep9b.setFrameShape(QFrame.HLine)
+        sep9b.setStyleSheet(f'background-color: {CLR("border")};')
+        contentLayout.addWidget(sep9b)
+
+        title10 = QLabel('十、车次查询、机车配属查询与数据自动更新（v3.0 新增）')
+        title10.setStyleSheet(f'color: {CLR("ok")}; font-size: 15px; font-weight: bold;')
+        contentLayout.addWidget(title10)
+        text10 = QLabel(
+            '<p><b>车次查询：</b>「工具 → 车次查询…」(Ctrl+F) 或按 Ctrl+F。'
+            '输入车次号（G7 / K1234 / Z21），选数据源后查询，结果里有：'
+            '列车等级、<b>担当局 / 客运段 / 配属段 / 车型</b>、开行日、'
+            '交路（贯通车次）与<b>全程时刻表</b>（站名/到点/发点/停站/里程）。</p>'
+            '<p><b>两个数据源：</b><b>RailGo</b> 是社区接口，字段最全，作为首选；'
+            '失败会自动退回 <b>12306</b>（官方，只有时刻表，没有担当与配属）。'
+            '查询失败时结果区会给出原因，并给「改用 12306 重试 / 改用 RailGo 重试」按钮。'
+            '默认数据源在「配置 → 地图与车次 → 车次数据源」里设。</p>'
+            '<p><b>机车配属查询：</b>「工具 → 机车配属查询…」(Ctrl+G)。'
+            '输入 <code>HXD1D 0123</code>、<code>HXD1D-0123</code>、'
+            '<code>韶山4-0123</code> 都可以；也可以先在下拉里选型号、再填机车号。'
+            '结果分两张卡：<b>配属</b>（配属局段、号段区间、制造厂、备注）与'
+            '<b>车型技术参数</b>（类型/轴式/功率/构造速度/制造厂/简介）。'
+            '型号没收录时会给出<b>相近型号</b>，点一下即可改查。</p>'
+            '<p><b>从记录直接查：</b>「当前解码 / 历史记录」表格上<b>右键</b>，'
+            '有「记录详情…」「查该车次…」「查该机车配属…」三项，不用手输。'
+            '「机车信息」卡片右下角的「配属查询」按钮也会带上当前机车直接查。</p>'
+            '<p><b>配属数据来自哪：</b>机车配属号段表来自开源项目 <b>LBJ_Console</b>'
+            '（GPL-3.0），随程序内置一份快照（一万六千多行号段）。'
+            '「工具 → 检查数据更新（机车配属表）」可手动从上游拉取增量；'
+            '<b>自动检查</b>默认开启（启动 20 秒后、每周一次），'
+            '在「配置 → 数据更新」里可以关掉或改间隔，那里也能看到当前数据的'
+            '行数、型号数、更新日期与来源，并区分「内置快照 / 已更新」。</p>'
+            '<p><b>数据更新安全吗：</b>下载后先<b>严格校验</b>（行数、型号数、'
+            '号段数字合法性、中文配属占比），任何一项不过就直接丢弃、保留原数据；'
+            '写入的是用户目录 <code>%LOCALAPPDATA%\\CR-LBJ-Receiver\\data</code>，'
+            '旧文件留 <code>.bak</code>，内置快照永远可回退。'
+            '断网时只会记一条日志，界面照常用。</p>'
+        )
+        text10.setWordWrap(True)
+        text10.setStyleSheet('font-size: 13px; line-height: 1.5;')
+        contentLayout.addWidget(text10)
+
         contentLayout.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll)
@@ -331,7 +384,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v2.6.1  ·  2026-11')
+        ver = QLabel('v3.0.0  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)

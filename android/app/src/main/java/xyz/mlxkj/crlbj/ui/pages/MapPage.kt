@@ -1,22 +1,45 @@
 package xyz.mlxkj.crlbj.ui.pages
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
+import android.graphics.Color as AndroidColor
 import android.location.LocationManager
+import android.util.Log
+import android.view.ViewGroup
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,15 +47,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.composefluent.component.Button
-import io.github.composefluent.component.Text
-import xyz.mlxkj.crlbj.core.Gcj02
-import xyz.mlxkj.crlbj.ui.theme.CrRed
+import org.json.JSONArray
+import org.json.JSONObject
+import xyz.mlxkj.crlbj.core.ReceiverSettings
+import xyz.mlxkj.crlbj.engine.DecodeEvent
+import xyz.mlxkj.crlbj.ui.components.FloatPill
+import xyz.mlxkj.crlbj.ui.components.SectionCard
+import xyz.mlxkj.crlbj.ui.components.StatusCapsule
+import xyz.mlxkj.crlbj.ui.theme.Dim
+import xyz.mlxkj.crlbj.ui.theme.pal
 import xyz.mlxkj.crlbj.vm.ReceiverViewModel
 import java.util.Locale
 import kotlin.math.atan2
@@ -41,165 +73,770 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * 地图页：高德 Web(JS API) 内嵌 WebView（Key 用户在设置页配置）。
- *  - 有 Key + 有网：列车标记（GCJ-02）+ 轨迹线 + 自动跟随
- *  - 无 Key / 无网：降级文本卡（最新坐标 + 与本机 GPS 的距离）
+ * 地图页（v3.0 重写）。
+ *
+ * 图源改为桌面/安卓共用的 `shared/web/railmap.html`（Leaflet + OpenRailwayMap 铁路图层，
+ * 底图可切换），彻底去掉高德 JS API 与 amapKey 门槛：
+ *
+ *  · 页面内 `window.LBJ` 是唯一接口：`applyConfig` 一次性下发底图/铁路/夜间/中心，
+ *    `update` 批量推列车（**WGS-84 原值**，纠偏由页面按底图基准自己做）；
+ *  · 页面通过 `window.LBJHost.onLayers(json)` 回报图层变化（用户在地图里改底图时），
+ *    这里落盘到设置，保证「设置页 ↔ 地图内操作」双向一致；
+ *  · 右上角「跟随」胶囊与页面 `LBJ.locked()` 联动：用户一拖地图就自动取消跟随；
+ *  · 有坐标才推；没坐标时显示半透明空态卡，不遮成大白块。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapPage(vm: ReceiverViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val events by vm.events.collectAsStateWithLifecycle()
-    val latest = events.firstOrNull()
+    val running by vm.running.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
+    val p = pal()
 
-    var useMap by remember { mutableStateOf(settings.amapKey.isNotBlank()) }
-    var gps by remember { mutableStateOf(doubleArrayOf(0.0, 0.0)) } // WGS-84
-    var gpsValid by remember { mutableStateOf(false) }
+    // 带坐标的最新一条（按车次去重，最多 24 列，地图上不挤）
+    val trains = remember(events) { collectTrains(events) }
+    val newest = trains.firstOrNull()
+
+    var web by remember { mutableStateOf<WebView?>(null) }
+    var ready by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var layers by remember { mutableStateOf<List<LayerOption>>(emptyList()) }
+    var sheet by remember { mutableStateOf(false) }
+    var gps by remember { mutableStateOf<DoubleArray?>(null) }
+    /** 底图瓦片连续失败（多半是网络到不了该图源）→ 底部横幅提示换底图 */
+    var tileFail by remember { mutableStateOf(false) }
 
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
-        if (grants.values.any { it }) {
-            val ctx = vm.getApplication<android.app.Application>()
-            readLastGps(ctx)?.let { gps = it; gpsValid = true }
+        if (grants.values.any { it }) gps = readLastGps(ctx)
+    }
+    LaunchedEffect(Unit) { gps = readLastGps(ctx) }
+
+    // ---- 就绪探测：不依赖 onPageFinished（模拟器上偶发不回调），并且**持续**探测。
+    //      WebView 因任何原因重载时，ready 会先回落再置真，配置随之自动重下，
+    //      这样「弹层交互导致网页重载」这类意外也能自愈。----
+    LaunchedEffect(web) {
+        val w = web ?: return@LaunchedEffect
+        var lastLogged = false
+        while (true) {
+            w.evaluateJavascript("!!(window.LBJ && window.LBJ.ready)") { r ->
+                val isReady = r == "true" || r == "\"true\""
+                if (isReady != ready) {
+                    ready = isReady
+                    if (!isReady) Log.i(TAG, "页面重载中（ready 回落）")
+                }
+                if (isReady && !lastLogged) {
+                    lastLogged = true
+                    Log.i(TAG, "页面就绪")
+                }
+                if (!isReady) lastLogged = false
+            }
+            kotlinx.coroutines.delay(500)
         }
     }
 
-    LaunchedEffect(Unit) {
-        val ctx = vm.getApplication<android.app.Application>()
-        readLastGps(ctx)?.let { gps = it; gpsValid = true }
+    // ---- 页面加载完成后下发配置 ----
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
+        val w = web ?: return@LaunchedEffect
+        w.evaluateJavascript(applyConfigJs(settings), null)
+        // 页面自带的图层/提示层在手机屏上不合适，统一收进本页的胶囊与面板：
+        //  · #panel：右上角图层选择面板（手机屏太小，且会压到状态栏）
+        //  · #hint ：瓦片全灭时的整屏提示（文案指向已隐藏的 panel，改由本页横幅提示）
+        w.evaluateJavascript(
+            "(function(){var css='#panel{display:none!important}#hint{display:none!important}" +
+                ".leaflet-top.leaflet-left{top:64px!important}';" +
+                "var s=document.createElement('style');s.id='lbj-android-css';" +
+                "s.appendChild(document.createTextNode(css));document.head.appendChild(s);" +
+                "return 'css-ok';})()",
+        ) { r -> Log.i(TAG, "注入移动端 CSS: $r") }
+        w.evaluateJavascript("JSON.stringify(window.LBJ.layers())") { json ->
+            layers = parseLayers(json)
+        }
+        Log.i(TAG, "已下发地图配置 base=${settings.mapBase} rail=${settings.mapRail}")
     }
 
-    // 最新坐标变化 → 推给 JS
-    var jsBridge: WebView? = remember { null }
-    LaunchedEffect(latest?.latitude, latest?.longitude, settings.mapFollow) {
-        val web = jsBridge ?: return@LaunchedEffect
-        val lat = latest?.latitude ?: return@LaunchedEffect
-        val lng = latest?.longitude ?: return@LaunchedEffect
-        val c = Gcj02.fromWgs(lat, lng)
-        web.evaluateJavascript(
-            "window.updateTrain(${c[0]}, ${c[1]}, '${latest!!.train}', ${settings.mapFollow})",
-            null,
+    // ---- 设置页改了地图项 → 重新下发配置（幂等，不会触发回环）----
+    LaunchedEffect(
+        ready, settings.mapBase, settings.mapRail, settings.mapRailOpacity,
+        settings.mapNight, settings.mapTdtKey, settings.mapZoom,
+        settings.mapCenterLat, settings.mapCenterLng,
+    ) {
+        if (!ready) return@LaunchedEffect
+        web?.evaluateJavascript(applyConfigJs(settings), null)
+    }
+
+    // ---- 列车坐标变化 → 推给页面（WGS-84 原值，不做 GCJ 转换）----
+    LaunchedEffect(ready, trains, settings.mapFollow, settings.mapNight) {
+        if (!ready) return@LaunchedEffect
+        val w = web ?: return@LaunchedEffect
+        w.evaluateJavascript(updateJs(trains, settings), null)
+    }
+
+    // ---- 状态轮询：跟随锁定 + 瓦片失败（1.5s 一次足够）----
+    LaunchedEffect(ready) {
+        if (!ready) return@LaunchedEffect
+        var polls = 0
+        while (true) {
+            val w = web ?: break
+            w.evaluateJavascript("window.LBJ?JSON.stringify(window.LBJ.status()):'null'") { raw ->
+                val st = parseStatus(raw)
+                polls++
+                if (polls == 1) {
+                    Log.i(TAG, "status=" + (st?.let {
+                        "base=${it.base} rail=${it.rail} tiles=${it.tilesTotal}/${it.tilesFailed}"
+                    } ?: raw?.take(120)))
+                }
+                if (st != null) {
+                    if (st.locked && vm.settings.value.mapFollow) {
+                        vm.updateViewSettings(vm.settings.value.copy(mapFollow = false))
+                    }
+                    // 瓦片连续失败就提示换图源。注意 tilesTotal 只统计**成功**的
+                    // tileload，网络全断时 total=0、failed 却在涨，所以不能要求 total>0。
+                    val failed = st.tilesFailed > 8 &&
+                        (st.tilesTotal == 0 || st.tilesFailed > st.tilesTotal * 0.9)
+                    if (failed != tileFail) {
+                        Log.i(TAG, "瓦片失败状态变化: $failed (total=${st.tilesTotal} failed=${st.tilesFailed})")
+                    }
+                    tileFail = failed
+                }
+            }
+            kotlinx.coroutines.delay(1500)
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(p.bg)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = {
+                Log.i(TAG, "创建 WebView（factory）")
+                buildWebView(ctx) { w ->
+                    web = w
+                    ready = false
+                }.also { w ->
+                    w.addJavascriptInterface(
+                        HostBridge { json ->
+                            w.post { persistLayers(vm, json) }
+                        },
+                        "LBJHost",
+                    )
+                    val client = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: WebResourceRequest,
+                        ): Boolean {
+                            val url = request.url
+                            val s = url.toString()
+                            if (s.startsWith("file://")) return false
+                            runCatching {
+                                ctx.startActivity(Intent(Intent.ACTION_VIEW, url))
+                            }
+                            return true
+                        }
+
+                        override fun onPageFinished(view: WebView, url: String) {
+                            ready = true
+                            loadError = null
+                            Log.i(TAG, "railmap.html 加载完成: $url")
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            error: android.webkit.WebResourceError,
+                        ) {
+                            if (request.isForMainFrame) {
+                                loadError = error.description?.toString() ?: "未知错误"
+                                Log.w(TAG, "地图页加载失败: $loadError")
+                            }
+                        }
+                    }
+                    w.webViewClient = client
+                    w.webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                            Log.i(TAG, "console: ${m.message()} @${m.lineNumber()}")
+                            return true
+                        }
+                    }
+                    w.setBackgroundColor(p.bg.toArgbInt())
+                    w.loadUrl(MAP_URL)
+                }
+            },
+            update = { /* 页面内容由 evaluateJavascript 驱动，无需重建 View */ },
         )
-    }
 
-    Column(Modifier.fillMaxSize().padding(12.dp)) {
-        Row {
-            Text("地图", fontSize = 20.sp)
-            Spacer(Modifier.weight(1f))
-            if (settings.amapKey.isNotBlank()) {
-                Button(onClick = { useMap = !useMap }) {
-                    Text(if (useMap) "文字卡" else "地图")
+        // ---- 左上角状态胶囊（地图页无重顶栏，胶囊浮在图上）----
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 14.dp, start = 12.dp)
+        ) {
+            StatusCapsule(
+                sourceLabel = sourceLabel(settings),
+                running = running,
+                lastEventTs = events.firstOrNull()?.timestamp,
+                onToggle = { vm.toggleStartStop() },
+            )
+        }
+
+        // ---- 右上角浮动胶囊 ----
+        Column(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 76.dp, end = 12.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FloatPill(
+                text = if (settings.mapFollow) "跟随中" else "跟随",
+                active = settings.mapFollow,
+                onClick = {
+                    val next = !settings.mapFollow
+                    vm.updateViewSettings(settings.copy(mapFollow = next))
+                    web?.evaluateJavascript("window.LBJ&&window.LBJ.setFollow($next)", null)
+                },
+            )
+            FloatPill(
+                text = "图层",
+                active = false,
+                onClick = { sheet = true },
+            )
+            FloatPill(
+                text = "回中心",
+                active = false,
+                onClick = {
+                    web?.evaluateJavascript(
+                        "window.LBJ&&window.LBJ.centerTo('${settings.mapCenterName}')", null)
+                    vm.updateViewSettings(settings.copy(mapFollow = false))
+                },
+            )
+        }
+
+        // ---- 空态 / 载入失败（半透明卡片，居中，不遮成全白）----
+        if (trains.isEmpty() || loadError != null) {
+            Column(
+                Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(p.surface.copy(alpha = 0.92f))
+                    .border(1.dp, p.border, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (loadError != null) {
+                    Text("地图页加载失败", color = p.err, fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(6.dp))
+                    Text(loadError!!, color = p.textTertiary, fontSize = 12.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "重试",
+                        color = p.accent,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable {
+                            loadError = null
+                            web?.loadUrl(MAP_URL)
+                        },
+                    )
+                } else {
+                    Text("暂无列车坐标", color = p.text, fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (running) "已开始接收，等待含经纬度的长报文"
+                        else "点状态胶囊「开始接收」，或到解码页一键开始",
+                        color = p.textSecondary, fontSize = 12.sp,
+                    )
                 }
             }
         }
 
-        Box(Modifier.fillMaxSize().padding(top = 8.dp).background(Color(0xFF10131A))) {
-            if (useMap && settings.amapKey.isNotBlank()) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            this.settings.setJavaScriptEnabled(true)
-                            this.settings.setDomStorageEnabled(true)
-                            webViewClient = WebViewClient()
-                            addJavascriptInterface(Bridge(), "lbj")
-                            val security = settings.amapSecurity
-                            val secJs = if (security.isNotBlank())
-                                "window._AMapSecurityConfig={securityJsCode:'$security'};"
-                            else ""
-                            loadDataWithBaseURL(
-                                "https://lbs.amap.com",
-                                """
-                                <html><head><meta charset="utf-8"/>
-                                <meta name="viewport" content="width=device-width,initial-scale=1"/>
-                                <style>body{margin:0}#m{width:100%;height:100vh}</style>
-                                <script>$secJs</script>
-                                <script src="https://webapi.amap.com/maps?v=2.0&key=${settings.amapKey}"></script>
-                                </head><body><div id="m"></div>
-                                <script>
-                                  var map = new AMap.Map('m', {
-                                    zoom: ${settings.mapZoom},
-                                    mapStyle: '${if (settings.mapNight) "amap://styles/dark" else "amap://styles/normal"}',
-                                    center: [114.305469, 30.592835],
-                                    viewMode: '2D'
-                                  });
-                                  var marker = null, trail = [], line = null;
-                                  window.updateTrain = function(lat, lng, name, follow) {
-                                    var pos = [lng, lat];
-                                    if (!marker) {
-                                      marker = new AMap.Marker({position: pos, title: name});
-                                      map.add(marker);
-                                    } else { marker.setPosition(pos); marker.setTitle(name); }
-                                    trail.push(pos); if (trail.length > 200) trail.shift();
-                                    if (line) map.remove(line);
-                                    if (trail.length > 1) {
-                                      line = new AMap.Polyline({path: trail, strokeColor: '#DA291C', strokeWeight: 3});
-                                      map.add(line);
-                                    }
-                                    if (follow) map.setCenter(pos);
-                                  };
-                                </script></body></html>
-                                """.trimIndent(),
-                                "text/html", "utf-8", null,
-                            )
-                            jsBridge = this
-                        }
-                    },
-                )
-            } else {
-                // ---- 降级文本卡：坐标 + 公里标 + 与本机 GPS 距离 ----
-                Column(Modifier.align(Alignment.Center).padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (latest?.latitude != null) {
-                        Text(latest!!.train.ifEmpty { "----" }, fontSize = 30.sp,
-                            color = Color(0xFFE8EAED))
-                        Text("WGS-84 %.5f, %.5f".format(
-                            Locale.US, latest!!.latitude!!, latest!!.longitude ?: 0.0),
-                            fontSize = 15.sp, color = Color(0xFF9AA0A6))
-                        Text("公里标 ${latest!!.position}  ${latest!!.direction}",
-                            fontSize = 14.sp, color = Color(0xFF9AA0A6))
-                        if (gpsValid) {
-                            val d = haversineKm(
-                                gps[0], gps[1], latest!!.latitude!!, latest!!.longitude ?: 0.0)
-                            Text("距本机约 %.1f km（GPS）".format(Locale.US, d),
-                                fontSize = 16.sp, color = CrRed)
-                        } else {
-                            Button(onClick = {
-                                permLauncher.launch(arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION))
-                            }) { Text("授权定位以计算距离") }
-                        }
+        // ---- 底部浮层：瓦片失败横幅 + 最近一列车信息（同一竖列，互不遮挡）----
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 12.dp, end = 12.dp, bottom = Dim.dockSpace + 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (tileFail) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(p.surface.copy(alpha = 0.94f))
+                        .border(1.dp, p.warn.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .clickable { sheet = true }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "底图瓦片加载失败：当前网络可能访问不到该图源",
+                        color = p.warn, fontSize = 11.sp, modifier = Modifier.weight(1f),
+                    )
+                    Text("换底图 ›", color = p.accent, fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium)
+                }
+            }
+            newest?.let { t ->
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(p.surface.copy(alpha = 0.94f))
+                        .border(1.dp, p.border, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        t.train.ifEmpty { "----" },
+                        color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(t.direction, color = p.dirColor(t.direction), fontSize = 12.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "%s km/h  K%s".format(Locale.US, t.speed.ifEmpty { "---" },
+                            t.position.ifEmpty { "---.-" }),
+                        color = p.textSecondary, fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    val g = gps
+                    if (g != null) {
+                        val dkm = haversineKm(g[0], g[1], t.lat, t.lon)
+                        Text(
+                            "距本机 %.1f km".format(Locale.US, dkm),
+                            color = p.accent, fontSize = 12.sp,
+                        )
                     } else {
-                        Text("暂无列车坐标", fontSize = 20.sp, color = Color(0xFF9AA0A6))
-                    }
-                    if (settings.amapKey.isBlank()) {
-                        Text("未配置高德 Key（设置页 → 地图），已降级为文字卡",
-                            fontSize = 12.sp, color = Color(0xFF666E78),
-                            modifier = Modifier.padding(top = 12.dp))
+                        Text(
+                            "定位算距离",
+                            color = p.textTertiary, fontSize = 12.sp,
+                            modifier = Modifier.clickable {
+                                permLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                    )
+                                )
+                            },
+                        )
                     }
                 }
+            }
+        }
+    }
+
+    // 图层/夜间面板必须**无条件调用**：如果直接写 `if (sheet) ModalBottomSheet(…)`，
+    // 兄弟节点数量变化会让 Compose 把上面的 AndroidView 当成新节点重建，
+    // WebView 就会整页重载（轨迹一起丢）。这里把 if 收进独立 composable。
+    MapLayerSheetHost(
+        show = sheet,
+        onDismiss = { sheet = false },
+        settings = settings,
+        layers = layers,
+        onApply = { s ->
+            vm.updateViewSettings(s)
+            web?.evaluateJavascript(applyConfigJs(s), null)
+        },
+    )
+
+    // 页面销毁时释放 WebView（否则 WebView 线程与 JS 定时器会一直存活）
+    DisposableEffect(Unit) {
+        Log.i(TAG, "MapPage 进入组合")
+        onDispose {
+            Log.i(TAG, "MapPage 离开组合 → 销毁 WebView")
+            runCatching {
+                web?.let {
+                    it.removeJavascriptInterface("LBJHost")
+                    it.stopLoading()
+                    (it.parent as? ViewGroup)?.removeView(it)
+                    it.destroy()
+                }
+            }
+            web = null
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MapLayerSheetHost(
+    show: Boolean,
+    onDismiss: () -> Unit,
+    settings: ReceiverSettings,
+    layers: List<LayerOption>,
+    onApply: (ReceiverSettings) -> Unit,
+) {
+    if (!show) return
+    val p = pal()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = p.surface,
+    ) {
+        LayerSheet(settings = settings, layers = layers, onApply = onApply)
+    }
+}
+
+// ----------------------------------------------------------------- 图层选项
+
+data class LayerOption(val id: String, val name: String, val coord: String, val kind: String)
+
+/** `LBJ.status()` 里本页关心的字段 */
+private data class MapStatus(
+    val locked: Boolean,
+    val tilesTotal: Int,
+    val tilesFailed: Int,
+    val coord: String,
+    val base: String,
+    val rail: String,
+)
+
+/**
+ * 解析 `evaluateJavascript("JSON.stringify(LBJ.status())")` 的返回值。
+ *
+ * 注意 WebView 的返回值是**再包一层 JSON 字符串**（形如 `"{\"base\":...}"`），
+ * 所以先当 JSON 值解，取出字符串再解一次。
+ */
+private fun parseStatus(raw: String?): MapStatus? {
+    if (raw.isNullOrBlank() || raw == "null" || raw == "\"null\"") return null
+    return runCatching {
+        val inner = if (raw.startsWith("\"")) JSONObject("{\"v\":$raw}").getString("v") else raw
+        val o = JSONObject(inner)
+        MapStatus(
+            locked = o.optBoolean("locked"),
+            tilesTotal = o.optInt("tilesTotal"),
+            tilesFailed = o.optInt("tilesFailed"),
+            coord = o.optString("coord"),
+            base = o.optString("base"),
+            rail = o.optString("rail"),
+        )
+    }.getOrNull()
+}
+
+/** 页面未就绪时的兜底清单（id 与 railmap.html 的 BASE_SOURCES / RAIL_SOURCES 对齐） */private val FALLBACK_LAYERS = listOf(
+    LayerOption("osm", "OSM 标准", "wgs", "base"),
+    LayerOption("carto_light", "Carto 浅色", "wgs", "base"),
+    LayerOption("carto_dark", "Carto 深色", "wgs", "base"),
+    LayerOption("carto_voyager", "Carto 路由", "wgs", "base"),
+    LayerOption("esri_img", "Esri 卫星", "wgs", "base"),
+    LayerOption("esri_street", "Esri 街道", "wgs", "base"),
+    LayerOption("opentopo", "OpenTopoMap 地形", "wgs", "base"),
+    LayerOption("tdt_vec", "天地图 矢量（CGCS2000）", "wgs", "base"),
+    LayerOption("tdt_img", "天地图 影像（CGCS2000）", "wgs", "base"),
+    LayerOption("amap", "高德 街道（GCJ-02）", "gcj", "base"),
+    LayerOption("amap_img", "高德 卫星（GCJ-02）", "gcj", "base"),
+    LayerOption("off", "不显示", "wgs", "rail"),
+    LayerOption("orm_standard", "ORM 标准（线路+信号）", "wgs", "rail"),
+    LayerOption("orm_maxspeed", "ORM 限速", "wgs", "rail"),
+    LayerOption("orm_signals", "ORM 信号", "wgs", "rail"),
+    LayerOption("orm_electrified", "ORM 电气化", "wgs", "rail"),
+    LayerOption("orm_gauge", "ORM 轨距", "wgs", "rail"),
+)
+
+private fun parseLayers(json: String?): List<LayerOption> {
+    if (json.isNullOrBlank() || json == "null") return FALLBACK_LAYERS
+    return try {
+        // evaluateJavascript 返回的是「JSON 字符串的 JSON 字面量」：先还原一次
+        val arr = JSONArray(JSONObject("{\"v\":$json}").getString("v"))
+        val out = ArrayList<LayerOption>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            out.add(
+                LayerOption(
+                    id = o.optString("id"),
+                    name = o.optString("name"),
+                    coord = o.optString("coord"),
+                    kind = o.optString("kind"),
+                )
+            )
+        }
+        out.ifEmpty { FALLBACK_LAYERS }
+    } catch (t: Throwable) {
+        FALLBACK_LAYERS
+    }
+}
+
+// ----------------------------------------------------------------- 图层面板
+
+@Composable
+private fun LayerSheet(
+    settings: ReceiverSettings,
+    layers: List<LayerOption>,
+    onApply: (ReceiverSettings) -> Unit,
+) {
+    val p = pal()
+    var base by remember(settings.mapBase) { mutableStateOf(settings.mapBase) }
+    var rail by remember(settings.mapRail) { mutableStateOf(settings.mapRail) }
+    var opacity by remember(settings.mapRailOpacity) {
+        mutableStateOf(settings.mapRailOpacity.toFloat())
+    }
+    var night by remember(settings.mapNight) { mutableStateOf(settings.mapNight) }
+
+    val bases = layers.filter { it.kind == "base" }.ifEmpty { FALLBACK_LAYERS.filter { it.kind == "base" } }
+    val rails = layers.filter { it.kind == "rail" }.ifEmpty { FALLBACK_LAYERS.filter { it.kind == "rail" } }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 28.dp),
+    ) {
+        Text("地图图层", color = p.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "铁路图源 OpenRailwayMap（WGS-84）；选高德底图（GCJ-02）会自动关掉铁路图层，" +
+                "否则线路会整体错位几百米。",
+            color = p.textTertiary, fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        SectionCard("底图") {
+            bases.forEach { item ->
+                OptionRow(
+                    title = item.name,
+                    selected = item.id == base,
+                    onClick = {
+                        base = item.id
+                        onApply(settings.copy(mapBase = item.id))
+                    },
+                )
+            }
+        }
+        Spacer(Modifier.height(Dim.gap))
+
+        SectionCard("铁路图层") {
+            rails.forEach { item ->
+                OptionRow(
+                    title = item.name,
+                    selected = item.id == rail,
+                    onClick = {
+                        rail = item.id
+                        onApply(settings.copy(mapRail = item.id))
+                    },
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("不透明度 %.0f%%".format(Locale.US, opacity * 100), color = p.textSecondary,
+                fontSize = 12.sp)
+            Slider(
+                value = opacity,
+                onValueChange = { opacity = it },
+                onValueChangeFinished = { onApply(settings.copy(mapRailOpacity = opacity.toDouble())) },
+                valueRange = 0.2f..1f,
+            )
+        }
+        Spacer(Modifier.height(Dim.gap))
+
+        SectionCard("显示") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("夜间底图", color = p.text, fontSize = 14.sp)
+                    Text("深色主题下给瓦片加反相，标记与轨迹不受影响",
+                        color = p.textTertiary, fontSize = 11.sp)
+                }
+                Switch(checked = night, onCheckedChange = {
+                    night = it
+                    onApply(settings.copy(mapNight = it))
+                })
             }
         }
     }
 }
 
-/** JS 桥（预留：页面 ↔ 原生交互） */
-private class Bridge {
+@Composable
+private fun OptionRow(title: String, selected: Boolean, onClick: () -> Unit) {
+    val p = pal()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 9.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, color = if (selected) p.accent else p.text, fontSize = 14.sp,
+            modifier = Modifier.weight(1f))
+        if (selected) {
+            Text("✓", color = p.accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// ----------------------------------------------------------------- WebView 构建
+
+private const val TAG = "RailMap"
+private const val MAP_URL = "file:///android_asset/web/railmap.html"
+
+@SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
+private fun buildWebView(ctx: Context, onCreated: (WebView) -> Unit): WebView =
+    WebView(ctx).apply {
+        layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.allowFileAccess = true
+        settings.allowContentAccess = false
+        settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+        @Suppress("DEPRECATION")
+        settings.allowFileAccessFromFileURLs = true
+        isVerticalScrollBarEnabled = false
+        isHorizontalScrollBarEnabled = false
+        setBackgroundColor(AndroidColor.TRANSPARENT)
+        onCreated(this)
+    }
+
+/** JS 桥：页面回报图层变化（在 JS 线程回调，调用方负责切回主线程） */
+private class HostBridge(private val onLayersJson: (String) -> Unit) {
+    @JavascriptInterface
+    fun onLayers(json: String) = onLayersJson(json)
+
     @JavascriptInterface
     fun ping(): String = "ok"
 }
 
+/** 数据源显示名（胶囊文案） */
+private fun sourceLabel(s: ReceiverSettings): String = when (s.sourceType) {
+    "usb" -> "USB 直连"
+    "rtl_tcp" -> "rtl_tcp"
+    "owrx" -> "OWRX"
+    else -> s.sourceType
+}
+
+/** 把图层变化落盘（底图/铁路/透明度/夜间），不重建 DSP 链路 */
+private fun persistLayers(vm: ReceiverViewModel, json: String) {
+    try {
+        val o = JSONObject(json)
+        val s = vm.settings.value
+        val next = s.copy(
+            mapBase = o.optString("base", s.mapBase).ifEmpty { s.mapBase },
+            mapRail = o.optString("rail", s.mapRail).ifEmpty { s.mapRail },
+            mapRailOpacity = if (o.has("railOpacity")) o.optDouble("railOpacity", s.mapRailOpacity)
+            else s.mapRailOpacity,
+            mapNight = if (o.has("night")) o.optBoolean("night", s.mapNight) else s.mapNight,
+        )
+        if (next != s) vm.updateViewSettings(next)
+    } catch (t: Throwable) {
+        Log.w(TAG, "图层回报解析失败: ${t.message}")
+    }
+}
+
+// ----------------------------------------------------------------- JS 生成
+
+/** 与应用内设置的 `toParamsJson` 不同：这里只下发地图页关心的字段 */
+private fun applyConfigJs(s: ReceiverSettings): String {
+    val cfg = JSONObject().apply {
+        put("base", s.mapBase)
+        put("rail", s.mapRail)
+        put("railOpacity", s.mapRailOpacity)
+        put("night", s.mapNight)
+        put("follow", s.mapFollow)
+        put("zoom", s.mapZoom)
+        put("tdtKey", s.mapTdtKey)
+        put("center", JSONObject().apply {
+            put("lat", s.mapCenterLat)
+            put("lng", s.mapCenterLng)
+        })
+    }
+    return "window.LBJ&&window.LBJ.applyConfig($cfg)"
+}
+
+private fun updateJs(trains: List<TrainPoint>, s: ReceiverSettings): String {
+    val arr = JSONArray()
+    trains.forEach { t ->
+        arr.put(JSONObject().apply {
+            put("id", t.id)
+            put("train", t.train)
+            put("lat", t.lat)
+            put("lon", t.lon)
+            put("speed", t.speed)
+            put("km", t.position)
+            put("position", t.position)
+            put("route", t.route)
+            put("loco", t.loco)
+            put("direction", t.direction)
+            put("category", t.category)
+            put("time", t.time)
+            put("ts", t.ts)
+        })
+    }
+    val payload = JSONObject().apply {
+        put("trains", arr)
+        put("follow", s.mapFollow)
+        put("night", s.mapNight)
+        put("showTrail", true)
+    }
+    return "window.LBJ&&window.LBJ.update($payload)"
+}
+
+// ----------------------------------------------------------------- 数据整形
+
+/** 地图像素：一列车一个点（同一车次只留最新一条） */
+data class TrainPoint(
+    val id: String,
+    val train: String,
+    val lat: Double,
+    val lon: Double,
+    val speed: String,
+    val position: String,
+    val route: String,
+    val loco: String,
+    val direction: String,
+    val category: String,
+    val time: String,
+    val ts: Double,
+)
+
+private fun collectTrains(events: List<DecodeEvent>): List<TrainPoint> {
+    val seen = HashSet<String>()
+    val out = ArrayList<TrainPoint>(24)
+    for (e in events) {
+        val lat = e.latitude ?: continue
+        val lon = e.longitude ?: continue
+        // 地图 id 与页面一致：优先 baseTrain（同车次换端不新增标记）
+        val id = e.baseTrain.ifEmpty { e.train }.ifEmpty { e.uid }
+        if (id.isEmpty() || !seen.add(id)) continue
+        out.add(
+            TrainPoint(
+                id = id,
+                train = e.train,
+                lat = lat,
+                lon = lon,
+                speed = e.speed,
+                position = e.position,
+                route = e.route,
+                loco = e.loco,
+                direction = e.direction,
+                category = e.category,
+                time = e.timeStr,
+                ts = e.timestamp,
+            )
+        )
+        if (out.size >= 24) break
+    }
+    return out
+}
+
+// ----------------------------------------------------------------- 定位工具
+
 /** 读系统最后一次已知定位（不主动开启 GPS，零功耗） */
 private fun readLastGps(ctx: Context): DoubleArray? = try {
     val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER,
-        LocationManager.PASSIVE_PROVIDER)
-        .firstNotNullOfOrNull { p ->
-            try { lm.getLastKnownLocation(p) } catch (_: SecurityException) { null }
-        }
-        ?.let { doubleArrayOf(it.latitude, it.longitude) }
-} catch (_: Exception) { null }
+    listOf(
+        LocationManager.GPS_PROVIDER,
+        LocationManager.NETWORK_PROVIDER,
+        LocationManager.PASSIVE_PROVIDER,
+    ).firstNotNullOfOrNull { provider ->
+        try { lm.getLastKnownLocation(provider) } catch (_: SecurityException) { null }
+    }?.let { doubleArrayOf(it.latitude, it.longitude) }
+} catch (_: Exception) {
+    null
+}
 
 /** 球面距离（km） */
 private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
@@ -211,3 +848,7 @@ private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double):
         sin(dLng / 2) * sin(dLng / 2)
     return 2 * r * atan2(sqrt(a), sqrt(1 - a))
 }
+
+/** Compose Color → Android int（WebView 背景，避免加载瞬间白闪） */
+private fun Color.toArgbInt(): Int = AndroidColor.argb(
+    (alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt())

@@ -233,17 +233,30 @@ class CoreConfig:
     theme: str = 'dark'                    # 外观主题: dark(夜间) / light(日间) / auto(跟随系统)
 
     # --- 高德地图 (仅 GUI 使用，不参与 DSP) ---
-    amapKey: str = ''                      # Web端(JS API) Key
-    amapSecurity: str = ''                 # JS API 安全密钥 securityJsCode
+    # v3.0 起地图改用 shared/web/railmap.html（Leaflet + OpenRailwayMap），
+    # 不再需要高德 Key；amapKey/amapSecurity 仅为兼容老配置保留读取。
+    amapKey: str = ''                      # 【已废弃】Web端(JS API) Key
+    amapSecurity: str = ''                 # 【已废弃】JS API 安全密钥 securityJsCode
     mapZoom: int = 12                      # 默认缩放级别
     mapFollow: bool = True                 # 是否自动跟随最新列车
     mapShowTrail: bool = True              # 是否显示最近列车轨迹点
     mapNight: bool = True                  # 地图夜间模式 (深色底图)
-    # 开机中心点：填一个地名（如“南昌站”），启动时用高德地理编码定位到这里；
-    # 留空则用上次记住的坐标，再没有就显示全国概览（不再固定北京）。
+    # 默认中心：mapCenterAddress 只是显示名（预设城市名），真实位置用经纬度；
+    # 离线也能定位，不再依赖地名解析。
     mapCenterAddress: str = ''
-    mapCenterLng: float = 0.0              # 上次解析出的中心经度（缓存，断网可用）
-    mapCenterLat: float = 0.0              # 上次解析出的中心纬度
+    mapCenterLng: float = 0.0              # 中心经度 (WGS-84)
+    mapCenterLat: float = 0.0              # 中心纬度 (WGS-84)
+    # --- 地图图源 (v3.0) ---
+    # 底图 id 与铁路图层 id 的取值见 shared/web/railmap.html 的
+    # BASE_SOURCES / RAIL_SOURCES；界面侧清单在 cr_lbj/ui/config_ext.py。
+    mapBase: str = 'osm'                   # 底图: osm/carto_*/esri_*/opentopo/tdt_*/amap*
+    mapRail: str = 'orm_standard'          # 铁路图层: orm_standard/maxspeed/signals/electrified/gauge/off
+    mapRailOpacity: float = 0.85           # 铁路图层不透明度 0.2~1.0
+    tdtKey: str = ''                       # 天地图「浏览器端」tk（选 tdt_* 底图时需要）
+    # --- 查询与数据更新 (v3.0) ---
+    trainQuerySource: str = 'auto'         # 车次查询数据源: auto/railgo/12306
+    dataAutoUpdate: bool = True            # 是否自动检查第三方数据（配属号段表）更新
+    dataUpdateIntervalDays: int = 7         # 自动检查间隔（天）
 
     def toDict(self) -> Dict[str, Any]:
         """转换为字典 (便于 JSON 序列化)。"""

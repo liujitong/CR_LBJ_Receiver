@@ -198,12 +198,26 @@ CONFIG_PATH = os.path.join(USER_DIR, 'lbj_config.json')
 DB_PATH = os.path.join(USER_DIR, 'history.db')
 ICON_PATH = os.path.join(DATA_DIR, '国铁.ico')
 
+# 离屏冒烟 / 自动化测试专用：用环境变量把配置与历史库指到临时目录，
+# 免得测试把仓库里受版本控制的 lbj_config.json 模板写脏（踩过两次）。
+_WORK_DIR = os.environ.get('CRLBJ_WORK_DIR', '').strip()
+if _WORK_DIR:
+    try:
+        os.makedirs(_WORK_DIR, exist_ok=True)
+        CONFIG_PATH = os.path.join(_WORK_DIR, 'lbj_config.json')
+        DB_PATH = os.path.join(_WORK_DIR, 'history.db')
+    except OSError:
+        pass
+
 # 首次运行：从打包模板复制默认配置到用户目录 (如果不存在)
 # 注意：FIRST_RUN 必须在复制之前求值，否则 main() 里永远拿不到“首次”状态
 FIRST_RUN = not os.path.exists(CONFIG_PATH)
 if FIRST_RUN:
-    _tmpl = os.path.join(DATA_DIR, 'lbj_config.json') if getattr(sys, 'frozen', False) else None
-    if _tmpl and os.path.exists(_tmpl):
+    # 打包后模板在 _MEIPASS，源码运行时就在项目根（同一个 DATA_DIR 逻辑）。
+    # 设置 CRLBJ_WORK_DIR 时两者不同，这里会把完整模板种进临时目录，
+    # 保证测试拿到的是一份字段齐全的配置而不是空 CoreConfig。
+    _tmpl = os.path.join(DATA_DIR, 'lbj_config.json')
+    if os.path.exists(_tmpl) and os.path.abspath(_tmpl) != os.path.abspath(CONFIG_PATH):
         try:
             import shutil
             shutil.copy(_tmpl, CONFIG_PATH)

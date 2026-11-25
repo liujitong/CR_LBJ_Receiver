@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>LBJ 实时位置</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<style>
+  /* ------------------------------------------------------------------
+     主题变量：body.dark / body.light 由 JS 按 night 开关切换。
+     颜色与桌面版主题（theme.py）保持一致，Android 端复用同一套。
+     ------------------------------------------------------------------ */
+  body.dark {
+    --bg: #10161c; --card: #191c21cc; --text: #d8dee6; --dim: #8c97a3;
+    --border: #2b3138; --accent: #F0604F; --warn: #F0A020; --ok: #4CAF7D;
+    --sub-bg: rgba(10,14,18,.78);
+  }
+  body.light {
+    --bg: #f4f6f8; --card: #ffffffdd; --text: #1b2026; --dim: #5a6572;
+    --border: #d5dce4; --accent: #DA291C; --warn: #A96500; --ok: #2E7D53;
+    --sub-bg: rgba(255,255,255,.86);
+  }
+  html, body { height: 100%; width: 100%; margin: 0; padding: 0;
+    background: var(--bg); overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    -webkit-tap-highlight-color: transparent; }
+  #map { position: absolute; inset: 0; background: var(--bg); }
+
+  /* 夜间兜底：底图没有深色版本时给瓦片层反相（标记/轨迹在独立 pane，不受影响） */
+  body.nightfall .lbj-tiles { filter: invert(1) hue-rotate(180deg) brightness(.86) contrast(.92) saturate(.72); }
+
+  /* ---------------- 列车标记 ---------------- */
+  .lbj-marker { position: relative; white-space: nowrap; text-align: center;
+    font: 11px/1.15 "Microsoft YaHei", sans-serif; }
+  .lbj-marker .tag { display: inline-block; padding: 2px 6px; border-radius: 3px;
+    color: #fff; font-weight: 700; letter-spacing: .3px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.35); }
+  .lbj-marker .sub { display: block; margin-top: 1px; padding: 0 4px; border-radius: 2px;
+    background: var(--sub-bg); color: var(--text); font-size: 9.5px; }
+  .lbj-marker .dot { position: absolute; left: 50%; bottom: 0;
+    width: 9px; height: 9px; margin-left: -4.5px; margin-bottom: -4.5px;
+    border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 2px rgba(255,255,255,.9), 0 0 6px rgba(0,0,0,.55); }
+  .lbj-marker.dim { opacity: .45; }
+  .lbj-marker.mini .sub { display: none; }
+  /* 选中态：放大 + 白描边 */
+  .lbj-marker.sel .tag { box-shadow: 0 0 0 2px #fff, 0 1px 6px rgba(0,0,0,.6); }
+
+  /* ---------------- 右上角图层面板 ---------------- */
+  #panel { position: absolute; right: 10px; top: 10px; z-index: 500;
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; font-size: 12px; min-width: 148px; max-width: 60%;
+    backdrop-filter: blur(6px); box-shadow: 0 4px 16px rgba(0,0,0,.25); overflow: hidden; }
+  #panel .hd { display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    cursor: pointer; user-select: none; }
+  #panel .hd b { color: var(--accent); font-size: 12px; }
+  #panel .bd { display: none; padding: 0 8px 8px; }
+  #panel.open .bd { display: block; }
+  #panel label.row { display: flex; align-items: center; gap: 6px; margin: 5px 0;
+    font-size: 12px; color: var(--text); }
+  #panel select { flex: 1; min-width: 0; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; font-size: 12px; padding: 2px 3px; }
+  #panel input[type=range] { flex: 1; min-width: 0; }
+  #panel .hint { color: var(--dim); font-size: 10.5px; line-height: 1.5; margin-top: 6px; }
+  #panel .st { color: var(--dim); font-size: 10.5px; margin-top: 6px;
+    border-top: 1px solid var(--border); padding-top: 5px; }
+  #panel .st b { color: var(--ok); }
+  #panel .st .bad { color: var(--warn); }
+
+  /* ---------------- 提示条 ---------------- */
+  #toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 900; max-width: 88%; padding: 8px 12px; border-radius: 6px;
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    font-size: 12px; line-height: 1.6; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+  #toast b { color: var(--warn); }
+  #hint { position: absolute; left: 50%; top: 46%; transform: translate(-50%,-50%);
+    color: var(--text); font-size: 13px; line-height: 1.8; text-align: center;
+    background: var(--card); padding: 14px 18px; border-radius: 6px;
+    border: 1px solid var(--border); max-width: 80%; display: none; z-index: 800; }
+  #hint b { color: var(--warn); }
+
+  /* Leaflet 署名条跟随主题 */
+  .leaflet-control-attribution { background: var(--card) !important;
+    color: var(--dim) !important; font-size: 10px !important; }
+  .leaflet-control-attribution a { color: var(--accent) !important; }
+  .leaflet-bar a { background: var(--card) !important; color: var(--text) !important;
+    border-color: var(--border) !important; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--card) !important; color: var(--text) !important; }
+</style>
+</head>
+<body class="dark">
+<div id="map"></div>
+
+<div id="panel">
+  <div class="hd" id="panelHd">
+    <b>图层</b>
+    <span id="panelSum" style="color:var(--dim);font-size:10.5px;flex:1;text-align:right"></span>
+    <span id="panelArrow">▾</span>
+  </div>
+  <div class="bd">
+    <label class="row">底图
+      <select id="selBase"></select>
+    </label>
+    <label class="row">铁路
+      <select id="selRail"></select>
+    </label>
+    <label class="row">不透明度
+      <input id="rngRail" type="range" min="20" max="100" step="5">
+    </label>
+    <div class="st" id="statusLine">—</div>
+    <div class="hint" id="hintLine"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="hint"></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>
+/* ====================================================================
+   railmap.html —— 桌面（Qt WebEngine）与安卓（WebView）共用的地图页。
+
+   设计要点
+   1. 单文件、零构建：Leaflet 就近引用 vendor/leaflet（离线可用）。
+   2. 铁路图源 = OpenRailwayMap（WGS-84 栅格瓦片）；底图可切换。
+   3. 坐标系：OSM/ORM 系底图直接用 WGS-84；高德系底图（GCJ-02）由本页
+      在做标记时自动加偏，避免出现「车标比线路偏移几百米」。
+      但 GCJ 底图与 WGS 铁路图层不能混叠（不同大地基准的栅格互相错位），
+      因此选中 GCJ 底图时会自动关闭铁路图层并给出提示。
+   4. 对外 API（Python / Kotlin 都只用这几个）：
+        LBJ.update(payload)   批量推送列车（WGS-84 原始坐标）
+        LBJ.focus(id) / clear() / setFollow(b) / locked() / center()
+        LBJ.setNight(b) / isNight() / centerTo(addr) / resize()
+        LBJ.applyConfig(cfg) / setBase(id) / setRailway(b) / setRailStyle(id)
+        LBJ.railOpacity(v) / status() / layers()
+   ==================================================================== */
+(function () {
+  'use strict';
+
+  /* ---------------- 1. 瓦片源登记表 ---------------- */
+  // noInvert: 夜间是否跳过反相滤镜（本身是深色瓦片，或卫星影像不宜反相）
+  // coord: 'wgs' | 'gcj' —— 栅格所在大地基准，决定标记是否需要加偏
+  var BASE_SOURCES = {
+    osm: {
+      name: 'OSM 标准', coord: 'wgs', maxNativeZoom: 19,
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    },
+    carto_light: {
+      name: 'Carto 浅色', coord: 'wgs', maxNativeZoom: 19,
+      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      subdomains: 'abcd',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    },
+    carto_dark: {
+      name: 'Carto 深色', coord: 'wgs', maxNativeZoom: 19, noInvert: true,
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      subdomains: 'abcd',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    },
+    carto_voyager: {
+      name: 'Carto 路由', coord: 'wgs', maxNativeZoom: 19,
+      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      subdomains: 'abcd',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    },
+    esri_img: {
+      name: 'Esri 卫星', coord: 'wgs', maxNativeZoom: 18, noInvert: true,
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+    },
+    esri_street: {
+      name: 'Esri 街道', coord: 'wgs', maxNativeZoom: 18,
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'Esri, HERE, Garmin, USGS, &copy; OpenStreetMap contributors, GIS User Community'
+    },
+    opentopo: {
+      name: 'OpenTopoMap 地形', coord: 'wgs', maxNativeZoom: 17,
+      url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+      subdomains: 'abc',
+      attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)'
+    },
+    tdt_vec: {
+      name: '天地图 矢量（CGCS2000）', coord: 'wgs', maxNativeZoom: 18,
+      url: 'https://t{s}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
+           '&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles' +
+           '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk={key}',
+      subdomains: '01234567',
+      attribution: '&copy; <a href="https://www.tianditu.gov.cn/">天地图</a> 国家地理信息公共服务平台'
+    },
+    tdt_img: {
+      name: '天地图 影像（CGCS2000）', coord: 'wgs', maxNativeZoom: 18, noInvert: true,
+      url: 'https://t{s}.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
+           '&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles' +
+           '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk={key}',
+      subdomains: '01234567',
+      attribution: '&copy; <a href="https://www.tianditu.gov.cn/">天地图</a> 国家地理信息公共服务平台'
+    },
+    amap: {
+      name: '高德 街道（GCJ-02）', coord: 'gcj', maxNativeZoom: 18,
+      url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+      subdomains: '1234', attribution: '&copy; 高德地图 AutoNavi'
+    },
+    amap_img: {
+      name: '高德 卫星（GCJ-02）', coord: 'gcj', maxNativeZoom: 18, noInvert: true,
+      url: 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
+      subdomains: '1234', attribution: '&copy; 高德地图 AutoNavi'
+    }
+  };
+
+  // OpenRailwayMap 官方瓦片：多种样式，均为 WGS-84
+  var RAIL_SOURCES = {
+    off:    { name: '不显示', url: '' },
+    orm_standard: {
+      name: 'ORM 标准（线路+信号）',
+      url: 'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+      subdomains: 'abc', maxNativeZoom: 19
+    },
+    orm_maxspeed: {
+      name: 'ORM 限速',
+      url: 'https://{s}.tiles.openrailwaymap.org/maxspeed/{z}/{x}/{y}.png',
+      subdomains: 'abc', maxNativeZoom: 19
+    },
+    orm_signals: {
+      name: 'ORM 信号',
+      url: 'https://{s}.tiles.openrailwaymap.org/signals/{z}/{x}/{y}.png',
+      subdomains: 'abc', maxNativeZoom: 19
+    },
+    orm_electrified: {
+      name: 'ORM 电气化',
+      url: 'https://{s}.tiles.openrailwaymap.org/electrified/{z}/{x}/{y}.png',
+      subdomains: 'abc', maxNativeZoom: 19
+    },
+    orm_gauge: {
+      name: 'ORM 轨距',
+      url: 'https://{s}.tiles.openrailwaymap.org/gauge/{z}/{x}/{y}.png',
+      subdomains: 'abc', maxNativeZoom: 19
+    }
+  };
+  var ORM_ATTR = '&copy; <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> ' +
+                 '(<a href="https://www.openstreetmap.org/copyright">OSM</a>, CC-BY-SA)';
+
+  /* ---------------- 2. 运行时配置 ---------------- */
+  var DEFAULT_CONFIG = {
+    base: 'osm',
+    rail: 'orm_standard',
+    railOpacity: 0.85,
+    night: true,
+    zoom: 11,
+    follow: true,
+    showTrail: true,
+    trailMax: 240,
+    // 天地图 tk（「浏览器端」类型）；留空则该底图在下拉里选中时只提示不加载
+    tdtKey: '',
+    center: { lat: 28.68, lng: 115.86 },   // 缺省中心（南昌附近），配置可覆盖
+    colors: { up: '#4C8DFF', down: '#F0604F', unknown: '#E0A400' }
+  };
+  var CONFIG = {};
+  function mergeConfig(dst, src) {
+    if (!src) return dst;
+    for (var k in src) {
+      if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+      if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k])) {
+        dst[k] = mergeConfig(dst[k] && typeof dst[k] === 'object' ? dst[k] : {}, src[k]);
+      } else if (src[k] !== undefined && src[k] !== null) {
+        dst[k] = src[k];
+      }
+    }
+    return dst;
+  }
+  // 宿主注入点：桌面版把下面这行替换成 `INJECTED = {...json...};`，
+  // 未替换时保持 null（页面自带缺省配置，照样能开）。
+  var INJECTED = null;
+  /*__LBJ_CONFIG_START__*//*__LBJ_CONFIG_END__*/
+  CONFIG = mergeConfig(JSON.parse(JSON.stringify(DEFAULT_CONFIG)), INJECTED);
+
+  /* ---------------- 3. 坐标系 ---------------- */
+  var PI = Math.PI, AXIS = 6378245.0, EE = 0.00669342162296594323;
+
+  function outOfChina(lat, lng) {
+    return !(lng > 73.66 && lng < 135.05 && lat > 3.86 && lat < 53.55);
+  }
+  function tLat(x, y) {
+    var r = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    r += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+    r += (20.0 * Math.sin(y * PI) + 40.0 * Math.sin(y / 3.0 * PI)) * 2.0 / 3.0;
+    r += (160.0 * Math.sin(y / 12.0 * PI) + 320 * Math.sin(y * PI / 30.0)) * 2.0 / 3.0;
+    return r;
+  }
+  function tLng(x, y) {
+    var r = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    r += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+    r += (20.0 * Math.sin(x * PI) + 40.0 * Math.sin(x / 3.0 * PI)) * 2.0 / 3.0;
+    r += (150.0 * Math.sin(x / 12.0 * PI) + 300.0 * Math.sin(x / 30.0 * PI)) * 2.0 / 3.0;
+    return r;
+  }
+  function wgs2gcj(lat, lng) {
+    if (outOfChina(lat, lng)) return [lat, lng];
+    var dLat = tLat(lng - 105.0, lat - 35.0);
+    var dLng = tLng(lng - 105.0, lat - 35.0);
+    var radLat = lat / 180.0 * PI;
+    var magic = Math.sin(radLat);
+    magic = 1 - EE * magic * magic;
+    var sqrtMagic = Math.sqrt(magic);
+    dLat = (dLat * 180.0) / ((AXIS * (1 - EE)) / (magic * sqrtMagic) * PI);
+    dLng = (dLng * 180.0) / (AXIS / sqrtMagic * Math.cos(radLat) * PI);
+    return [lat + dLat, lng + dLng];
+  }
+
+  var baseId = BASE_SOURCES[CONFIG.base] ? CONFIG.base : 'osm';
+  var railId = RAIL_SOURCES[CONFIG.rail] ? CONFIG.rail : 'orm_standard';
+  function coordMode() { return (BASE_SOURCES[baseId] || {}).coord || 'wgs'; }
+  // 原始 WGS-84 → 当前底图坐标
+  function toMap(lat, lng) {
+    return coordMode() === 'gcj' ? wgs2gcj(lat, lng) : [lat, lng];
+  }
+
+  /* ---------------- 4. 地图与图层 ---------------- */
+  var map = L.map('map', {
+    center: [CONFIG.center.lat || 28.68, CONFIG.center.lng || 115.86],
+    zoom: CONFIG.zoom || 11,
+    zoomControl: true,
+    preferCanvas: true,
+    attributionControl: true,
+    worldCopyJump: false
+  });
+  map.attributionControl.setPrefix('');
+
+  // 独立 pane：底图 < 铁路 < 轨迹 < 标记
+  map.createPane('railPane');   map.getPane('railPane').style.zIndex = 300;
+  map.createPane('trailPane');  map.getPane('trailPane').style.zIndex = 410;
+  map.createPane('markerPane').style.zIndex = 620;
+
+  var baseLayer = null, railLayer = null, tilesTotal = 0, tilesFailed = 0;
+  var userTouched = false, follow = CONFIG.follow !== false, night = CONFIG.night !== false;
+  var railUserOff = false;   // 用户手动把铁路图层关掉了：换底图时不要自作主张再打开
+  var lastFocusId = null, lastAuto = null;
+  var centerApplied = false;   // 默认中心只应用一次，之后由跟随/用户操作决定视图
+
+  function tileHooks(layer) {
+    layer.on('tileerror', function () { tilesFailed++; scheduleStatus(); });
+    layer.on('tileload', function () { tilesTotal++; scheduleStatus(); });
+    return layer;
+  }
+
+  function buildBase() {
+    var src = BASE_SOURCES[baseId];
+    if (baseLayer) { map.removeLayer(baseLayer); baseLayer = null; }
+    var url = String(src.url || '').replace('{key}', CONFIG.tdtKey || '');
+    baseLayer = L.tileLayer(url, {
+      subdomains: src.subdomains || 'abc',
+      maxNativeZoom: src.maxNativeZoom || 18,
+      maxZoom: 19,
+      attribution: src.attribution || '',
+      className: 'lbj-tiles',
+      crossOrigin: false,
+      detectRetina: false
+    });
+    baseLayer.addTo(map);
+    tileHooks(baseLayer);
+    applyNightFallback();
+  }
+
+  function buildRail() {
+    if (railLayer) { map.removeLayer(railLayer); railLayer = null; }
+    var src = RAIL_SOURCES[railId];
+    if (!src || !src.url) return;
+    railLayer = L.tileLayer(src.url, {
+      pane: 'railPane',
+      subdomains: src.subdomains || 'abc',
+      maxNativeZoom: src.maxNativeZoom || 19,
+      maxZoom: 19,
+      opacity: Math.min(1, Math.max(0.2, CONFIG.railOpacity || 0.85)),
+      attribution: ORM_ATTR,
+      className: 'lbj-rail',
+      detectRetina: false
+    });
+    railLayer.addTo(map);
+    tileHooks(railLayer);
+  }
+
+  // 夜间：底图有深色版就换源，否则给瓦片层反相
+  function applyNightFallback() {
+    var src = BASE_SOURCES[baseId] || {};
+    var need = night && !src.noInvert;
+    document.body.classList.toggle('nightfall', !!need);
+  }
+
+  /* ---------------- 5. 列车标记与轨迹 ---------------- */
+  var state = {};   // id -> {marker, line, data, trail:[[lat,lng]...]}
+
+  function markerHtml(d, sel, mini) {
+    var col = (CONFIG.colors || {})[
+      d.direction === '上行' ? 'up' : (d.direction === '下行' ? 'down' : 'unknown')] || '#888';
+    var title = escapeHtml(d.train || d.id || '----');
+    var sub = [];
+    if (d.speed && d.speed !== '---') sub.push(d.speed + ' km/h');
+    if (d.km && d.km !== '---.-') sub.push('K' + d.km);
+    var cls = 'lbj-marker' + (sel ? ' sel' : '') + (mini ? ' mini' : '');
+    return '<div class="' + cls + '"><span class="tag" style="background:' + col + '">' +
+      title + '</span>' + (sub.length ? '<span class="sub">' + escapeHtml(sub.join(' · ')) + '</span>' : '') +
+      '<span class="dot" style="background:' + col + '"></span></div>';
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  function upsertTrain(d) {
+    var id = String(d.id || d.train || '----');
+    var st = state[id];
+    var pos = toMap(Number(d.lat), Number(d.lon));
+    if (!isFinite(pos[0]) || !isFinite(pos[1])) return;
+    if (!st) {
+      var mk = L.marker(pos, {
+        pane: 'markerPane',
+        icon: L.divIcon({
+          className: '', html: markerHtml(d, false, false),
+          iconSize: [0, 0], iconAnchor: [0, 0]
+        }),
+        riseOnHover: true,
+        zIndexOffset: 100
+      });
+      mk.on('click', function () { showInfo(id); });
+      st = state[id] = { marker: mk, line: null, data: d, trail: [], ts: 0 };
+      mk.addTo(map);
+    } else {
+      st.marker.setLatLng(pos);
+      st.marker.setIcon(L.divIcon({
+        className: '', html: markerHtml(d, lastFocusId === id, false),
+        iconSize: [0, 0], iconAnchor: [0, 0]
+      }));
+      st.data = d;
+    }
+
+    // 轨迹抽稀：位移 > 6m 或距上一点 > 3s 才记
+    var trail = st.trail;
+    var now = Number(d.ts) || (Date.now() / 1000);
+    var keep = true;
+    if (trail.length) {
+      var lo = trail[trail.length - 1];
+      var moved = Math.abs(lo[0] - d.lat) + Math.abs(lo[1] - d.lon) > 6e-5;
+      keep = moved || (now - (st.ts || 0)) > 3.0;
+    }
+    if (keep) {
+      trail.push([Number(d.lat), Number(d.lon)]);
+      st.ts = now;
+      while (trail.length > (CONFIG.trailMax || 240)) trail.shift();
+    }
+    if (CONFIG.showTrail !== false && trail.length >= 2) {
+      var pts = trail.map(function (p) { return toMap(p[0], p[1]); });
+      if (!st.line) {
+        st.line = L.polyline(pts, {
+          pane: 'trailPane', color: '#DA291C', weight: 3, opacity: .85,
+          lineJoin: 'round', dashArray: null
+        }).addTo(map);
+      } else {
+        st.line.setLatLngs(pts);
+      }
+    }
+  }
+
+  function showInfo(id) {
+    var st = state[id];
+    if (!st) return;
+    var d = st.data;
+    var span = trailSpan(st.trail);
+    var rows = [
+      ['车次', d.train || '----'],
+      ['方向', d.direction || '未知'],
+      ['速度', (d.speed || '---') + ' km/h'],
+      ['公里标', 'K' + (d.km || d.position || '---.-')],
+      ['线路', d.route || '----'],
+      ['机车', d.loco || '----'],
+      ['类别', d.category || '----'],
+      ['收到', d.time || '----']
+    ];
+    if (span) rows.push(['轨迹里程', span]);
+    rows.push(['坐标', Number(d.lat).toFixed(5) + ', ' + Number(d.lon).toFixed(5)]);
+    var html = '<div style="font-size:12px;line-height:1.9">' +
+      rows.map(function (r) {
+        return '<div><span style="color:var(--dim);display:inline-block;min-width:56px">' +
+          escapeHtml(r[0]) + '</span>' + escapeHtml(r[1]) + '</div>';
+      }).join('') + '</div>';
+    L.popup({ closeButton: true, autoPan: false })
+      .setLatLng(st.marker.getLatLng()).setContent(html).openOn(map);
+  }
+
+  function trailSpan(trail) {
+    if (!trail || trail.length < 2) return '';
+    var dist = 0;
+    for (var i = 1; i < trail.length; i++) {
+      var dy = (trail[i][0] - trail[i - 1][0]) * 111.0;
+      var dx = (trail[i][1] - trail[i - 1][1]) * 111.0 * Math.cos(trail[i][0] * PI / 180);
+      dist += Math.sqrt(dx * dx + dy * dy);
+    }
+    return dist >= 0.1 ? dist.toFixed(1) + ' km' : Math.round(dist * 1000) + ' m';
+  }
+
+  function haversine(a, b) {
+    var R = 6371000, dLat = (b[0] - a[0]) * PI / 180, dLng = (b[1] - a[1]) * PI / 180;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(a[0] * PI / 180) * Math.cos(b[0] * PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+  }
+
+  function autoCenter(id, pos) {
+    if (!follow || userTouched) return;
+    if (id !== lastFocusId && lastFocusId !== null) return;   // 只跟当前关注的车
+    if (lastAuto && haversine(lastAuto, pos) < 30) return;    // 30m 内不重设中心
+    lastAuto = pos;
+    map.setView(pos, map.getZoom(), { animate: false });
+  }
+
+  /* ---------------- 6. 面板与状态 ---------------- */
+  var tileFailTimer = null;
+  function scheduleStatus() {
+    if (tileFailTimer) return;
+    tileFailTimer = setTimeout(function () { tileFailTimer = null; refreshStatus(); }, 700);
+  }
+
+  var _hostLast = '';
+  function notifyHost() {
+    var payload = { base: baseId, rail: railId, railOpacity: CONFIG.railOpacity, night: night };
+    var sig = payload.base + '|' + payload.rail + '|' + payload.railOpacity + '|' + payload.night;
+    if (sig === _hostLast) return;          // 只有组合真的变了才通知宿主
+    _hostLast = sig;
+    try {
+      if (window.LBJHost && typeof window.LBJHost.onLayers === 'function') {
+        window.LBJHost.onLayers(JSON.stringify(payload));
+      }
+    } catch (e) { /* 宿主不存在时静默 */ }
+  }
+
+  function refreshStatus() {
+    notifyHost();
+    var src = BASE_SOURCES[baseId] || {}, rail = RAIL_SOURCES[railId] || {};
+    document.getElementById('panelSum').textContent =
+      src.name + (rail.url ? ' + ORM' : '');
+    var st = document.getElementById('statusLine');
+    st.innerHTML = '底图 <b class="' + (tilesFailed > 0 ? 'bad' : '') + '">' + escapeHtml(src.name) + '</b>' +
+      ' · 瓦片 ' + tilesTotal + (tilesFailed ? '<span class="bad">，失败 ' + tilesFailed + '</span>' : '') +
+      '<br>铁路 ' + escapeHtml(rail.name || '—') + ' · 坐标 ' + (coordMode() === 'gcj' ? 'GCJ-02（已纠偏标记）' : 'WGS-84');
+    var hint = document.getElementById('hintLine');
+    if (tilesFailed > 4 && tilesTotal > 0 && tilesFailed > tilesTotal * 0.9) {
+      hint.innerHTML = '<b>瓦片加载失败</b>：当前网络可能无法访问该底图，换一张（或检查代理）。';
+    } else if (coordMode() === 'gcj' && railId !== 'off') {
+      hint.innerHTML = '<b>坐标不混叠</b>：高德底图为 GCJ-02，已自动关闭 WGS-84 铁路图层。';
+    } else if (railId !== 'off') {
+      hint.innerHTML = '铁路图源 OpenRailwayMap · 中国境内覆盖取决于 OSM 数据完整度。';
+    } else {
+      hint.innerHTML = '未叠加铁路图层。';
+    }
+    // 一张都没成功（total==0）时也要提示：国内网络下底图域名常被整体阻断
+    showHint(tilesFailed > 8 && (tilesTotal === 0 || tilesFailed >= tilesTotal * 0.9));
+  }
+
+  function showHint(on) {
+    var el = document.getElementById('hint');
+    if (on) {
+      el.innerHTML = '<b>底图瓦片加载失败</b><br>当前网络无法访问该底图。<br>' +
+        '打开右上角「图层」换一张底图。';
+      el.style.display = 'block';
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
+  var toastTimer = null;
+  function toast(msg, ms) {
+    var el = document.getElementById('toast');
+    el.innerHTML = msg;
+    el.style.display = 'block';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.style.display = 'none'; }, ms || 4200);
+  }
+
+  function buildSelects() {
+    var sb = document.getElementById('selBase');
+    sb.innerHTML = '';
+    for (var k in BASE_SOURCES) {
+      if (!BASE_SOURCES.hasOwnProperty(k)) continue;
+      var o = document.createElement('option');
+      o.value = k; o.textContent = BASE_SOURCES[k].name;
+      if (k === baseId) o.selected = true;
+      sb.appendChild(o);
+    }
+    sb.onchange = function () { setBase(this.value); };
+    var sr = document.getElementById('selRail');
+    sr.innerHTML = '';
+    for (var r in RAIL_SOURCES) {
+      if (!RAIL_SOURCES.hasOwnProperty(r)) continue;
+      var o2 = document.createElement('option');
+      o2.value = r; o2.textContent = RAIL_SOURCES[r].name;
+      if (r === railId) o2.selected = true;
+      sr.appendChild(o2);
+    }
+    sr.onchange = function () { setRailStyle(this.value); };
+    var rng = document.getElementById('rngRail');
+    rng.value = Math.round((CONFIG.railOpacity || 0.85) * 100);
+    rng.oninput = function () { railOpacity(this.value / 100); };
+  }
+
+  /* ---------------- 7. 交互：用户动过地图就不再自动跟随 ---------------- */
+  function markTouched() { userTouched = true; }
+  ['mousedown', 'touchstart', 'wheel', 'dragstart'].forEach(function (ev) {
+    map.getContainer().addEventListener(ev, markTouched, { passive: true });
+  });
+
+  map.on('zoomend moveend', function () { scheduleStatus(); });
+
+  /* ---------------- 8. 对外 API ---------------- */
+  var api = {
+    update: function (payload) {
+      if (!payload || typeof payload !== 'object') return;
+      if (typeof payload.night === 'boolean' && payload.night !== night) api.setNight(payload.night);
+      if (typeof payload.follow === 'boolean') follow = payload.follow;
+      if (typeof payload.showTrail === 'boolean') CONFIG.showTrail = payload.showTrail;
+      var trains = payload.trains || [];
+      var newest = null, newestTs = -1;
+      for (var i = 0; i < trains.length; i++) {
+        var d = trains[i];
+        if (d == null || d.lat == null || d.lon == null) continue;
+        upsertTrain(d);
+        var ts = Number(d.ts) || 0;
+        if (ts > newestTs) { newestTs = ts; newest = d; }
+      }
+      if (payload.focus != null && state[String(payload.focus)]) {
+        var st = state[String(payload.focus)];
+        lastFocusId = String(payload.focus);
+        userTouched = false;
+        lastAuto = null;
+        map.setView(st.marker.getLatLng(), Math.max(map.getZoom(), 10), { animate: false });
+      } else if (newest && follow) {
+        if (lastFocusId == null) lastFocusId = String(newest.id || newest.train);
+        if (String(newest.id || newest.train) === String(lastFocusId)) {
+          var s2 = state[String(lastFocusId)];
+          if (s2) autoCenter(lastFocusId, s2.marker.getLatLng());
+        }
+      }
+      scheduleStatus();
+    },
+    // Android 简单入口：单车推送
+    pushTrain: function (lat, lng, name, id, opts) {
+      var d = { id: id || name, train: name, lat: Number(lat), lon: Number(lng),
+                ts: Date.now() / 1000 };
+      if (opts && typeof opts === 'object') for (var k in opts) d[k] = opts[k];
+      api.update({ trains: [d], follow: true });
+    },
+    focus: function (id) {
+      var st = state[String(id)];
+      if (!st) return;
+      lastFocusId = String(id);
+      userTouched = false;
+      lastAuto = null;
+      map.setView(st.marker.getLatLng(), Math.max(map.getZoom(), 10), { animate: true });
+    },
+    clear: function () {
+      for (var k in state) {
+        if (!state.hasOwnProperty(k)) continue;
+        if (state[k].marker) map.removeLayer(state[k].marker);
+        if (state[k].line) map.removeLayer(state[k].line);
+      }
+      state = {};
+      lastFocusId = null;
+      lastAuto = null;
+      map.closePopup();
+      scheduleStatus();
+    },
+    setFollow: function (on) {
+      follow = !!on;
+      if (follow) { userTouched = false; lastAuto = null; }
+    },
+    follow: function () { return follow; },
+    locked: function () { return !!userTouched; },
+    unlock: function () { userTouched = false; },
+    center: function () { var c = map.getCenter(); return [c.lng, c.lat]; },
+    setNight: function (on) {
+      night = !!on;
+      document.body.classList.toggle('light', !night);
+      document.body.classList.toggle('dark', night);
+      applyNightFallback();
+      refreshStatus();
+    },
+    isNight: function () { return night; },
+    // 默认中心：addr 为空则用 CONFIG.center（Leaflet 离线不依赖地名解析）
+    centerTo: function (addr) {
+      var c = CONFIG.center || {};
+      if (c.lat && c.lng) {
+        map.setView([c.lat, c.lng], Math.max(CONFIG.zoom || 11, 8), { animate: true });
+        toast('已回到默认中心' + (addr ? '：' + escapeHtml(addr) : ''), 2600);
+      } else {
+        toast('<b>未配置默认中心</b>：请在设置里填写中心经纬度或选择预设城市。', 5200);
+      }
+    },
+    resize: function () { map.invalidateSize(false); },
+    setBase: setBase,
+    base: function () { return baseId; },
+    setRailway: function (on) { setRailStyle(on ? 'orm_standard' : 'off'); },
+    setRailStyle: setRailStyle,
+    railOpacity: railOpacity,
+    rail: function () { return railId; },
+    coordMode: coordMode,
+    status: function () {
+      var c = map.getCenter();
+      return {
+        base: baseId, rail: railId, coord: coordMode(), night: night, follow: follow,
+        locked: userTouched, zoom: map.getZoom(),
+        center: [c.lng, c.lat], tilesTotal: tilesTotal, tilesFailed: tilesFailed
+      };
+    },
+    layers: function () {
+      var out = [];
+      for (var k in BASE_SOURCES) if (BASE_SOURCES.hasOwnProperty(k)) {
+        out.push({ id: k, name: BASE_SOURCES[k].name, coord: BASE_SOURCES[k].coord, kind: 'base' });
+      }
+      for (var r in RAIL_SOURCES) if (RAIL_SOURCES.hasOwnProperty(r)) {
+        out.push({ id: r, name: RAIL_SOURCES[r].name, coord: 'wgs', kind: 'rail' });
+      }
+      return out;
+    },
+    applyConfig: function (cfg) { applyConfig(cfg); },
+    ready: true
+  };
+  window.LBJ = api;
+  // 兼容旧调用（安卓 M0~M3 用过的名字）
+  window.updateTrain = function (lat, lng, name, follow) {
+    if (typeof follow === 'boolean') api.setFollow(follow);
+    api.pushTrain(lat, lng, name, name, null);
+  };
+
+  function setBase(id) {
+    if (!BASE_SOURCES[id] || id === baseId) return;
+    if (BASE_SOURCES[id].url.indexOf('{key}') >= 0 && !CONFIG.tdtKey) {
+      toast('<b>该底图需要天地图 Key</b>：到 tianditu.gov.cn 申请「浏览器端」tk，' +
+            '填到 设置 → 地图 → 天地图 Key。', 7000);
+      var sb0 = document.getElementById('selBase'); if (sb0) sb0.value = baseId;
+      return;
+    }
+    baseId = id;
+    tilesTotal = 0; tilesFailed = 0;
+    buildBase();
+    // GCJ 底图与 WGS 铁路图层不混叠：自动关掉铁路图层
+    if (BASE_SOURCES[id].coord === 'gcj' && railId !== 'off') {
+      railId = 'off';
+      if (railLayer) { map.removeLayer(railLayer); railLayer = null; }
+      var sr = document.getElementById('selRail'); if (sr) sr.value = 'off';
+      toast('<b>铁路图层已关闭</b>：高德底图为 GCJ-02，与 OpenRailwayMap（WGS-84）叠加会错位。<br>' +
+        '需要看铁路图源请换成 OSM / Carto / Esri 底图。', 7000);
+    } else if (BASE_SOURCES[id].coord === 'wgs' && railId === 'off' && !railUserOff && CONFIG.rail && CONFIG.rail !== 'off') {
+      railId = CONFIG.rail;
+      buildRail();
+      var sr2 = document.getElementById('selRail'); if (sr2) sr2.value = railId;
+    }
+    rebuildMarkers();
+    refreshStatus();
+  }
+
+  function setRailStyle(id) {
+    if (!RAIL_SOURCES[id]) return;
+    if (BASE_SOURCES[baseId].coord === 'gcj' && id !== 'off') {
+      toast('<b>无法叠加</b>：当前底图是高德（GCJ-02），铁路图源是 WGS-84。请先把底图换成 OSM 系列。', 6500);
+      var sr = document.getElementById('selRail'); if (sr) sr.value = railId;
+      return;
+    }
+    railId = id;
+    railUserOff = (id === 'off');
+    buildRail();
+    refreshStatus();
+  }
+
+  function railOpacity(v) {
+    CONFIG.railOpacity = Number(v);
+    if (railLayer) railLayer.setOpacity(Math.min(1, Math.max(0.2, CONFIG.railOpacity)));
+    refreshStatus();
+  }
+
+  // 切换坐标系后把已有标记/轨迹按新基准重画
+  function rebuildMarkers() {
+    for (var k in state) {
+      if (!state.hasOwnProperty(k)) continue;
+      var st = state[k], d = st.data;
+      var pos = toMap(Number(d.lat), Number(d.lon));
+      st.marker.setLatLng(pos);
+      if (st.line && st.trail.length >= 2) {
+        st.line.setLatLngs(st.trail.map(function (p) { return toMap(p[0], p[1]); }));
+      }
+    }
+  }
+
+  function applyConfig(cfg) {
+    CONFIG = mergeConfig(CONFIG, cfg || {});
+    // 先定底图，再按底图基准决定铁路图层能不能开——避免「先开 ORM 再切高德」
+    // 时弹两次「无法叠加」的提示。
+    if (cfg && cfg.base && BASE_SOURCES[cfg.base]) { setBase(cfg.base); }
+    if (cfg && cfg.rail && RAIL_SOURCES[cfg.rail]) {
+      var wantGcj = BASE_SOURCES[baseId].coord === 'gcj';
+      setRailStyle((wantGcj && cfg.rail !== 'off') ? 'off' : cfg.rail);
+    }
+    if (cfg && typeof cfg.railOpacity === 'number') railOpacity(cfg.railOpacity);
+    if (cfg && typeof cfg.night === 'boolean') api.setNight(cfg.night);
+    if (cfg && typeof cfg.follow === 'boolean') api.setFollow(cfg.follow);
+    if (cfg && cfg.center && cfg.center.lat && cfg.center.lng && map && !centerApplied) {
+      centerApplied = true;
+      map.setView([cfg.center.lat, cfg.center.lng], CONFIG.zoom || map.getZoom(), { animate: false });
+    }
+    refreshStatus();
+  }
+
+  // 显式把视图挪到某个坐标（宿主「中心」按钮 / 配置改了默认中心时用）
+  api.setCenter = function (lat, lng, zoom) {
+    var la = Number(lat), ln = Number(lng);
+    if (!isFinite(la) || !isFinite(ln)) return false;
+    centerApplied = true;
+    userTouched = false;
+    lastAuto = null;
+    map.setView([la, ln], Number(zoom) || CONFIG.zoom || map.getZoom(), { animate: true });
+    return true;
+  };
+
+  /* ---------------- 9. 启动 ---------------- */
+  document.getElementById('panelHd').onclick = function () {
+    var p = document.getElementById('panel');
+    p.classList.toggle('open');
+    document.getElementById('panelArrow').textContent = p.classList.contains('open') ? '▴' : '▾';
+  };
+  api.setNight(night);
+  buildBase();
+  buildSelects();
+  buildRail();
+  refreshStatus();
+  setTimeout(function () { map.invalidateSize(false); }, 60);
+  // 之后由宿主调用 resize()（面板尺寸变化时）
+})();
+</script>
+</body>
+</html>

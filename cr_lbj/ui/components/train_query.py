@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from cr_lbj.runtime import *  # noqa: F401,F403
 
+from cr_lbj.data import loco_roster   # v3.0：机车配属号段表（型号 + 号 → 局段）
+from cr_lbj.ui.ui_threads import keep_thread as _keepWorker
+
 class TrainQueryWorker(QThread):
     """异步查询 12306 车次时刻表。"""
     resultReady = Signal(dict)
@@ -337,6 +340,7 @@ class TrainQueryPanel(QWidget):
 
         dateStr = datetime.now().strftime('%Y%m%d')
         self._worker = TrainQueryWorker(train, dateStr)
+        _keepWorker(self._worker)      # 防止旧线程在运行中被回收
         self._worker.resultReady.connect(self._onQueryResult)
         self._worker.queryFailed.connect(self._onQueryFailed)
         self._worker.start()
@@ -369,7 +373,13 @@ class TrainQueryPanel(QWidget):
 
 
 class LocoInfoPanel(QWidget):
-    """机车信息卡片 (v2.1)：型号、参数摘要与详情入口。"""
+    """机车信息卡片（v3.0）：车型 + **配属局段** + 参数摘要，入口进配属查询。
+
+    数据来自两处，各有分工：
+        cr_lbj/data/loco_info.py     报文「机车代号」→ 车型名/类型/轴式/简介
+        cr_lbj/data/loco_roster.py   型号 + 机车号 → 配属局段（号段表命中）
+    后者是 v3.0 新增的「车次/机车配属查询」的数据基础，同一套 CSV 也给安卓端用。
+    """
 
     detailRequested = Signal(dict)
 
@@ -377,7 +387,7 @@ class LocoInfoPanel(QWidget):
         super().__init__()
         self._last: dict = {}
 
-        # 横向排：左侧机型/参数/简介，右侧「机车详情」按钮
+        # 横向排：左侧机型/配属/参数，右侧「配属查询」按钮
         outer = QHBoxLayout(self)
         outer.setContentsMargins(spx(10), spx(8), spx(10), spx(6))
         outer.setSpacing(spx(10))
@@ -393,6 +403,13 @@ class LocoInfoPanel(QWidget):
         self.nameLabel.setWordWrap(True)
         self.nameLabel.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         col.addWidget(self.nameLabel)
+
+        # 配属单位（v3.0 新增）：命中号段时绿色，只认出型号时黄色
+        self.depotLabel = QLabel('')
+        self.depotLabel.setStyleSheet(f'color: {CLR("dim")}; font-size: {spx(10)}px;')
+        self.depotLabel.setWordWrap(True)
+        self.depotLabel.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        col.addWidget(self.depotLabel)
 
         self.detailLabel = QLabel('')
         self.detailLabel.setStyleSheet(f'color: {CLR("dim")}; font-size: {spx(10)}px;')
@@ -410,7 +427,8 @@ class LocoInfoPanel(QWidget):
         col.addStretch(1)
         outer.addLayout(col, 1)
 
-        self.detailBtn = QPushButton('机车详情')
+        self.detailBtn = QPushButton('配属查询')
+        self.detailBtn.setToolTip('打开「机车配属查询」，可看号段、制造厂与完整参数')
         self.detailBtn.setMinimumWidth(spx(96))
         self.detailBtn.setEnabled(False)
         self.detailBtn.clicked.connect(
@@ -418,7 +436,7 @@ class LocoInfoPanel(QWidget):
         outer.addWidget(self.detailBtn, 0, Qt.AlignVCenter)
 
     def updateLoco(self, d: dict):
-        """根据解码记录更新机车卡片。"""
+        """根据解码记录更新机车卡片（车型 + 配属 + 参数摘要）。"""
         self._last = dict(d or {})
         loco_number = d.get('loco', '') if d else ''
         loco_code = d.get('locoCode', d.get('loco_code', '')) if d else ''
@@ -426,26 +444,87 @@ class LocoInfoPanel(QWidget):
             self.nameLabel.setText('等待详细报文...')
             self.nameLabel.setStyleSheet(
                 f'color: {CLR("faint")}; font-size: {spx(12)}px; font-weight: bold;')
+            self.depotLabel.setText('')
             self.detailLabel.setText('')
-            self.briefLabel.setText('收到扩展长报文（1234002 / 1234001）后自动填充机型与牵引参数')
+            self.briefLabel.setText(
+                '收到扩展长报文（1234002 / 1234001）后自动填充机型、配属与牵引参数')
             self.detailBtn.setEnabled(False)
             return
 
         info = lookup_loco(loco_code=loco_code, loco_number=loco_number)
+        roster = {}
+        try:
+            roster = loco_roster.lookup_loco(loco_number, loco_code) or {}
+        except Exception:
+            roster = {}
+
+        # ---- 标题：机车号 + 车型名（两个数据源互相补位）----
+        model_name = (info or {}).get('name', '') or roster.get('name', '') \
+            or roster.get('model', '')
+        head = loco_number or model_name or '未知机车'
+        if model_name and model_name not in head:
+            head = '%s  %s' % (head, model_name)
+        self.nameLabel.setText(head)
+        hit = bool(roster.get('exact'))
+        self.nameLabel.setStyleSheet(
+            f'color: {CLR("ok") if (info or hit) else CLR("warn")};'
+            f' font-size: {spx(12)}px; font-weight: bold;')
+
+        # ---- 配属（v3.0）：命中号段 → 局段 + 区间；否则说明原因 ----
+        if hit:
+            depot = str(roster.get('depot') or '').strip() or '（原表未标注配属）'
+            note = ('号段 %s' % roster.get('range')) if roster.get('range') else ''
+            maker = str(roster.get('maker') or '').strip()
+            bits = [depot]
+            if note:
+                bits.append(note)
+            if maker:
+                bits.append(maker)
+            self.depotLabel.setText('配属：' + ' · '.join(bits))
+            self.depotLabel.setStyleSheet(
+                f'color: {CLR("ok")}; font-size: {spx(10)}px; font-weight: bold;')
+        elif roster.get('ok'):
+            self.depotLabel.setText('配属：未知（%s）'
+                                    % (roster.get('reason') or '号段未收录'))
+            self.depotLabel.setStyleSheet(
+                f'color: {CLR("warn")}; font-size: {spx(10)}px;')
+        else:
+            self.depotLabel.setText('配属：%s'
+                                    % (roster.get('reason') or '配属表未收录该型号'))
+            self.depotLabel.setStyleSheet(
+                f'color: {CLR("faint")}; font-size: {spx(10)}px;')
+
+        # ---- 参数摘要：编码器给的简介优先，其次号段表的 specs ----
+        specs = {}
+        try:
+            specs = loco_roster.specs_for(roster.get('model') or model_name) or {}
+        except Exception:
+            specs = {}
         if info:
-            self.nameLabel.setText(info.get('name', '未知车型'))
-            self.nameLabel.setStyleSheet(
-                f'color: {CLR("ok")}; font-size: {spx(12)}px; font-weight: bold;')
             self.detailLabel.setText(
                 f"{info.get('type', '')} | {info.get('maker', '')} | {info.get('axle', '')}")
-            self.briefLabel.setText(info.get('brief', ''))
+        elif specs:
+            self.detailLabel.setText(' | '.join(x for x in (
+                str(specs.get('type') or ''), str(specs.get('maker') or ''),
+                str(specs.get('axle') or '')) if x))
         else:
-            self.nameLabel.setText(loco_number or '未知机车')
-            self.nameLabel.setStyleSheet(
-                f'color: {CLR("warn")}; font-size: {spx(12)}px; font-weight: bold;')
             self.detailLabel.setText(f'代号: {loco_code}' if loco_code else '')
-            self.briefLabel.setText('暂无该车型资料')
+
+        brief = (info or {}).get('brief', '') or str(specs.get('brief') or '')
+        pows = str(specs.get('power') or '').strip()
+        spds = str(specs.get('speed') or '').strip()
+        head_bits = [x for x in (pows, spds) if x]
+        if head_bits and brief:
+            brief = ' · '.join(head_bits) + '\n' + brief
+        elif head_bits:
+            brief = ' · '.join(head_bits)
+        self.briefLabel.setText(brief or '暂无该车型资料')
         self.detailBtn.setEnabled(True)
+
+    def refreshRoster(self):
+        """号段表更新后重算一次配属（主窗口在数据更新完成时调用）。"""
+        if self._last:
+            self.updateLoco(self._last)
 
 
 # ===========================================================================

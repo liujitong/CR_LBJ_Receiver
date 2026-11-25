@@ -77,6 +77,13 @@
   "mapShowTrail": true,
   "mapNight": true,
   "mapCenterAddress": "南昌站",
-  "mapCenterLng": 0.0,
-  "mapCenterLat": 0.0
+  "mapCenterLng": 115.86,
+  "mapCenterLat": 28.68,
+  "mapBase": "osm",
+  "mapRail": "orm_standard",
+  "mapRailOpacity": 0.85,
+  "tdtKey": "",
+  "trainQuerySource": "auto",
+  "dataAutoUpdate": true,
+  "dataUpdateIntervalDays": 7
 }

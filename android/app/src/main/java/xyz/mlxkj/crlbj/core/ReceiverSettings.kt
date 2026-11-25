@@ -38,12 +38,31 @@ data class ReceiverSettings(
     val etaMaxMin: Double = 360.0,         // ETA 最大估算分钟数 (6h)
     val userKm: String = "",               // 本站公里标 (km)，空=未设置
     val routeKmText: String = "",          // 线路公里标: "线路=km,线路=km"
-    // 地图（高德 Web/SDK Key 由用户提供，缺省降级文本卡）
+    // 地图（v3.0 起用 shared/web/railmap.html：OpenRailwayMap 铁路图层 + 可选底图）
+    // amapKey/amapSecurity 自 v3.0 起**已废弃**（不再用高德 JS API），
+    // 仅为「老配置不丢字段」保留读取与写回，界面不再展示。
     val amapKey: String = "",
     val amapSecurity: String = "",
-    val mapZoom: Int = 12,
+    val mapZoom: Int = 11,
     val mapFollow: Boolean = true,          // 自动跟随最新列车
     val mapNight: Boolean = true,           // 深色底图
+    /** 底图 id，与 railmap.html 的 BASE_SOURCES 对齐（osm/carto_light/carto_dark/…） */
+    val mapBase: String = "osm",
+    /** 铁路图层 id：off / orm_standard / orm_maxspeed / orm_signals / orm_electrified / orm_gauge */
+    val mapRail: String = "orm_standard",
+    /** 铁路图层不透明度 0.2~1.0 */
+    val mapRailOpacity: Double = 0.85,
+    /** 天地图 tk（「浏览器端」类型）；空 = 天地图底图只提示不加载 */
+    val mapTdtKey: String = "",
+    /** 默认中心：预设城市名（仅显示用，来自 shared/data/places.csv） */
+    val mapCenterName: String = "南昌",
+    val mapCenterLat: Double = 28.68,
+    val mapCenterLng: Double = 115.86,
+    // 查询
+    /** 车次数据源：auto / railgo / 12306 */
+    val trainQuerySource: String = "auto",
+    /** 第三方数据（机车配属号段表）自动更新 */
+    val dataAutoUpdate: Boolean = true,
 ) {
     val isUsb: Boolean get() = sourceType == "usb"
 
@@ -108,6 +127,19 @@ data class ReceiverSettings(
                 mapZoom = sp.getInt("mapZoom", d.mapZoom),
                 mapFollow = sp.getBoolean("mapFollow", d.mapFollow),
                 mapNight = sp.getBoolean("mapNight", d.mapNight),
+                mapBase = sp.getString("mapBase", d.mapBase) ?: d.mapBase,
+                mapRail = sp.getString("mapRail", d.mapRail) ?: d.mapRail,
+                mapRailOpacity = Double.fromBits(
+                    sp.getLong("mapRailOpacity", d.mapRailOpacity.toRawBits())),
+                mapTdtKey = sp.getString("mapTdtKey", d.mapTdtKey) ?: d.mapTdtKey,
+                mapCenterName = sp.getString("mapCenterName", d.mapCenterName) ?: d.mapCenterName,
+                mapCenterLat = Double.fromBits(
+                    sp.getLong("mapCenterLat", d.mapCenterLat.toRawBits())),
+                mapCenterLng = Double.fromBits(
+                    sp.getLong("mapCenterLng", d.mapCenterLng.toRawBits())),
+                trainQuerySource = sp.getString("trainQuerySource", d.trainQuerySource)
+                    ?: d.trainQuerySource,
+                dataAutoUpdate = sp.getBoolean("dataAutoUpdate", d.dataAutoUpdate),
             )
         }
 
@@ -140,6 +172,15 @@ data class ReceiverSettings(
             e.putInt("mapZoom", s.mapZoom)
             e.putBoolean("mapFollow", s.mapFollow)
             e.putBoolean("mapNight", s.mapNight)
+            e.putString("mapBase", s.mapBase)
+            e.putString("mapRail", s.mapRail)
+            e.putLong("mapRailOpacity", s.mapRailOpacity.toRawBits())
+            e.putString("mapTdtKey", s.mapTdtKey)
+            e.putString("mapCenterName", s.mapCenterName)
+            e.putLong("mapCenterLat", s.mapCenterLat.toRawBits())
+            e.putLong("mapCenterLng", s.mapCenterLng.toRawBits())
+            e.putString("trainQuerySource", s.trainQuerySource)
+            e.putBoolean("dataAutoUpdate", s.dataAutoUpdate)
             e.apply()
         }
     }

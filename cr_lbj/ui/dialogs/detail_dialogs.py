@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from cr_lbj.runtime import *  # noqa: F401,F403
 
+from cr_lbj.ui.ui_threads import keep_thread as _trackQuery
+
+
 class LocoDetailDialog(QDialog):
     """机车详情对话框：展示机车技术参数和资料来源。
 
@@ -53,6 +56,20 @@ class LocoDetailDialog(QDialog):
             ('功率', self._loco_info.get('power', '—')),
             ('最高速度', self._loco_info.get('speed', '—')),
         ]
+        # v3.0：补「配属单位 / 号段」（来自号段表，命中才显示局段）
+        try:
+            from cr_lbj.data import loco_roster
+            _r = loco_roster.lookup_loco(loco_number) if loco_number else {}
+        except Exception:
+            _r = {}
+        if _r:
+            if _r.get('exact'):
+                info_items.append(('配属单位', _r.get('depot') or '（原表未标注）'))
+            elif _r.get('ok'):
+                info_items.append(('配属单位', '未知（%s）' % (_r.get('reason') or '号段未收录')))
+            info_items.append(('号段', _r.get('range') or '—'))
+            if _r.get('remark'):
+                info_items.append(('备注', _r.get('remark')))
         for i, (k, v) in enumerate(info_items):
             r, c = divmod(i, 2)
             lab = QLabel(f'{k}:')
@@ -226,6 +243,27 @@ class RecordDetailDialog(QDialog):
         self._locoInfoData: Optional[dict] = loco_info
         self._locoNumberStr = loco_number or ''
 
+        # v3.0：配属查询（号段表）。命中就显示局段 + 号段区间，否则显示原因。
+        try:
+            from cr_lbj.data import loco_roster
+            roster = loco_roster.lookup_loco(loco_number, loco_code) or {}
+            specs = loco_roster.specs_for(roster.get('model')
+                                          or (loco_info or {}).get('name')
+                                          or '') or {}
+        except Exception:
+            roster, specs = {}, {}
+        self._rosterData = roster
+        if roster.get('exact'):
+            depot_text = str(roster.get('depot') or '（原表未标注配属）')
+        elif roster.get('ok'):
+            depot_text = '未知（%s）' % (roster.get('reason') or '号段未收录')
+        else:
+            depot_text = '—（%s）' % (roster.get('reason') or '配属表未收录')
+        range_text = str(roster.get('range') or '—')
+        param_text = ' · '.join(x for x in (
+            str(specs.get('power') or ''), str(specs.get('axle') or ''),
+            str(specs.get('speed') or '')) if x) or '—'
+
         items = [
             ('时间', record.get('timeStr', record.get('time', ''))),
             ('车次', record.get('train', '----')),
@@ -237,6 +275,9 @@ class RecordDetailDialog(QDialog):
             ('线路', record.get('route', '----')),
             ('机车号', loco_number or '----'),
             ('机车代号', loco_code or '---'),
+            ('配属', depot_text),
+            ('号段', range_text),
+            ('车型参数', param_text),
             ('类别', record.get('category', '未知')),
             ('报文类型', msg_type),
             ('经度', f"{record.get('longitude'):.6f}"
@@ -375,7 +416,11 @@ class RecordDetailDialog(QDialog):
         self._addPage('纠错码字', page)
 
     def _openMap(self, record: dict):
-        """用高德 URI API 在浏览器中定位该列车。"""
+        """用高德 URI API 在浏览器中定位该列车。
+
+        报文经纬度是 **WGS-84**，所以 `coordinate` 必须写 `wgs84` 交给高德自己纠偏；
+        以前写的是 `gaode`（GCJ-02），落点会偏几百米。
+        """
         lat = record.get('latitude')
         lon = record.get('longitude')
         if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
@@ -383,7 +428,7 @@ class RecordDetailDialog(QDialog):
         name = f"{record.get('train', '列车')} {record.get('timeStr', '')}".strip()
         enc = QUrl.toPercentEncoding(name).data().decode()
         url = (f'https://uri.amap.com/marker?position={lon:.6f},{lat:.6f}'
-               f'&name={enc}&src=crlbj&coordinate=gaode&callnative=1')
+               f'&name={enc}&src=crlbj&coordinate=wgs84&callnative=1')
         QDesktopServices.openUrl(QUrl(url))
 
     def _startTrainQuery(self, record: dict):
@@ -397,9 +442,20 @@ class RecordDetailDialog(QDialog):
         if len(dateStr) != 8:
             dateStr = datetime.now().strftime('%Y%m%d')
         self._worker = TrainQueryWorker(train, dateStr)
+        _trackQuery(self._worker)
         self._worker.resultReady.connect(self._onTrainQueryResult)
         self._worker.queryFailed.connect(self._onTrainQueryFailed)
         self._worker.start()
+
+    def closeEvent(self, event):
+        """关窗前给查询线程一点收尾时间（真正的防崩靠 _RUNNING_QUERIES 保活）。"""
+        th = getattr(self, '_worker', None)
+        if th is not None and th.isRunning():
+            try:
+                th.wait(1200)
+            except Exception:
+                pass
+        super().closeEvent(event)
 
     def _onTrainQueryResult(self, data: dict):
         self._trainQueryData = data

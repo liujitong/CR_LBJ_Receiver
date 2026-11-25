@@ -426,52 +426,202 @@ class ConfigPanel(QWidget):
 
         page('到达估算').addWidget(etaGroup)
 
-        # ---- 地图 + 车次规则 ----
-        mapGroup = QGroupBox('地图与车次规则')
+        # ---- 地图与车次（v3.0：Leaflet + OpenRailwayMap，免 Key） ----
+        from PySide6.QtWidgets import QSlider           # runtime 未导出 QSlider
+        from cr_lbj.ui import config_ext
+        from cr_lbj.ui import data_update
+
+        mapGroup = QGroupBox('地图底图与铁路图层')
         mapForm = QFormLayout(mapGroup)
         mapForm.setSpacing(4)
         mapForm.setContentsMargins(8, 16, 8, 4)
 
-        self.amapKeyEdit = QLineEdit(getattr(config, 'amapKey', '') or '')
-        self.amapKeyEdit.setPlaceholderText('Web端(JS API) Key')
-        self.amapSecEdit = QLineEdit(getattr(config, 'amapSecurity', '') or '')
-        self.amapSecEdit.setPlaceholderText('安全密钥 securityJsCode')
-        self.amapSecEdit.setEchoMode(QLineEdit.Password)
-        self.mapCenterEdit = QLineEdit(getattr(config, 'mapCenterAddress', '') or '')
-        self.mapCenterEdit.setPlaceholderText('地名即可，如：南昌站 / 向塘站 / 鹰潭东')
-        self.mapCenterEdit.setClearButtonEnabled(True)
+        # 底图（免 Key；天地图需要 tk）
+        self.mapBaseCombo = QComboBox()
+        for _lid, _name in config_ext.BASE_LAYERS:
+            self.mapBaseCombo.addItem(_name, _lid)
+        _curBase = config_ext.normalize_base(
+            config_ext.get(config, 'mapBase', 'osm'))
+        _bi = self.mapBaseCombo.findData(_curBase)
+        self.mapBaseCombo.setCurrentIndex(_bi if _bi >= 0 else 0)
+        self.mapBaseCombo.setToolTip(
+            '底图可选 OSM / Carto / Esri / 天地图 / 高德；'
+            '高德是 GCJ-02，选了会自动关掉 WGS-84 的铁路图层')
+
+        # 铁路图层（OpenRailwayMap）
+        self.mapRailCombo = QComboBox()
+        for _rid, _rname in config_ext.RAIL_LAYERS:
+            self.mapRailCombo.addItem(_rname, _rid)
+        _curRail = config_ext.normalize_rail(
+            config_ext.get(config, 'mapRail', 'orm_standard'))
+        _ri = self.mapRailCombo.findData(_curRail)
+        self.mapRailCombo.setCurrentIndex(_ri if _ri >= 0 else 1)
+
+        self.mapRailOpacity = QSlider(Qt.Horizontal)
+        self.mapRailOpacity.setRange(20, 100)
+        self.mapRailOpacity.setSingleStep(5)
+        self.mapRailOpacity.setPageStep(10)
+        try:
+            _op = int(round(float(config_ext.get(config, 'mapRailOpacity',
+                                                 0.85) or 0.85) * 100))
+        except (TypeError, ValueError):
+            _op = 85
+        self.mapRailOpacity.setValue(max(20, min(100, _op)))
+        self.mapRailOpacityLabel = QLabel('%d%%' % self.mapRailOpacity.value())
+        self.mapRailOpacityLabel.setMinimumWidth(spx(38))
+        self.mapRailOpacity.valueChanged.connect(
+            lambda v: self.mapRailOpacityLabel.setText('%d%%' % v))
+        railRow = QWidget()
+        railLay = QHBoxLayout(railRow)
+        railLay.setContentsMargins(0, 0, 0, 0)
+        railLay.setSpacing(spx(6))
+        railLay.addWidget(self.mapRailOpacity, 1)
+        railLay.addWidget(self.mapRailOpacityLabel, 0)
+
+        self.mapNightCheck = QCheckBox('地图夜间模式（深色底图）')
+        self.mapNightCheck.setChecked(bool(getattr(config, 'mapNight', True)))
+        self.mapFollowCheck = QCheckBox('自动跟随最新列车')
+        self.mapFollowCheck.setChecked(bool(getattr(config, 'mapFollow', True)))
+        self.mapTrailCheck = QCheckBox('显示历史轨迹（最多 240 点）')
+        self.mapTrailCheck.setChecked(bool(getattr(config, 'mapShowTrail', True)))
+
+        # 天地图 tk（只在选天地图底图时才需要）
+        self.tdtKeyEdit = QLineEdit(str(config_ext.get(config, 'tdtKey', '') or ''))
+        self.tdtKeyEdit.setPlaceholderText('天地图「浏览器端」tk，留空则天地图不可用')
+        self.tdtKeyEdit.setClearButtonEnabled(True)
+
+        # 默认中心：预设城市下拉 + 经纬度，双向同步
+        self._places = config_ext.load_places()
+        self.mapCenterCity = QComboBox()
+        self.mapCenterCity.addItem('自定义经纬度', '')
+        for _p in self._places:
+            self.mapCenterCity.addItem(
+                '%s（%.2f, %.2f）' % (_p['name'], _p['lat'], _p['lng']), _p['name'])
+
+        self.mapCenterLngSpin = QDoubleSpinBox()
+        self.mapCenterLngSpin.setRange(-180.0, 180.0)
+        self.mapCenterLngSpin.setDecimals(4)
+        self.mapCenterLngSpin.setSingleStep(0.01)
+        self.mapCenterLngSpin.setSuffix(' °E')
+        self.mapCenterLatSpin = QDoubleSpinBox()
+        self.mapCenterLatSpin.setRange(-90.0, 90.0)
+        self.mapCenterLatSpin.setDecimals(4)
+        self.mapCenterLatSpin.setSingleStep(0.01)
+        self.mapCenterLatSpin.setSuffix(' °N')
+
+        _curLng = float(getattr(config, 'mapCenterLng', 0) or 0)
+        _curLat = float(getattr(config, 'mapCenterLat', 0) or 0)
+        self._centerAddress = str(getattr(config, 'mapCenterAddress', '') or '').strip()
+        if abs(_curLng) < 1e-6 and abs(_curLat) < 1e-6 and self._centerAddress:
+            # 老配置只存了地名：按名字在内置城市表里反查一次
+            for _p in self._places:
+                if _p['name'] == self._centerAddress:
+                    _curLat, _curLng = float(_p['lat']), float(_p['lng'])
+                    break
+        self._updating_center = True
+        try:
+            self.mapCenterLngSpin.setValue(_curLng)
+            self.mapCenterLatSpin.setValue(_curLat)
+            _name = self._centerAddress or config_ext.nearest_place(_curLat, _curLng,
+                                                                    self._places) or ''
+            if not _name:
+                _name = config_ext.nearest_place(_curLat, _curLng, self._places) or ''
+            _ci = self.mapCenterCity.findData(_name)
+            self.mapCenterCity.setCurrentIndex(_ci if _ci > 0 else 0)
+            self._centerAddress = _name if _ci > 0 else ''
+        finally:
+            self._updating_center = False
+        self.mapCenterCity.currentIndexChanged.connect(self._onCenterCityPicked)
+        self.mapCenterLngSpin.valueChanged.connect(self._onCenterSpinChanged)
+        self.mapCenterLatSpin.valueChanged.connect(self._onCenterSpinChanged)
+
+        centerRow = QWidget()
+        centerLay = QHBoxLayout(centerRow)
+        centerLay.setContentsMargins(0, 0, 0, 0)
+        centerLay.setSpacing(spx(6))
+        centerLay.addWidget(self.mapCenterCity, 2)
+        centerLay.addWidget(self.mapCenterLngSpin, 1)
+        centerLay.addWidget(self.mapCenterLatSpin, 1)
+
         self.mapZoomSpin = QSpinBox()
         self.mapZoomSpin.setRange(3, 18)
         self.mapZoomSpin.setValue(int(getattr(config, 'mapZoom', 12) or 12))
-        self.mapFollowCheck = QCheckBox('自动跟随最新列车')
-        self.mapFollowCheck.setChecked(bool(getattr(config, 'mapFollow', True)))
-        self.mapTrailCheck = QCheckBox('显示历史轨迹（最近 12 点）')
-        self.mapTrailCheck.setChecked(bool(getattr(config, 'mapShowTrail', True)))
-        self.mapNightCheck = QCheckBox('地图夜间模式（深色底图）')
-        self.mapNightCheck.setChecked(bool(getattr(config, 'mapNight', True)))
+
+        mapForm.addRow('底图:', self.mapBaseCombo)
+        mapForm.addRow('铁路图层:', self.mapRailCombo)
+        mapForm.addRow('图层不透明度:', railRow)
+        mapForm.addRow('', self.mapNightCheck)
+        mapForm.addRow('', self.mapFollowCheck)
+        mapForm.addRow('', self.mapTrailCheck)
+        mapForm.addRow('天地图 tk:', self.tdtKeyEdit)
+        mapForm.addRow('默认中心:', centerRow)
+        mapForm.addRow('默认缩放:', self.mapZoomSpin)
+
+        mapHint = QLabel(
+            '铁路图源用 <b>OpenRailwayMap</b>（WGS-84 栅格瓦片，免 Key），底图可随时'
+            '在界面左上角的下拉里切换；<b>高德底图是 GCJ-02</b>，与 WGS-84 的铁路图层'
+            '不能混叠，选中时会自动关掉铁路图层。<br>'
+            '底图全部<b>免 Key</b>（OSM / Carto / Esri / OpenTopoMap）；只有天地图需要到 '
+            '<a href="https://console.tianditu.gov.cn/">tianditu.gov.cn</a> 免费申请'
+            '「<b>浏览器端</b>」类型的 tk 填进来。<br>'
+            '「默认中心」选预设城市会自动填经纬度；手改经纬度则城市名清空。'
+            '中心只用于开机定位，不会在地图上打标记。')
+        mapHint.setWordWrap(True)
+        mapHint.setOpenExternalLinks(True)
+        mapHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
+        mapForm.addRow('', mapHint)
+        page('地图与车次').addWidget(mapGroup)
+
+        # ---- 车次与配属查询 ----
+        queryGroup = QGroupBox('车次与配属查询')
+        queryForm = QFormLayout(queryGroup)
+        queryForm.setSpacing(4)
+        queryForm.setContentsMargins(8, 16, 8, 4)
+        self.trainQuerySourceCombo = QComboBox()
+        self.trainQuerySourceCombo.addItem('自动（RailGo → 12306）', 'auto')
+        self.trainQuerySourceCombo.addItem('RailGo（字段全）', 'railgo')
+        self.trainQuerySourceCombo.addItem('12306（官方兜底）', '12306')
+        _qi = self.trainQuerySourceCombo.findData(
+            str(getattr(config, 'trainQuerySource', 'auto') or 'auto'))
+        self.trainQuerySourceCombo.setCurrentIndex(_qi if _qi >= 0 else 0)
+        self.trainQuerySourceCombo.setToolTip(
+            '「工具 → 车次查询」和车次信息卡默认用这个数据源')
+        queryForm.addRow('车次数据源:', self.trainQuerySourceCombo)
+        qHint = QLabel('RailGo 字段全（担当局 / 客运段 / 配属段 / 车型 / 交路），'
+                       '12306 为官方兜底（只有时刻表，没有担当配属）。')
+        qHint.setWordWrap(True)
+        qHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
+        queryForm.addRow('', qHint)
+
         self.trainSchemeCombo = QComboBox()
         self.trainSchemeCombo.addItem('自动兼容（按速度区分新旧）', 'auto')
         self.trainSchemeCombo.addItem('2026 新版（全部按新规则）', '2026')
         self.trainSchemeCombo.addItem('2014 旧版（过渡期兼容）', 'legacy')
         si = self.trainSchemeCombo.findData(getattr(config, 'trainScheme', 'auto'))
         self.trainSchemeCombo.setCurrentIndex(max(0, si))
+        queryForm.addRow('车次规则:', self.trainSchemeCombo)
+        page('地图与车次').addWidget(queryGroup)
 
-        mapForm.addRow('高德 Key:', self.amapKeyEdit)
-        mapForm.addRow('安全密钥:', self.amapSecEdit)
-        mapForm.addRow('默认中心:', self.mapCenterEdit)
-        mapForm.addRow('默认缩放:', self.mapZoomSpin)
-        mapForm.addRow('', self.mapFollowCheck)
-        mapForm.addRow('', self.mapTrailCheck)
-        mapForm.addRow('', self.mapNightCheck)
-        mapForm.addRow('车次规则:', self.trainSchemeCombo)
-        hint = QLabel('Key 申请：console.amap.com → 应用管理 → 新建 Key（服务平台选 Web端 JS API）。'
-                      '「默认中心」填地名即可（如 南昌站），启动时用高德地理编码解析后把视图挪过去，'
-                      '不添加任何标记点；留空则显示全国概览。'
-                      '详细用法见“帮助 → 使用手册 → 高德地图”。')
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
-        mapForm.addRow('', hint)
-        page('地图与车次').addWidget(mapGroup)
+        # ---- 旧版高德 Key（保留读取，不再作为地图可用性门槛） ----
+        legacyGroup = QGroupBox('旧版高德 Key（已废弃）')
+        legacyForm = QFormLayout(legacyGroup)
+        legacyForm.setSpacing(4)
+        legacyForm.setContentsMargins(8, 16, 8, 4)
+        self.amapKeyEdit = QLineEdit(getattr(config, 'amapKey', '') or '')
+        self.amapSecEdit = QLineEdit(getattr(config, 'amapSecurity', '') or '')
+        self.amapSecEdit.setEchoMode(QLineEdit.Password)
+        for _w, _ph in ((self.amapKeyEdit, '（已废弃）'), (self.amapSecEdit, '（已废弃）')):
+            _w.setPlaceholderText(_ph)
+            _w.setEnabled(False)          # 只保留回显，避免误以为还需要它
+        legacyForm.addRow('高德 Key:', self.amapKeyEdit)
+        legacyForm.addRow('安全密钥:', self.amapSecEdit)
+        legacyHint = QLabel(
+            'v3.0 起地图改用 <b>Leaflet + OpenRailwayMap</b> 与免 Key 底图，'
+            '不再需要高德 Key；这两项只为不让老配置丢字段而保留（已禁用）。')
+        legacyHint.setWordWrap(True)
+        legacyHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
+        legacyForm.addRow('', legacyHint)
+        page('地图与车次').addWidget(legacyGroup)
 
         # ---- 解码与界面 ----
         miscGroup = QGroupBox('解码与界面')
@@ -528,6 +678,51 @@ class ConfigPanel(QWidget):
         themeHint.setStyleSheet(f'color: {CLR("dim")}; font-size: {spx(11)}px;')
         themeForm.addRow('', themeHint)
         page('外观主题').addWidget(themeGroup)
+
+        # ---- 第三方数据（自动更新） ----
+        dataGroup = QGroupBox('第三方数据（机车配属号段表）')
+        dataForm = QFormLayout(dataGroup)
+        dataForm.setSpacing(4)
+        dataForm.setContentsMargins(8, 16, 8, 4)
+
+        self.dataAutoUpdateCheck = QCheckBox('自动检查数据更新（默认每周一次）')
+        self.dataAutoUpdateCheck.setChecked(
+            bool(getattr(config, 'dataAutoUpdate', True)))
+        self.dataAutoUpdateCheck.setToolTip(
+            '启动 20 秒后在后台检查上游号段表；失败只记日志，不影响使用')
+
+        self.dataIntervalSpin = QSpinBox()
+        self.dataIntervalSpin.setRange(1, 90)
+        self.dataIntervalSpin.setSuffix(' 天')
+        self.dataIntervalSpin.setValue(int(getattr(config, 'dataUpdateIntervalDays', 7)
+                                           or 7))
+        self.dataIntervalSpin.setToolTip('两次自动检查之间的最小间隔')
+
+        self.dataStatusLabel = QLabel(data_update.status_text_multiline())
+        self.dataStatusLabel.setWordWrap(True)
+        self.dataStatusLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.dataStatusLabel.setStyleSheet(
+            f'color: {CLR("text")}; font-size: 11px;'
+            f' background-color: {CLR("panel")}; border: 1px solid {CLR("border")};'
+            f' border-radius: 4px; padding: 6px;'
+            ' font-family: Consolas, "Microsoft YaHei", monospace;')
+
+        self.dataCheckBtn = K.small_button('立即检查更新', h=28, px=12)
+        self.dataCheckBtn.clicked.connect(self._checkDataUpdate)
+
+        dataForm.addRow('', self.dataAutoUpdateCheck)
+        dataForm.addRow('检查间隔:', self.dataIntervalSpin)
+        dataForm.addRow('当前数据:', self.dataStatusLabel)
+        dataForm.addRow('', self.dataCheckBtn)
+        dataHint = QLabel(
+            '配属号段表来自开源项目 <b>LBJ_Console</b>（GPL-3.0），装在程序里的是一份'
+            '快照；勾选自动检查后会定期从上游拉取增量并<b>严格校验</b>（行数 / 型号数 / '
+            '号段合法性），校验不过不会覆盖现有数据。更新写入用户目录 '
+            '<code>%LOCALAPPDATA%\\CR-LBJ-Receiver\\data</code>，内置快照始终保留可回退。')
+        dataHint.setWordWrap(True)
+        dataHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
+        dataForm.addRow('', dataHint)
+        page('数据更新').addWidget(dataGroup)
 
         # 给所有分类页补一个底部弹簧，内容靠上
         for _w, _lay in self._tabPages.values():
@@ -724,9 +919,75 @@ class ConfigPanel(QWidget):
         self._sources[self._activeSource]['name'] = name
         self._refreshSourceCombo()
 
+    # ---- 地图默认中心（城市 ↔ 经纬度 双向同步） ----
+    def _onCenterCityPicked(self, _index: int):
+        """选预设城市 → 填经纬度；选「自定义」只是清掉城市名，不动坐标。"""
+        if getattr(self, '_updating_center', False):
+            return
+        name = str(self.mapCenterCity.currentData() or '')
+        if not name:
+            self._centerAddress = ''
+            return
+        for p in getattr(self, '_places', []):
+            if p['name'] == name:
+                self._updating_center = True
+                try:
+                    self.mapCenterLngSpin.setValue(float(p['lng']))
+                    self.mapCenterLatSpin.setValue(float(p['lat']))
+                finally:
+                    self._updating_center = False
+                self._centerAddress = name
+                return
+
+    def _onCenterSpinChanged(self, _value: float = 0.0):
+        """手改经纬度 → 城市名清空（自定义中心）。"""
+        if getattr(self, '_updating_center', False):
+            return
+        self._updating_center = True
+        try:
+            self.mapCenterCity.setCurrentIndex(0)
+        finally:
+            self._updating_center = False
+        self._centerAddress = ''
+
+    # ---- 第三方数据更新 ----
+    def _checkDataUpdate(self):
+        """手动检查更新：后台线程跑，结果写回状态框（不阻塞配置窗口）。"""
+        if getattr(self, '_dataThread', None) is not None and \
+                self._dataThread.isRunning():
+            return
+        from cr_lbj.ui.data_update import DataUpdateThread, result_text
+        self.dataCheckBtn.setEnabled(False)
+        self.dataCheckBtn.setText('检查中…')
+        self.dataStatusLabel.setText('正在连接上游……（最长约 20 秒）')
+        # 线程不挂 parent：配置窗口随时会被关掉，运行中的 QThread 被 C++ 析构
+        # 就是崩溃；data_update 内部会保留引用到 finished。
+        self._dataThread = DataUpdateThread(force=True,
+                                            interval_days=self.dataIntervalSpin.value(),
+                                            parent=None)
+        self._dataThread.done.connect(
+            lambda res: self._onDataChecked(res, result_text(res)))
+        self._dataThread.start()
+
+    def _onDataChecked(self, res: dict, text: str):
+        from cr_lbj.ui import data_update
+        self.dataCheckBtn.setEnabled(True)
+        self.dataCheckBtn.setText('立即检查更新')
+        ok = bool((res or {}).get('ok'))
+        tone = CLR('ok') if ok else CLR('warn')
+        # 第一行放本次结果（成功/跳过/失败都看得见），后面接当前数据状态
+        self.dataStatusLabel.setText('%s\n\n%s'
+                                     % (text, data_update.status_text_multiline()))
+        self.dataStatusLabel.setStyleSheet(
+            f'color: {tone}; font-size: 11px;'
+            f' background-color: {CLR("panel")}; border: 1px solid {CLR("border")};'
+            f' border-radius: 4px; padding: 6px;')
+
     def _readConfig(self) -> Optional[CoreConfig]:
         try:
+            from cr_lbj.ui import config_ext
             cfg = CoreConfig()
+            config_ext.ensure(cfg)       # v3.0 字段要有实例属性，toDict 才写得进去
             cfg.host = self.hostEdit.text().strip()
             cfg.port = self.portSpin.value()
             cfg.sampleRate = self.srCombo.currentData() or 960000
@@ -745,23 +1006,36 @@ class ConfigPanel(QWidget):
             cfg.owrxMode = (cfg.sourceType == 'owrx')
             cfg.rtlTcpPath = self.rtlPathEdit.text().strip()
             cfg.rtlDeviceIndex = self.devIndexSpin.value()
-            # ---- 地图与车次规则 ----
+            # ---- 地图与车次（v3.0） ----
+            # 老配置里的高德 Key 原样搬过去（字段保留，界面已标废弃）
             cfg.amapKey = self.amapKeyEdit.text().strip()
             cfg.amapSecurity = self.amapSecEdit.text().strip()
-            newAddr = self.mapCenterEdit.text().strip()
-            if newAddr != str(getattr(self.config, 'mapCenterAddress', '') or ''):
-                # 地名变了，旧的解析缓存作废，下次启动重新地理编码
-                cfg.mapCenterLng = 0.0
-                cfg.mapCenterLat = 0.0
-            else:
-                cfg.mapCenterLng = float(getattr(self.config, 'mapCenterLng', 0.0) or 0.0)
-                cfg.mapCenterLat = float(getattr(self.config, 'mapCenterLat', 0.0) or 0.0)
-            cfg.mapCenterAddress = newAddr
+            cfg.mapBase = str(self.mapBaseCombo.currentData() or 'osm')
+            cfg.mapRail = str(self.mapRailCombo.currentData() or 'orm_standard')
+            cfg.mapRailOpacity = self.mapRailOpacity.value() / 100.0
+            cfg.tdtKey = self.tdtKeyEdit.text().strip()
             cfg.mapZoom = self.mapZoomSpin.value()
             cfg.mapFollow = self.mapFollowCheck.isChecked()
             cfg.mapShowTrail = self.mapTrailCheck.isChecked()
             cfg.mapNight = self.mapNightCheck.isChecked()
+            # 默认中心：城市名只当标签（页面离线，靠经纬度居中）
+            cfg.mapCenterAddress = str(getattr(self, '_centerAddress', '') or '')
+            newLng = float(self.mapCenterLngSpin.value())
+            newLat = float(self.mapCenterLatSpin.value())
+            oldLng = float(getattr(self.config, 'mapCenterLng', 0.0) or 0.0)
+            oldLat = float(getattr(self.config, 'mapCenterLat', 0.0) or 0.0)
+            moved = (abs(newLng - oldLng) > 1e-6 or abs(newLat - oldLat) > 1e-6)
+            cfg.mapCenterLng = newLng
+            cfg.mapCenterLat = newLat
+            if moved:
+                # 坐标换了：地图面板收到 setConfig 会自己挪视图
+                pass
+            cfg.trainQuerySource = str(
+                self.trainQuerySourceCombo.currentData() or 'auto')
             cfg.trainScheme = self.trainSchemeCombo.currentData() or 'auto'
+            # ---- 第三方数据自动更新 ----
+            cfg.dataAutoUpdate = self.dataAutoUpdateCheck.isChecked()
+            cfg.dataUpdateIntervalDays = int(self.dataIntervalSpin.value())
             # ---- 解码与界面 ----
             cfg.dedupeWindow = float(self.dedupeSpin.value())
             cfg.uiScale = float(self.uiScaleCombo.currentData() or 0.0)

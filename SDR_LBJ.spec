@@ -76,7 +76,9 @@ a = Analysis(
         ('lbj_config.json', '.'),   # 初始配置模板
         ('cr_lbj/data/loco_info.py', '.'),  # 机车信息映射表（便于查阅/核对）
         ('README.md', '.'),
-        ('docs', 'docs'),           # 用户手册 / 高德地图手册 / 技术参考 / 架构说明
+        ('docs', 'docs'),           # 用户手册 / 技术参考 / 架构说明 / 安卓文档
+        # v3.0：桌面与安卓共用的地图页与数据（配属号段表 / 车型参数 / 预设中心）
+        ('shared', 'shared'),
     ] + _RTL_DATAS,
     hiddenimports=[
         # PySide6 插件
@@ -122,6 +124,16 @@ a = Analysis(
         'cr_lbj.ui.dialogs.help_dialogs',
         'cr_lbj.ui.windows.main_window',
         'cr_lbj.utils.helpers',
+        # v3.0 新增：地图宿主 / 配置扩展 / 数据更新 / 查询对话框 / 数据层
+        'cr_lbj.ui.map_host',
+        'cr_lbj.ui.config_ext',
+        'cr_lbj.ui.data_update',
+        'cr_lbj.ui.ui_threads',
+        'cr_lbj.ui.dialogs.query_ui',
+        'cr_lbj.data.loco_roster',
+        'cr_lbj.data.train_info',
+        'cr_lbj.data.updater',
+        'cr_lbj.data.paths',
         # pyqtgraph
         'pyqtgraph',
         'pyqtgraph.graphicsItems',

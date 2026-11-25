@@ -96,6 +96,10 @@ interface RecordDao {
 
     @Query("DELETE FROM records")
     suspend fun clear()
+
+    /** 历史页多选删除（uid 主键，一次删若干条） */
+    @Query("DELETE FROM records WHERE uid IN (:uids)")
+    suspend fun deleteByUids(uids: List<String>)
 }
 
 @Database(entities = [RecordEntity::class], version = 1, exportSchema = false)
