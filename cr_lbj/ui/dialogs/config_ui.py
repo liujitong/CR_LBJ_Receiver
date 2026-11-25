@@ -602,26 +602,8 @@ class ConfigPanel(QWidget):
         queryForm.addRow('车次规则:', self.trainSchemeCombo)
         page('地图与车次').addWidget(queryGroup)
 
-        # ---- 旧版高德 Key（保留读取，不再作为地图可用性门槛） ----
-        legacyGroup = QGroupBox('旧版高德 Key（已废弃）')
-        legacyForm = QFormLayout(legacyGroup)
-        legacyForm.setSpacing(4)
-        legacyForm.setContentsMargins(8, 16, 8, 4)
-        self.amapKeyEdit = QLineEdit(getattr(config, 'amapKey', '') or '')
-        self.amapSecEdit = QLineEdit(getattr(config, 'amapSecurity', '') or '')
-        self.amapSecEdit.setEchoMode(QLineEdit.Password)
-        for _w, _ph in ((self.amapKeyEdit, '（已废弃）'), (self.amapSecEdit, '（已废弃）')):
-            _w.setPlaceholderText(_ph)
-            _w.setEnabled(False)          # 只保留回显，避免误以为还需要它
-        legacyForm.addRow('高德 Key:', self.amapKeyEdit)
-        legacyForm.addRow('安全密钥:', self.amapSecEdit)
-        legacyHint = QLabel(
-            'v3.0 起地图改用 <b>Leaflet + OpenRailwayMap</b> 与免 Key 底图，'
-            '不再需要高德 Key；这两项只为不让老配置丢字段而保留（已禁用）。')
-        legacyHint.setWordWrap(True)
-        legacyHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
-        legacyForm.addRow('', legacyHint)
-        page('地图与车次').addWidget(legacyGroup)
+        # 旧版高德 Key 已彻底移除（v3.0 起地图用 Leaflet + OpenRailwayMap，
+        # 底图全部免 Key）；老配置文件里的 amapKey/amapSecurity 加载时被忽略。
 
         # ---- 解码与界面 ----
         miscGroup = QGroupBox('解码与界面')
@@ -1007,9 +989,7 @@ class ConfigPanel(QWidget):
             cfg.rtlTcpPath = self.rtlPathEdit.text().strip()
             cfg.rtlDeviceIndex = self.devIndexSpin.value()
             # ---- 地图与车次（v3.0） ----
-            # 老配置里的高德 Key 原样搬过去（字段保留，界面已标废弃）
-            cfg.amapKey = self.amapKeyEdit.text().strip()
-            cfg.amapSecurity = self.amapSecEdit.text().strip()
+            # 旧版高德 Key 字段已彻底移除，不再回写（老配置里的键加载时被忽略）
             cfg.mapBase = str(self.mapBaseCombo.currentData() or 'osm')
             cfg.mapRail = str(self.mapRailCombo.currentData() or 'orm_standard')
             cfg.mapRailOpacity = self.mapRailOpacity.value() / 100.0

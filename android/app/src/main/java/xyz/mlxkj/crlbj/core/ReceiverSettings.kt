@@ -39,10 +39,8 @@ data class ReceiverSettings(
     val userKm: String = "",               // 本站公里标 (km)，空=未设置
     val routeKmText: String = "",          // 线路公里标: "线路=km,线路=km"
     // 地图（v3.0 起用 shared/web/railmap.html：OpenRailwayMap 铁路图层 + 可选底图）
-    // amapKey/amapSecurity 自 v3.0 起**已废弃**（不再用高德 JS API），
-    // 仅为「老配置不丢字段」保留读取与写回，界面不再展示。
-    val amapKey: String = "",
-    val amapSecurity: String = "",
+    // 旧版高德 JS API 的 amapKey/amapSecurity 已彻底移除（底图全部免 Key），
+    // 老配置文件里的这两个键读取时被忽略。
     val mapZoom: Int = 11,
     val mapFollow: Boolean = true,          // 自动跟随最新列车
     val mapNight: Boolean = true,           // 深色底图
@@ -122,8 +120,6 @@ data class ReceiverSettings(
                 etaMaxMin = Double.fromBits(sp.getLong("etaMaxMin", d.etaMaxMin.toRawBits())),
                 userKm = sp.getString("userKm", d.userKm) ?: d.userKm,
                 routeKmText = sp.getString("routeKmText", d.routeKmText) ?: d.routeKmText,
-                amapKey = sp.getString("amapKey", d.amapKey) ?: d.amapKey,
-                amapSecurity = sp.getString("amapSecurity", d.amapSecurity) ?: d.amapSecurity,
                 mapZoom = sp.getInt("mapZoom", d.mapZoom),
                 mapFollow = sp.getBoolean("mapFollow", d.mapFollow),
                 mapNight = sp.getBoolean("mapNight", d.mapNight),
@@ -167,8 +163,6 @@ data class ReceiverSettings(
             e.putLong("etaMaxMin", s.etaMaxMin.toRawBits())
             e.putString("userKm", s.userKm)
             e.putString("routeKmText", s.routeKmText)
-            e.putString("amapKey", s.amapKey)
-            e.putString("amapSecurity", s.amapSecurity)
             e.putInt("mapZoom", s.mapZoom)
             e.putBoolean("mapFollow", s.mapFollow)
             e.putBoolean("mapNight", s.mapNight)

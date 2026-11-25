@@ -70,8 +70,6 @@
   "dedupeWindow": 2.5,
   "uiScale": 1.0,
   "theme": "dark",
-  "amapKey": "",
-  "amapSecurity": "",
   "mapZoom": 12,
   "mapFollow": true,
   "mapShowTrail": true,

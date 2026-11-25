@@ -232,11 +232,10 @@ class CoreConfig:
     uiScale: float = 0.0                   # 界面缩放倍率，0 表示按屏幕自动
     theme: str = 'dark'                    # 外观主题: dark(夜间) / light(日间) / auto(跟随系统)
 
-    # --- 高德地图 (仅 GUI 使用，不参与 DSP) ---
+    # --- 地图显示 (仅 GUI 使用，不参与 DSP) ---
     # v3.0 起地图改用 shared/web/railmap.html（Leaflet + OpenRailwayMap），
-    # 不再需要高德 Key；amapKey/amapSecurity 仅为兼容老配置保留读取。
-    amapKey: str = ''                      # 【已废弃】Web端(JS API) Key
-    amapSecurity: str = ''                 # 【已废弃】JS API 安全密钥 securityJsCode
+    # 底图全部免 Key；旧版高德 JS API 的 amapKey/amapSecurity 已彻底移除
+    # （老配置文件里残留的这两个键在 fromDict 时因 hasattr 为假而被忽略）。
     mapZoom: int = 12                      # 默认缩放级别
     mapFollow: bool = True                 # 是否自动跟随最新列车
     mapShowTrail: bool = True              # 是否显示最近列车轨迹点
