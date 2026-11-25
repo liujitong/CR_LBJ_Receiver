@@ -87,8 +87,18 @@ a = Analysis(
         'PySide6.QtWebEngineWidgets',
         'PySide6.QtWebEngineCore',
         'PySide6.QtWebEngineQuick',
+        # 外观层（v2.4）：qfluentwidgets 缺了不会崩，但会静默降级成原生外观，
+        # 所以必须显式列出来；qframelesswindow / darkdetect 是它的硬依赖。
+        'qfluentwidgets',
+        'qfluentwidgets.common',
+        'qfluentwidgets.components',
+        'qfluentwidgets.window',
+        'qframelesswindow',
+        'darkdetect',
         # 地图面板
         'map_panel',
+        # 界面外观封装层
+        'ui_kit',
         # pyqtgraph
         'pyqtgraph',
         'pyqtgraph.graphicsItems',

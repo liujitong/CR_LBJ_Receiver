@@ -147,7 +147,10 @@ QPushButton:pressed { background-color: $bg; }
 QPushButton:disabled { color: $faint; border-color: $border; }
 QPushButton:checked { border-color: $accent; color: $accent; }
 
-QTableWidget {
+/* 表格：QTableView 这一条是给 Fluent 的 TableWidget 用的——
+   它继承自 QTableView 而不是 QTableWidget，只写 QTableWidget 匹配不到，
+   结果 Fluent 的透明背景 + Fusion 的白色 Base 会画出大片白底。 */
+QTableWidget, QTableView {
     gridline-color: $border; background-color: $panel;
     alternate-background-color: $panel2;
     selection-background-color: $sel; selection-color: $sel_text;

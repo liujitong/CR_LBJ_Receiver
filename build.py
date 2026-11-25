@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""build.py — CR-LBJ-Receiver 一键构建（v2.3.1）
+"""build.py — CR-LBJ-Receiver 一键构建（v2.4）
 
 用法:
     python build.py                # 清理 -> 打包 -> 清理过程文件 -> 校验
@@ -81,6 +81,22 @@ def cleanDistRunData(keepConfig: bool = True) -> None:
         rm(os.path.join(DIST, name))
 
 
+def checkDeps() -> None:
+    """打包前确认外观层依赖在不在。
+
+    `ui_kit` 对 qfluentwidgets 做了降级：库不在也能跑，但**外观会退回原生 Qt**
+    而且没有任何提示。打包时静默降级最坑——所以在这里显式报出来。
+    """
+    for mod, pip in (('qfluentwidgets', 'PySide6-Fluent-Widgets'),
+                     ('qframelesswindow', 'PySide6-Frameless-Window')):
+        try:
+            __import__(mod)
+            log(f'依赖 {mod}  OK')
+        except Exception as e:
+            log(f'警告: 缺少 {mod}（{e}）→ 打包出的 exe 会退回原生外观')
+            log(f'      安装: pip install {pip}')
+
+
 def runPyInstaller() -> int:
     cmd = [sys.executable, '-m', 'PyInstaller', 'SDR_LBJ.spec',
            '--clean', '--noconfirm']
@@ -120,6 +136,7 @@ def verify() -> bool:
 def summary() -> None:
     log('-' * 46)
     src = ['RTL_LBJ_core.py', 'SDR_ALL_LBJ_GUI.py', 'map_panel.py', 'loco_info.py',
+           'ui_kit.py', 'theme.py',
            'SDR_LBJ.spec', 'lbj_config.json', '国铁.ico', 'LICENSE', 'README.md',
            'build.py']
     log('源码: ' + ', '.join(n for n in src if os.path.exists(os.path.join(ROOT, n))))
@@ -145,6 +162,7 @@ def main() -> int:
         log('清理过程文件...')
         cleanProcessFiles()
 
+    checkDeps()
     rc = runPyInstaller()
     if rc != 0:
         log('打包失败，保留 build/ 以便排查')

@@ -41,6 +41,10 @@ from map_panel import MapPanel, HAS_WEBENGINE
 import theme as TH
 from theme import c as CLR
 
+# Fluent Design 外观层（qfluentwidgets 封装，见 ui_kit.py；缺库自动退回原生控件）
+import ui_kit as K
+from ui_kit import CardBox
+
 
 def themeColors() -> dict:
     """当前主题的关键颜色，供子控件内联样式使用。"""
@@ -59,12 +63,20 @@ from PySide6.QtGui import (QColor, QBrush, QFont, QTextCursor, QIcon, QAction,
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
-    QGridLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QGridLayout, QLabel, QTableWidget, QTableWidgetItem,
     QTextEdit, QTabWidget, QGroupBox, QFormLayout, QStatusBar,
-    QDialog, QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox,
-    QHeaderView, QMessageBox, QInputDialog, QFrame, QFileDialog, QMenu, QMenuBar,
-    QStackedWidget, QScrollArea, QSizePolicy,
+    QDialog, QHeaderView, QMessageBox, QInputDialog, QFrame, QFileDialog,
+    QMenu, QMenuBar, QStackedWidget, QScrollArea, QSizePolicy,
 )
+
+# 控件统一由 ui_kit（Fluent）提供，名字保持原样，界面代码无需改动
+QPushButton = K.PushButton
+QComboBox = K.ComboBox
+QLineEdit = K.LineEdit
+QCheckBox = K.CheckBox
+QSpinBox = K.SpinBox
+QDoubleSpinBox = K.DoubleSpinBox
+QTableWidget = K.TableWidget
 
 # pyqtgraph (使用 PySide6 作为 Qt 后端)
 import pyqtgraph as pg
@@ -123,14 +135,32 @@ def autoUiScale(app) -> float:
         rh = geo.height() / 1040.0
         r = min(rw, rh)
         if r >= 1.25:
+            return 1.25
+        if r >= 1.10:
             return 1.15
         if r >= 0.98:
-            return 1.0
+            return 1.12
         if r >= 0.80:
-            return 0.92
-        return 0.88
+            return 1.00
+        return 0.92
     except Exception:
         return 1.0
+
+
+def resolveUiScale(config) -> float:
+    """定下本次运行的界面缩放倍率。
+
+    配置里 `uiScale = 0` 才是「按屏幕自动」，但老版本把 100% 当默认值写进了配置，
+    等于把自动缩放永久关掉——大屏上就一直显示小字。所以 v2.4 起 1.0 也按自动处理。
+    """
+    app = QApplication.instance()
+    try:
+        raw = float(getattr(config, 'uiScale', 0.0) or 0.0)
+    except Exception:
+        raw = 0.0
+    if raw <= 0.0 or abs(raw - 1.0) < 0.01:
+        return autoUiScale(app)
+    return max(0.8, min(1.6, raw))
 
 
 # 触屏友好补充样式（Surface 等设备的可点区域与滚动条）
@@ -886,91 +916,84 @@ class FieldGrid(QWidget):
 
 
 # ===========================================================================
-# 卡片容器（v2.3 全景布局）
-#   页签去掉后，每块面板都要自己说明“我是什么”，统一用这个小标题栏；
-#   标题右侧还能放一个小控件（例如频谱的「图形 / 终端」切换）。
+# 卡片容器：改用 ui_kit.CardBox（Fluent SimpleCardWidget）
+#   原来这里是一段自绘 QSS 卡片，v2.4 起交给 qfluentwidgets，
+#   只保留同名同签名的封装，界面代码不用改。
 # ===========================================================================
-class CardBox(QWidget):
-    """带小标题的卡片容器。样式走 QSS（#card），主题切换时自动跟着变。"""
-
-    def __init__(self, title: str, content: QWidget, right: QWidget = None,
-                 margins=(5, 3, 5, 3)):
-        super().__init__()
-        self.setObjectName('card')
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.content = content
-
-        v = QVBoxLayout(self)
-        v.setContentsMargins(spx(margins[0]), spx(margins[1]),
-                             spx(margins[2]), spx(margins[3]))
-        v.setSpacing(0)
-
-        head = QHBoxLayout()
-        head.setContentsMargins(spx(6), 0, spx(2), 0)
-        head.setSpacing(spx(6))
-        self.titleLabel = QLabel(title)
-        self.titleLabel.setObjectName('cardTitle')
-        self.titleLabel.setStyleSheet(
-            f'color: {CLR("accent")}; font-size: {spx(11)}px; font-weight: bold;'
-            ' background: transparent; border: none;')
-        head.addWidget(self.titleLabel, 0)
-        head.addStretch(1)
-        if right is not None:
-            head.addWidget(right, 0, Qt.AlignVCenter)
-        v.addLayout(head)
-        v.addWidget(content, 1)
 
 
 # ===========================================================================
-# 输出 1：日志尾部（多行，点击开完整日志窗口）
+# 输出 1：最新一条日志（v2.4 改成单行大字，点击开完整日志窗口）
 # ===========================================================================
-class LogTail(QTextEdit):
-    """底栏左半边的“输出 1”：滚动显示最近几条日志，按级别上色。"""
+class LogTail(QWidget):
+    """底栏左半边「输出 1」：只显示**最新一条**日志。
 
-    MAX_LINES = 120
+    底栏就是个底栏——不做滚动区，一行大字，按级别着色（正常灰白、告警黄、错误红），
+    放不下就省略号截断，完整内容挂在 tooltip 上；点一下开实时日志窗口（Ctrl+L）。
+    """
 
     def __init__(self):
         super().__init__()
-        self.setReadOnly(True)
-        self.setFrameShape(QFrame.NoFrame)
-        self.setLineWrapMode(QTextEdit.WidgetWidth)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip('最近日志（点击查看完整日志 Ctrl+L）')
-        self._lines = []
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setToolTip('最新一条日志（点击查看完整日志 Ctrl+L）')
+        self._text = '等待日志…'
+        self._level = 'info'
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(spx(8), 0, spx(8), 0)
+        lay.setSpacing(spx(8))
+
+        self.dot = QLabel('●')
+        self.label = QLabel(self._text)
+        self.label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        lay.addWidget(self.dot, 0, Qt.AlignVCenter)
+        lay.addWidget(self.label, 1, Qt.AlignVCenter)
+
         self.applyTheme()
 
     # ------------------------------------------------------------------
-    def applyTheme(self):
-        self.setStyleSheet(
-            f'QTextEdit {{ background: transparent; border: none;'
-            f' font-family: Consolas, "Microsoft YaHei", monospace;'
-            f' font-size: {spx(11)}px; color: {CLR("text")}; }}')
+    def _color(self) -> str:
+        return {'ok': CLR('ok'), 'warn': CLR('warn'),
+                'err': CLR('err')}.get(self._level, CLR('text'))
 
-    def _html(self, line: str, level: str) -> str:
-        color = {'ok': CLR('ok'), 'warn': CLR('warn'),
-                 'err': CLR('err')}.get(level, CLR('dim'))
-        safe = (line.replace('&', '&amp;').replace('<', '&lt;')
-                .replace('>', '&gt;'))
-        return f'<span style="color:{color}">{safe}</span>'
+    def applyTheme(self):
+        """主题变化后重新着色（颜色写在样式里，不跟 QSS 走）。"""
+        px = K.barFontPx()
+        self.dot.setStyleSheet(
+            f'background: transparent; color: {self._color()};'
+            f' font-size: {px * 0.62:.1f}px;')
+        self.label.setStyleSheet(
+            f'background: transparent; color: {self._color()};'
+            f' font-size: {px:.1f}px; font-weight: 600;'
+            ' font-family: "Microsoft YaHei UI", "Microsoft YaHei", Consolas;')
+        self._elide()
+
+    def _elide(self):
+        # 单行显示：按当前宽度省略，完整文本放 tooltip
+        w = max(60, self.label.width() - spx(4))
+        fm = self.label.fontMetrics()
+        self.label.setText(fm.elidedText(self._text, Qt.ElideRight, w))
+        self.setToolTip(self._text + '\n点击查看完整日志 (Ctrl+L)')
 
     def appendLine(self, line: str, level: str = 'info'):
-        self._lines.append(self._html(line, level))
-        if len(self._lines) > self.MAX_LINES:
-            self._lines = self._lines[-self.MAX_LINES:]
-        self.setHtml('<br>'.join(self._lines))
-        sb = self.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        self._text = str(line)
+        self._level = level or 'info'
+        self.applyTheme()
 
     def relayout(self):
-        """主题变化后重画（HTML 里写死了颜色）。"""
         self.applyTheme()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
 
     def mousePressEvent(self, event):
         # 点一下打开完整日志窗口（由主窗口连过去）
-        self.window().openLogWindow()
+        try:
+            self.window().openLogWindow()
+        except Exception:
+            pass
         event.accept()
 
 
@@ -1040,74 +1063,85 @@ class TrainInfoPanel(QWidget):
 
 
 # ===========================================================================
-# 底部状态条：接收状态的关键提示（点击进仪表板）
+# 输出 2：接收状态提示（v2.4 改回「一句话」形态）
 # ===========================================================================
 class RxStatusStrip(QWidget):
-    """底栏右侧的接收状态（v2.3 分块版）。
+    """底栏右边「输出 2」：把接收状态归纳成**一句人能读懂的话**。
 
-    四项最该盯的指标各占一个方块：信号 / AFC / 干扰 / 链路。方块等宽，
-    正常时只有灰色描边，一旦某项不对就整块变黄或红——扫一眼就知道哪一项。
-    整条可点，点开运行状态仪表板；这里**不复述日志原文**。
+    正常时显示「接收正常」加一行小字指标；出问题时直接说哪不对，例如
+    「AFC 置信度偏低」「信号偏弱」「近 60 秒干扰 12 次」，黄色是注意、红色是严重。
+    多项同时异常时主提示给最严重的一条，其余用「·」跟在后面。
+    整条可点，点开运行状态仪表板（Ctrl+D）。
     """
 
     clicked = Signal()
 
-    FIELDS = (('rssi', '信号'), ('afc', 'AFC'), ('interf', '干扰'), ('link', '链路'))
-
+    #: 主提示文案：信号弱 / AFC 置信度低 / 干扰多 / 断链
     def __init__(self):
         super().__init__()
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip('接收状态：点击打开运行状态仪表板 (Ctrl+D)')
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-
-        bar = QHBoxLayout(self)
-        bar.setContentsMargins(spx(2), 0, spx(2), 0)
-        bar.setSpacing(spx(5))
-
-        #: key -> (标题, 标题控件, 值控件, 方块)
-        self.chips: Dict[str, tuple] = {}
-        for key, label in self.FIELDS:
-            box = QWidget()
-            box.setObjectName('chip')
-            box.setAttribute(Qt.WA_StyledBackground, True)
-            v = QVBoxLayout(box)
-            v.setContentsMargins(spx(7), spx(2), spx(7), spx(2))
-            v.setSpacing(0)
-            cap = QLabel(label)
-            cap.setStyleSheet(
-                f'color: {CLR("faint")}; font-size: {spx(9)}px;'
-                ' background: transparent; border: none;')
-            val = QLabel('--')
-            val.setStyleSheet(
-                f'color: {CLR("faint")}; font-size: {spx(13)}px; font-weight: bold;'
-                ' background: transparent; border: none;')
-            v.addWidget(cap)
-            v.addWidget(val, 1)
-            bar.addWidget(box, 1)
-            self.chips[key] = (label, cap, val, box)
-
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self._interfCount = 0
         self._interfTs = 0.0
-        self._tones: Dict[str, str] = {}
+        self._issues: List[str] = []
+        self._main = '等待连接'
+        self._tone = 'dim'
+        self._brief = '尚未开始接收'
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(spx(8), 0, spx(8), 0)
+        lay.setSpacing(spx(8))
+        self.dot = QLabel('●')
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        self.mainLabel = QLabel(self._main)
+        self.mainLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.briefLabel = QLabel(self._brief)
+        self.briefLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        col.addWidget(self.mainLabel)
+        col.addWidget(self.briefLabel)
+        lay.addWidget(self.dot, 0, Qt.AlignVCenter)
+        lay.addLayout(col, 1)
+        self.applyTheme()
 
     # ------------------------------------------------------------------
-    def _setChip(self, key: str, text: str, color: str, tone: str = ''):
-        """tone: '' 正常 / 'warn' 注意 / 'err' 严重 —— 决定方块边框颜色。"""
-        label, cap, val, box = self.chips[key]
-        val.setText(text)
-        val.setStyleSheet(
-            f'color: {color}; font-size: {spx(13)}px; font-weight: bold;'
-            ' background: transparent; border: none;')
-        if self._tones.get(key) == tone:
+    def _color(self) -> str:
+        return {'ok': CLR('ok'), 'warn': CLR('warn'),
+                'err': CLR('err')}.get(self._tone, CLR('dim'))
+
+    def applyTheme(self):
+        px = K.barFontPx()
+        self.dot.setStyleSheet(
+            f'background: transparent; color: {self._color()};'
+            f' font-size: {px * 0.62:.1f}px;')
+        self.mainLabel.setStyleSheet(
+            f'background: transparent; color: {self._color()};'
+            f' font-size: {px:.1f}px; font-weight: 600;')
+        self.briefLabel.setStyleSheet(
+            f'background: transparent; color: {CLR("dim")};'
+            f' font-size: {max(9.0, px * 0.66):.1f}px;')
+        self._elide()
+
+    def _elide(self):
+        fm = self.mainLabel.fontMetrics()
+        w = max(60, self.mainLabel.width() - spx(4))
+        self.mainLabel.setText(fm.elidedText(self._main, Qt.ElideRight, w))
+        fm2 = self.briefLabel.fontMetrics()
+        self.briefLabel.setText(
+            fm2.elidedText(self._brief, Qt.ElideRight, max(60, self.briefLabel.width() - spx(4))))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    # ------------------------------------------------------------------
+    def _set(self, main: str, tone: str, brief: str):
+        if (main, tone, brief) == (self._main, self._tone, self._brief):
             return
-        self._tones[key] = tone
-        border = {'warn': CLR('warn'), 'err': CLR('err')}.get(tone, CLR('border'))
-        if tone:
-            box.setStyleSheet(
-                f'QWidget#chip {{ background-color: {CLR("panel2")};'
-                f' border: 1px solid {border}; border-radius: 3px; }}')
-        else:
-            box.setStyleSheet('')          # 回到 QSS 里的默认样式
+        self._main, self._tone, self._brief = main, tone, brief
+        self.applyTheme()
 
     def noteInterference(self):
         """记一次干扰告警（BCH 错包），60 秒窗口内累计。"""
@@ -1116,7 +1150,6 @@ class RxStatusStrip(QWidget):
             self._interfCount = 0
         self._interfTs = now
         self._interfCount += 1
-        self._setChip('interf', f'{self._interfCount} 次', CLR('warn'), 'warn')
 
     def updateStatus(self, st: dict):
         rssi = float(st.get('rssi', -140.0) or -140.0)
@@ -1126,54 +1159,56 @@ class RxStatusStrip(QWidget):
         err = float(st.get('afcErrHz', 0.0) or 0.0)
         conn = bool(st.get('connected', False))
 
-        # 信号
-        if not conn:
-            self._setChip('rssi', '--', CLR('faint'))
-        elif rssi < -80:
-            self._setChip('rssi', f'{rssi:.0f} dB', CLR('err'), 'err')
-        elif rssi < -65:
-            self._setChip('rssi', f'{rssi:.0f} dB', CLR('warn'), 'warn')
-        else:
-            self._setChip('rssi', f'{rssi:.0f} dB',
-                          CLR('ok') if rssi > thresh else CLR('text'))
-
-        # AFC：置信度低 / 频偏大 都要能一眼看出来
-        if conn and (score < 0.10 and gate == 'ON'):
-            self._setChip('afc', f'{score:.2f} 低', CLR('warn'), 'warn')
-        elif conn and abs(err) > 200:
-            self._setChip('afc', f'{err:+.0f} Hz', CLR('warn'), 'warn')
-        elif conn:
-            self._setChip('afc', f'{score:.2f}', CLR('dim'))
-        else:
-            self._setChip('afc', '--', CLR('faint'))
-
-        # 干扰：60 秒滚动窗口，过期自动归零
+        # 干扰窗口过期归零
         if self._interfCount and time.time() - self._interfTs > 60.0:
             self._interfCount = 0
-        if self._interfCount:
-            self._setChip('interf', f'{self._interfCount} 次', CLR('warn'), 'warn')
-        else:
-            self._setChip('interf', '无', CLR('faint'))
 
-        self._setChip('link', '已连' if conn else '断开',
-                      CLR('ok') if conn else CLR('err'),
-                      '' if conn else 'err')
-
-        # 汇总成一句给 tooltip，点开前就知道哪里不对
-        issues = []
+        # ① 先按严重程度收集“问题”，② 没有问题时才是“正常”
+        errs: List[str] = []
+        warns: List[str] = []
         if not conn:
-            issues.append('链路未连接')
-        elif rssi < -80:
-            issues.append('信号极弱')
-        elif rssi < -65:
-            issues.append('信号偏弱')
-        if conn and score < 0.10 and gate == 'ON':
-            issues.append('AFC 置信度低')
-        if conn and abs(err) > 200:
-            issues.append(f'频偏 {err:+.0f} Hz')
-        if self._interfCount:
-            issues.append(f'近 60 秒干扰 {self._interfCount} 次')
-        tip = '● ' + ' · '.join(issues) if issues else '✓ 接收链路正常'
+            errs.append('链路已断开')
+        else:
+            if rssi < -80:
+                errs.append('信号极弱')
+            elif rssi < -65:
+                warns.append('信号偏弱')
+            if score < 0.10 and gate == 'ON':
+                warns.append('AFC 置信度偏低')
+            if abs(err) > 200:
+                warns.append(f'频偏 {err:+.0f} Hz')
+            if self._interfCount >= 5:
+                warns.append(f'干扰偏多 {self._interfCount} 次')
+            elif self._interfCount:
+                warns.append(f'干扰 {self._interfCount} 次')
+
+        if errs:
+            main, tone = errs[0], 'err'
+        elif warns:
+            main, tone = warns[0], 'warn'
+        elif conn:
+            main, tone = '接收正常', 'ok'
+        else:
+            main, tone = '未连接', 'dim'
+
+        rest = (errs + warns)
+        rest = [x for x in rest if x != main]
+
+        # 小字补充：关键指标一行
+        bits = []
+        if conn:
+            bits.append(f'信号 {rssi:.0f} dB')
+            bits.append(f'AFC {score:.2f}')
+            bits.append(f'门控 {gate}')
+        else:
+            bits.append('点「开始」接收')
+        if rest:
+            bits.insert(0, ' · '.join(rest[:2]) + ('…' if len(rest) > 2 else ''))
+        brief = ' · '.join(bits)
+
+        self._issues = errs + warns
+        self._set(main, tone, brief)
+        tip = ('● ' + ' · '.join(self._issues)) if self._issues else '✓ 接收链路正常'
         self.setToolTip(tip + '\n点击打开运行状态仪表板 (Ctrl+D)')
 
     def mousePressEvent(self, event):
@@ -1187,6 +1222,70 @@ class RxStatusStrip(QWidget):
 # ===========================================================================
 # 当前列表面板 (10 分钟内全部解码)
 # ===========================================================================
+# ===========================================================================
+# 「当前解码」与「历史记录」共用的列定义（v2.4）
+#   两个页签的列必须完全一致——值班时来回切，不能换个表就换一套字段。
+#   差异列的处理：预计到达（原来只有当前表有）、报文（原来只有历史表有，BCD 收进详情框）。
+# ===========================================================================
+DECODE_COLUMNS = ['时间', '车次', '方向', '速度', '公里标', '线路',
+                  '机车', '类别', '预计到达', '报文']
+
+#: 可伸缩列（报文最长，吃掉剩余宽度）
+DECODE_STRETCH_COL = DECODE_COLUMNS.index('报文')
+
+
+def decodeRowValues(d: dict) -> List[str]:
+    """一条解码记录 → 与 DECODE_COLUMNS 一一对应的显示文本。"""
+    def txt(key: str, default: str = '') -> str:
+        v = d.get(key, default)
+        return default if v is None or v == '' else str(v)
+
+    return [
+        txt('timeStr', '--:--:--'),
+        txt('train', '----'),
+        txt('direction', '未知'),
+        txt('speed', '---'),
+        txt('position', '---.-'),
+        txt('route', '----'),
+        txt('loco', '----'),
+        txt('category', '未知'),
+        txt('etaTime', '--:--:--'),
+        '详细' if d.get('isDetailed') else '短报文',
+    ]
+
+
+def styleDecodeItem(item: 'QTableWidgetItem', col: int, text: str,
+                    invalid: bool = False, age: float = 0.0) -> None:
+    """统一的单元格着色：无车次标红、车次加粗、方向配色、过期变暗。"""
+    if invalid:
+        item.setForeground(QColor(CLR('err')))
+        return
+    if col == 1:                       # 车次加粗
+        f = item.font()
+        f.setBold(True)
+        item.setFont(f)
+    elif col == 2:                     # 方向配色（红涨绿跌之外的另一套：下行绿/上行蓝）
+        if text == '下行':
+            item.setForeground(QColor(CLR('ok')))
+        elif text == '上行':
+            item.setForeground(QColor(CLR('accent2')))
+    if age > 180:
+        item.setForeground(QColor(CLR('faint')))
+
+
+def initDecodeTable(table: 'QTableWidget') -> None:
+    """把一张表配成标准的解码列表（列名、只读、整行选、列宽策略）。"""
+    table.setColumnCount(len(DECODE_COLUMNS))
+    table.setHorizontalHeaderLabels(DECODE_COLUMNS)
+    table.setAlternatingRowColors(True)
+    table.setEditTriggers(QTableWidget.NoEditTriggers)
+    table.setSelectionBehavior(QTableWidget.SelectRows)
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(QHeaderView.ResizeToContents)
+    header.setSectionResizeMode(DECODE_STRETCH_COL, QHeaderView.Stretch)
+    table.verticalHeader().setVisible(False)
+
+
 class CurrentPanel(QWidget):
     """当前 10 分钟内的全部解码记录。"""
 
@@ -1198,14 +1297,8 @@ class CurrentPanel(QWidget):
         self.records = []  # [(timestamp, dict), ...]
         self.lock = False
 
-        self.table = QTableWidget(0, 9)
-        self.table.setHorizontalHeaderLabels(
-            ['时间', '车次', '方向', '速度', '公里标', '线路', '机车', '类别', '预计到达'])
-        self.table.setAlternatingRowColors(True)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table = QTableWidget(0, len(DECODE_COLUMNS))
+        initDecodeTable(self.table)
         layout.addWidget(self.table)
         self.table.doubleClicked.connect(self._onDoubleClicked)
 
@@ -1237,32 +1330,13 @@ class CurrentPanel(QWidget):
         for ts, d in reversed(self.records):
             row = self.table.rowCount()
             self.table.insertRow(row)
-            timeStr = d.get('timeStr', '').split(' ')[-1] if ' ' in d.get('timeStr', '') else d.get('timeStr', '')
             age = now - ts
-            items = [
-                timeStr, d.get('train', '----'), d.get('direction', '未知'),
-                d.get('speed', '---'), d.get('position', '---.-'),
-                d.get('route', '----'), d.get('loco', '----'),
-                d.get('category', '未知'), d.get('etaTime', '--:--:--'),
-            ]
-            for col, text in enumerate(items):
+            # 无车次信息的报文: 整行标红
+            isInvalid = (d.get('train', '----') in ('----', '', '未知')
+                         and d.get('baseTrain', '----') in ('----', ''))
+            for col, text in enumerate(decodeRowValues(d)):
                 item = QTableWidgetItem(str(text))
-                # 无车次信息的报文: 整行标红
-                isInvalid = (d.get('train', '----') in ('----', '', '未知')
-                             and d.get('baseTrain', '----') in ('----', ''))
-                if isInvalid:
-                    item.setForeground(QColor(CLR("err")))
-                elif col == 1:  # 车次加粗
-                    f = item.font(); f.setBold(True); item.setFont(f)
-                # 方向着色
-                if col == 2 and not isInvalid:
-                    if text == '下行':
-                        item.setForeground(QColor(CLR("ok")))
-                    elif text == '上行':
-                        item.setForeground(QColor(CLR("accent2")))
-                # 过期变暗
-                if age > 180 and not isInvalid:
-                    item.setForeground(QColor(CLR("faint")))
+                styleDecodeItem(item, col, text, invalid=isInvalid, age=age)
                 self.table.setItem(row, col, item)
         self.lock = False
 
@@ -1445,7 +1519,7 @@ class HistoryDb:
         """查询最近的记录（含 id 供详情查询）。"""
         sql = """
         SELECT id, timeStr, train, direction, speed, position, route, loco, category,
-               isDetailed, rawBcd, rawAddr, rawFunc
+               isDetailed, rawBcd, rawAddr, rawFunc, etaTime, etaDistanceKm
         FROM records ORDER BY id DESC LIMIT ?
         """
         try:
@@ -1779,9 +1853,7 @@ class RecordDetailDialog(QDialog):
         else:
             self._locoIntroLabel.setText('暂无该车型资料')
         # 机车详情按钮 (双击效果: 弹出图片+详细信息)
-        self._locoDetailBtn = QPushButton('机车详情')
-        self._locoDetailBtn.setStyleSheet(
-            f'background-color: {CLR("sel")}; color: #fff; font-size: 10px; padding: 1px 4px;')
+        self._locoDetailBtn = K.small_button('机车详情', h=24, px=11)
         self._locoDetailBtn.setEnabled(bool(loco_info))
         self._locoDetailBtn.clicked.connect(self._openLocoDetail)
         resultGrid.addWidget(loco_intro, loco_row, 0)
@@ -1794,9 +1866,7 @@ class RecordDetailDialog(QDialog):
         self._trainQueryLabel.setStyleSheet(
             f'color: {CLR("accent2")}; font-size: 11px; font-weight: bold; padding: 2px;')
         self._trainQueryLabel.setWordWrap(True)
-        self._trainQueryBtn = QPushButton('时刻表')
-        self._trainQueryBtn.setStyleSheet(
-            f'background-color: {CLR("sel")}; color: #fff; font-size: 10px; padding: 1px 4px;')
+        self._trainQueryBtn = K.small_button('时刻表', h=24, px=11)
         self._trainQueryBtn.setEnabled(False)
         self._trainQueryData: Optional[dict] = None
         self._trainQueryBtn.clicked.connect(self._openTrainQueryResult)
@@ -2108,11 +2178,11 @@ class HistoryPanel(QWidget):
 
         # 工具栏
         toolbar = QHBoxLayout()
-        self.refreshBtn = QPushButton('刷新')
-        self.clearBtn = QPushButton('清空')
-        self.exportBtn = QPushButton('导出 CSV...')
+        self.refreshBtn = K.small_button('刷新', h=28, px=12)
+        self.clearBtn = K.small_button('清空', h=28, px=12)
+        self.exportBtn = K.small_button('导出 CSV...', h=28, px=12)
         self.countLabel = QLabel('0 条')
-        self.countLabel.setStyleSheet(f'color: {CLR("faint")};')
+        self.countLabel.setStyleSheet(f'background: transparent; color: {CLR("faint")};')
         toolbar.addWidget(self.refreshBtn)
         toolbar.addWidget(self.clearBtn)
         toolbar.addWidget(self.exportBtn)
@@ -2120,14 +2190,8 @@ class HistoryPanel(QWidget):
         toolbar.addWidget(self.countLabel)
         layout.addLayout(toolbar)
 
-        self.table = QTableWidget(0, 10)
-        self.table.setHorizontalHeaderLabels(
-            ['时间', '车次', '方向', '速度', '公里标', '线路', '机车', '类别', '报文', 'BCD'])
-        self.table.setAlternatingRowColors(True)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table = QTableWidget(0, len(DECODE_COLUMNS))
+        initDecodeTable(self.table)
         layout.addWidget(self.table)
 
         self.refreshBtn.clicked.connect(self.loadFromDb)
@@ -2157,22 +2221,9 @@ class HistoryPanel(QWidget):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 self._rowIds.append(r.get('id', 0))
-                vals = [
-                    r.get('timeStr', ''), r.get('train', ''), r.get('direction', ''),
-                    r.get('speed', ''), r.get('position', ''), r.get('route', ''),
-                    r.get('loco', ''), r.get('category', ''),
-                    '详细' if r.get('isDetailed') else '短报文',
-                    r.get('rawBcd', ''),
-                ]
-                for col, val in enumerate(vals):
+                for col, val in enumerate(decodeRowValues(r)):
                     item = QTableWidgetItem(str(val))
-                    if col == 1:
-                        f = item.font(); f.setBold(True); item.setFont(f)
-                    if col == 2:
-                        if val == '下行':
-                            item.setForeground(QColor(CLR("ok")))
-                        elif val == '上行':
-                            item.setForeground(QColor(CLR("accent2")))
+                    styleDecodeItem(item, col, val)
                     self.table.setItem(row, col, item)
             self.countLabel.setText(f'{self.table.rowCount()} 条 / 共 {self.db.count()} 条')
         except Exception as e:
@@ -2305,10 +2356,9 @@ class SourceEditDialog(QDialog):
 
         btns = QHBoxLayout()
         btns.addStretch()
-        ok = QPushButton('确定')
-        ok.setStyleSheet(f'background-color: {CLR("accent")}; color: {CLR("panel")}; font-weight: bold;')
+        ok = K.button('确定', primary=True)
         ok.clicked.connect(self.accept)
-        cancel = QPushButton('取消')
+        cancel = K.button('取消')
         cancel.clicked.connect(self.reject)
         btns.addWidget(ok)
         btns.addWidget(cancel)
@@ -2400,16 +2450,13 @@ class ConfigPanel(QWidget):
 
         self.rtlPathEdit = QLineEdit(getattr(config, 'rtlTcpPath', '') or '')
         self.rtlPathEdit.setPlaceholderText('留空自动查找 rtl_tcp.exe')
-        pathBtn = QPushButton('浏览')
-        pathBtn.setStyleSheet('padding: 2px 8px; font-size: 11px;')
+        pathBtn = K.small_button('浏览', h=26, px=11.5)
         pathBtn.clicked.connect(self._browseRtlTcp)
 
-        self.srcAddBtn = QPushButton('新增')
-        self.srcEditBtn = QPushButton('编辑')
-        self.srcDelBtn = QPushButton('删除')
-        self.srcDetectBtn = QPushButton('检测设备')
-        for b in (self.srcAddBtn, self.srcEditBtn, self.srcDelBtn, self.srcDetectBtn):
-            b.setStyleSheet('padding: 2px 10px; font-size: 11px;')
+        self.srcAddBtn = K.small_button('新增', h=26, px=11.5)
+        self.srcEditBtn = K.small_button('编辑', h=26, px=11.5)
+        self.srcDelBtn = K.small_button('删除', h=26, px=11.5)
+        self.srcDetectBtn = K.small_button('检测设备', h=26, px=11.5)
         self.srcAddBtn.clicked.connect(self._addSource)
         self.srcEditBtn.clicked.connect(self._editSource)
         self.srcDelBtn.clicked.connect(self._delSource)
@@ -2718,11 +2765,9 @@ class ConfigPanel(QWidget):
 
         # ---- 按钮 ----
         btnLayout = QHBoxLayout()
-        self.saveBtn = QPushButton('保存配置')
-        self.saveBtn.setStyleSheet(
-            f'background-color: {CLR("accent")}; color: #ffffff; font-weight: bold;')
-        self.hotBtn = QPushButton('热更新 (不重启)')
-        self.restartBtn = QPushButton('应用并重启 DSP')
+        self.saveBtn = K.button('保存配置', primary=True)
+        self.hotBtn = K.button('热更新 (不重启)')
+        self.restartBtn = K.button('应用并重启 DSP')
         btnLayout.addWidget(self.saveBtn)
         btnLayout.addWidget(self.hotBtn)
         btnLayout.addWidget(self.restartBtn)
@@ -2964,10 +3009,9 @@ class ConfigDialog(QDialog):
         layout.addWidget(scroll, 1)
         btnLayout = QHBoxLayout()
         btnLayout.addStretch()
-        okBtn = QPushButton('确定')
-        okBtn.setStyleSheet(f'background-color: {CLR("accent")}; color: {CLR("panel")}; font-weight: bold;')
+        okBtn = K.button('确定', primary=True)
         okBtn.clicked.connect(self._onOk)
-        cancelBtn = QPushButton('取消')
+        cancelBtn = K.button('取消')
         cancelBtn.clicked.connect(self.reject)
         btnLayout.addWidget(okBtn)
         btnLayout.addWidget(cancelBtn)
@@ -3475,7 +3519,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v2.3.1  ·  2026-11')
+        ver = QLabel('v2.4  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)
@@ -3983,7 +4027,7 @@ class MainWindow(QMainWindow):
         self._dashWindow = None
         self._isFullScreen = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.3.1')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.4')
         # 下限放低一点：1024×600 的老上网本也能用，布局会自己收（FieldGrid 换列）
         self.setMinimumSize(spx(880), spx(560))
         self._applyWindowGeometry()
@@ -3992,6 +4036,8 @@ class MainWindow(QMainWindow):
 
         self._buildMenu()
         self._buildUi()
+        # 启动时先让地图底图跟界面主题对齐（老配置里的 mapNight 可能是手设的）
+        self._syncMapNight()
 
         # 从配置初始化频谱显示模式
         mode = getattr(self.config, 'spectrumMode', 'graph')
@@ -4072,11 +4118,12 @@ class MainWindow(QMainWindow):
 
         chrome = spx(96)                       # 工具栏 + 状态栏
         avail = max(spx(300), h - chrome)
-        # ③ 输出区（底栏两条）：约 14%，夹在 84~132 之间
-        outH = int(min(max(avail * 0.14, spx(84)), spx(132)))
+        # ③ 输出区（底栏）：只放一行日志 + 一句状态，压到 8% 左右（56~88），
+        #    省下来的高度全给上段——底栏就是个底栏，图要大。
+        outH = int(min(max(avail * 0.085, spx(56)), spx(88)))
         rest = max(spx(240), avail - outH)
-        # ② 中段（频谱 | 车次 | 机车）：约 38%，夹在 120~280
-        band2H = int(min(max(rest * 0.38, spx(120)), spx(280)))
+        # ② 中段（频谱 | 车次 | 机车）：约 34%，夹在 110~260
+        band2H = int(min(max(rest * 0.34, spx(110)), spx(260)))
         # ① 上段吃掉剩下的
         band1H = max(spx(180), rest - band2H)
         self.mainSplit.setSizes([band1H, band2H, outH])
@@ -4242,7 +4289,7 @@ class MainWindow(QMainWindow):
         self.titleLabel = QLabel('中国铁路 LBJ 列车预警器')
         self.titleLabel.setStyleSheet(
             f'color: {CLR("accent")}; font-size: {spx(15)}px; font-weight: bold;')
-        self.titleLabel.setToolTip('中国铁路 LBJ 列车预警器解码程序 v2.3.1')
+        self.titleLabel.setToolTip('中国铁路 LBJ 列车预警器解码程序 v2.4')
         # 标题固定成文字宽度：既不会被拉伸成一大块空白，也不给窗口垫出多余的宽度下限
         _titleW = self.titleLabel.fontMetrics().horizontalAdvance(
             self.titleLabel.text()) + spx(10)
@@ -4251,50 +4298,39 @@ class MainWindow(QMainWindow):
         self.titleLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         header.addWidget(self.titleLabel, 0)
 
-        self.btnStart = QPushButton('▶ 开始')
-        self.btnStart.setStyleSheet(
-            f'QPushButton {{ background-color: {CLR("panel2")}; border: 1px solid {CLR("accent")};'
-            f' border-radius: 3px; padding: {spx(5)}px {spx(16)}px;'
-            f' font-weight: bold; color: {CLR("ok")}; }}'
-            f'QPushButton:hover {{ background-color: {CLR("btn_hover")}; }}')
-        self.btnStart.setMinimumHeight(spx(30))
+        # 按钮外观全部交给 Fluent：开始用强调色主按钮，其余为常规按钮
+        self.btnStart = K.button('▶  开始', primary=True)
+        self.btnStart.setToolTip('启动 DSP 接收 (Ctrl+R)')
         self.btnStart.clicked.connect(self.startDsp)
-        self.btnStop = QPushButton('■ 停止')
-        self.btnStop.setStyleSheet(
-            f'QPushButton {{ background-color: {CLR("panel2")}; border: 1px solid {CLR("err")};'
-            f' border-radius: 3px; padding: {spx(5)}px {spx(16)}px;'
-            f' font-weight: bold; color: {CLR("err")}; }}'
-            f'QPushButton:hover {{ background-color: {CLR("btn_hover")}; }}')
-        self.btnStop.setMinimumHeight(spx(30))
+        self.btnStop = K.button('■  停止')
+        self.btnStop.setToolTip('停止接收 (Ctrl+R)')
         self.btnStop.clicked.connect(self.stopDsp)
         header.addWidget(self.btnStart)
         header.addWidget(self.btnStop)
-        header.addSpacing(spx(12))
+        header.addSpacing(spx(10))
 
         self.freqLabel = QLabel('频率: -- MHz')
         self.freqLabel.setStyleSheet(
-            f'color: {CLR("accent")}; font-weight: bold; font-size: {spx(14)}px;')
+            f'background: transparent; color: {CLR("accent")};'
+            f' font-weight: bold; font-size: {spx(14)}px;')
         header.addWidget(self.freqLabel)
-        header.addSpacing(spx(12))
+        header.addSpacing(spx(10))
 
         self.connIndicator = QLabel('● 未连接')
         self.connIndicator.setStyleSheet(
-            f'color: {CLR("err")}; font-size: {spx(13)}px; font-weight: bold;')
+            f'background: transparent; color: {CLR("err")};'
+            f' font-size: {spx(13)}px; font-weight: bold;')
         header.addWidget(self.connIndicator)
         header.addStretch()
 
-        # 原来这里是「频谱: 图形/终端」下拉框，现在频谱切换搬进了频谱卡片自己的标题栏；
-        # 腾出来的位置给日/夜配色开关（原来只能在菜单里选、还得重启）。
-        self.btnTheme = QPushButton('日间')
+        # 日/夜配色开关（按钮文字是“点一下会切到哪”）
+        self.btnTheme = K.button('日间')
         self.btnTheme.setToolTip('切换日间 / 夜间配色，立即生效 (Ctrl+T)')
-        self.btnTheme.setMinimumHeight(spx(30))
-        self.btnTheme.setMinimumWidth(spx(72))
         self.btnTheme.clicked.connect(self._toggleTheme)
         header.addWidget(self.btnTheme)
 
-        self.fullBtn = QPushButton('全屏')
+        self.fullBtn = K.button('全屏')
         self.fullBtn.setToolTip('全屏显示 (F11)')
-        self.fullBtn.setMinimumHeight(spx(30))
         self.fullBtn.clicked.connect(lambda: self.toggleFullScreen())
         header.addWidget(self.fullBtn)
         root.addLayout(header)
@@ -4385,14 +4421,16 @@ class MainWindow(QMainWindow):
         self.band2 = band2
         mainSplit.addWidget(band2)
 
-        # ---- ③ 底栏：输出 1 | 输出 2（各占一半） ----
+        # ---- ③ 底栏：输出 1（最新一条日志） | 输出 2（状态提示） ----
         self.logTail = LogTail()
         self.statusStrip = RxStatusStrip()
         self.statusStrip.clicked.connect(self.openDashboard)
 
-        self.out1Card = CardBox('输出 1 · 日志', self.logTail, margins=(5, 2, 5, 3))
-        self.out2Card = CardBox('输出 2 · 接收状态', self.statusStrip, margins=(5, 2, 5, 3))
-        self.out2Card.setToolTip('点击任意状态块打开运行状态仪表板 (Ctrl+D)')
+        self.out1Card = CardBox('输出 1 · 日志', self.logTail, margins=(8, 3, 8, 4))
+        self.out2Card = CardBox('输出 2 · 接收状态', self.statusStrip, margins=(8, 3, 8, 4))
+        self.out2Card.setToolTip('点击打开运行状态仪表板 (Ctrl+D)')
+        for _c in (self.out1Card, self.out2Card):
+            _c.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         bottomBar = QWidget()
         bl = QHBoxLayout(bottomBar)
@@ -4511,7 +4549,13 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(TH.styleSheet())      # 全局 QSS 先换
+        K.applyTheme(resolved)                      # Fluent 组件换深浅色
         self._restyleWidgets(mapping)               # 内联颜色跟一遍
+        # 表格底色要在换色**之后**再刷：表格的调色板/样式是我们按主题色生成的，
+        # 先刷会被上面的“旧色→新色”批量替换改坏（白底被替换成深色文字色）。
+        K.refreshTablePalettes()
+        # 地图底图跟界面一起深浅色（日间界面配深色底图太割裂）——要在重建页面之前设
+        self._syncMapNight(resolved)
 
         # pyqtgraph：背景、坐标轴、字体颜色
         applyPgTheme()
@@ -4537,6 +4581,24 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         return resolved
+
+    def _syncMapNight(self, resolved: str = ''):
+        """让地图底图与界面深浅色保持一致（界面日间 → 地图日间）。
+
+        地图上的「夜间/日间」按钮仍可临时覆盖，下一轮换肤会再同步回来。
+        """
+        resolved = resolved or TH.P.get('mode', 'dark')
+        night = (resolved == 'dark')
+        self.config.mapNight = night
+        act = getattr(self, 'actMapNight', None)
+        if act is not None:
+            act.blockSignals(True)
+            act.setChecked(night)
+            act.blockSignals(False)
+        try:
+            self.mapPanel.setNightMode(night)
+        except Exception:
+            pass
 
     def _syncThemeButton(self, resolved: str = ''):
         if not hasattr(self, 'btnTheme'):
@@ -5149,17 +5211,19 @@ def main():
     resolved_theme = TH.applyMode(str(getattr(config, 'theme', 'dark') or 'dark'))
     applyPgTheme()
 
-    # 界面缩放：0 = 按屏幕自动；否则用配置倍率
+    # 界面缩放：0（或老的 100%）= 按屏幕自动；其余用配置倍率
+    # 大屏给小屏同一条布局，但字号/控件尺寸按档位放大（v2.4：大屏别再看小字）
     global UI_SCALE
-    raw_scale = float(getattr(config, 'uiScale', 0.0) or 0.0)
-    UI_SCALE = autoUiScale(app) if raw_scale <= 0 else max(0.8, min(1.6, raw_scale))
+    UI_SCALE = resolveUiScale(config)
+    K.setScale(UI_SCALE)
     app.setStyleSheet(scale_qss(TH.styleSheet()) + scale_qss(TOUCH_STYLE))
-    try:
-        f = QFont('Microsoft YaHei')
-        f.setPointSizeF(9.5)
-        app.setFont(f)
-    except Exception:
-        pass
+
+    # Fluent 外观层：强调色、字体、深浅色（qfluentwidgets 缺失时自动降级）
+    K.setupApp(app)
+    K.applyTheme(resolved_theme)
+    # Fluent 控件的字号是构造时 setFont 定的，不吃应用级 QSS —— 用事件过滤器补上缩放
+    K.installFontScaler(app)
+
     if os.path.exists(ICON_PATH):
         app.setWindowIcon(QIcon(ICON_PATH))
 
