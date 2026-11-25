@@ -93,6 +93,17 @@ fun SettingsPage(vm: ReceiverViewModel) {
             field("本站公里标 km", s.userKm) { s = s.copy(userKm = it.trim()) }
             field("线路公里标", s.routeKmText) { s = s.copy(routeKmText = it) }
         }
+        group("地图") {
+            field("高德 Key", s.amapKey) { s = s.copy(amapKey = it.trim()) }
+            field("安全密钥", s.amapSecurity) { s = s.copy(amapSecurity = it.trim()) }
+            field("缩放级别", s.mapZoom.toString()) { s = s.copy(mapZoom = it.toIntOrNull() ?: s.mapZoom) }
+            field("跟随 (true/false)", s.mapFollow.toString()) {
+                s = s.copy(mapFollow = it.trim().equals("true", true))
+            }
+            field("夜间模式 (true/false)", s.mapNight.toString()) {
+                s = s.copy(mapNight = it.trim().equals("true", true))
+            }
+        }
 
         Spacer(Modifier.height(10.dp))
         Row {

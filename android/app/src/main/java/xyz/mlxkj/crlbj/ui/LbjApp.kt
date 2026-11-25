@@ -61,9 +61,9 @@ fun LbjApp() {
         }
     ) { _padding ->
         when (current) {
-            0 -> MapPage()
+            0 -> MapPage(vm)
             1 -> DecodePage(vm)
-            2 -> HistoryPage()
+            2 -> HistoryPage(vm)
             3 -> StatusPage(vm)
             4 -> SettingsPage(vm)
         }

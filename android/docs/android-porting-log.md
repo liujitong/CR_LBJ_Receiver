@@ -12,8 +12,8 @@
 | M1 | USB/pipe fd 采样 + 环形缓冲 + StatusFrame | 完成 | a9e1eb9 |
 | M2a | C++ DSP 1:1 移植 + POCSAG/BCH/GBK | 完成 | a9e1eb9 |
 | M2b | 对拍（OWRX 120s 真实 IQ）0 差异 | 完成 | a9e1eb9 / 0f97271 |
-| M2c | Kotlin 业务层（分类/去重/ETA）+ 引擎/VM/UI 接线 | **进行中** | — |
-| M3 | Room 历史 / CSV / 前台服务 / IQ 录制 / 地图 / 设置页 | 未开始 | — |
+| M2c | Kotlin 业务层（分类/去重/ETA）+ 引擎/VM/UI 接线 | 完成 | 9fed120 |
+| M3 | Room 历史 / CSV / 前台服务 / IQ 录制 / 地图 / 设置页 | **完成（模拟器验收）** | 见 git log |
 
 ## M2c 进行中记录（2026-11-26）
 
@@ -92,6 +92,46 @@ git 提交：见下方 git log。
   时区差 ≤8h 不影响车次判定场景）
 - watchdog 重连在 socket ECONNREFUSED 时每次等满 10s 连接超时（日志显示
   10000ms），可考虑缩短连接超时，暂不阻塞
+
+## M3 记录（2026-11-26）
+
+### 实施
+1. **Room 历史库**（KSP 2.2.10-2.0.2 + Room 2.8.4，AGP 9 内置 Kotlin 下可用）：
+   `data/LbjDatabase.kt` —— records 表字段与桌面版 history.py 完全同名；
+   uid 主键 + OnConflictStrategy.REPLACE 实现窗口内更优记录就地更新；
+   timestamp/train 索引；recent(500)/all()/count()/clear()。
+2. **CSV 导出**（SAF CreateDocument）：`data/CsvExporter.kt`，
+   18 列表头与桌面版 exportToCsv 一致，utf-8 BOM（Excel 兼容）。
+3. **前台服务**：`service/ReceiveForegroundService.kt` 真实实现
+   （通知常驻、随接收状态启停）。
+   ⚠️ 坑：`connectedDevice` 类型需要 USB 设备等运行时凭据，纯网络源启动即
+   SecurityException 崩溃 → 改 `specialUse` 类型 + PROPERTY_SPECIAL_USE_FGS_SUBTYPE
+   说明，全模式可用。
+4. **IQ 录制**：RtlTcpSource 泵线程 tee（recordOut 可中途设置/清除，
+   录制失败不断接收）；USB 模式 native 直读 fd 不支持（UI 提示）。
+   实测 960kS/s 速率 ~1.92MB/s 与理论一致。
+5. **地图页**：WebView + 高德 JS API（Key/安全密钥用户在设置页配置），
+   GCJ-02 转换（core/Gcj02.kt，标准算法与桌面版一致）+ 轨迹线 + 跟随；
+   无 Key/无坐标降级文本卡 + 设备 GPS 距离（getLastKnownLocation，
+   定位权限运行时申请）。
+6. **设置页扩到六组**：数据源/射频/RSSI 门控/AFC/解码业务/地图。
+7. **历史页**：Room 流式列表（uid key）+ 导出 CSV + 清空。
+
+### 模拟器验收（回放源 10.0.2.2:5678）
+- ✅ 接收 + 解码入库（11079 技术直达货运列车 / V1281 快速旅客列车）
+- ✅ 历史页 7 条、CSV 导出（18 列内容核对通过，含 WGS-84 坐标）
+- ✅ IQ 录制启停（34MB/8s 速率正确）
+- ✅ 前台服务无崩溃（specialUse）
+- ✅ 地图降级卡正常
+- 未测（无 Key/无真机）：高德地图 WebView 实图、USB 真机链路、真实 GPS
+
+### 构建错误记录（已修复）
+1. libs.versions.toml ksp 条目重复（原本尾部已有一条硬编码 ksp）→ 去重
+2. SharingStarted.WhileLazily 不存在 → Lazily
+3. WebSettings 属性/方法被外层同名 Compose 变量 `settings` 遮蔽 →
+   `this.settings.setJavaScriptEnabled(true)` 限定接收者
+4. `w.write('\uFEFF')` Char 不能隐式转 Int → `w.write(0xFEFF)`
+5. MapPage 漏 import Row/Spacer
 
 ## 环境备忘（复用）
 - Gradle 构建：`cd /c/lbj_src && JAVA_HOME="C:\Program Files\Java\latest\jdk-21" ./gradlew :app:assembleDebug`

@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 // 注意：AGP 9 内置 Kotlin 支持，不另应用 org.jetbrains.kotlin.android（与 cw2 一致）
 
@@ -109,6 +110,11 @@ dependencies {
 
     // JSON（配置文件与桌面版 lbj_config.json 互导）
     implementation(libs.org.json)
+
+    // Room 历史库
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     // Testing
     testImplementation(libs.junit)

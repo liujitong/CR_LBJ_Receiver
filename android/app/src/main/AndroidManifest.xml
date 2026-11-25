@@ -3,9 +3,9 @@
 
     <!-- rtl_tcp / OWRX 网络源 -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- 接收中前台服务（connectedDevice） -->
+    <!-- 接收中前台服务（specialUse：USB/网络源均可用，接收期间存活） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 无网降级：手机 GPS 算距离 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -28,10 +28,15 @@
             </intent-filter>
         </activity>
 
-        <!-- M1 接入：接收中前台服务 -->
+        <!-- 接收中前台服务：USB 直连时为 connectedDevice 场景，网络源无 USB
+             凭据，统一用 specialUse（subtype 说明见 PROPERTY_SPECIAL_USE_FGS_SUBTYPE） -->
         <service
             android:name=".service.ReceiveForegroundService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Portable RTL-SDR LBJ train warning receiver: keeps USB/network SDR data pumping and DSP decoding alive while user is receiving" />
+        </service>
     </application>
 </manifest>

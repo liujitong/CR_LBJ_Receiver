@@ -1,20 +1,28 @@
 package xyz.mlxkj.crlbj.vm
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import xyz.mlxkj.crlbj.core.ReceiverSettings
 import xyz.mlxkj.crlbj.engine.RouteUtils
+import xyz.mlxkj.crlbj.data.CsvExporter
+import xyz.mlxkj.crlbj.data.LbjDatabase
+import xyz.mlxkj.crlbj.data.RecordEntity
 import xyz.mlxkj.crlbj.engine.ArrivalEstimator
 import xyz.mlxkj.crlbj.engine.DecodeEvent
 import xyz.mlxkj.crlbj.engine.DecoderEngine
 import xyz.mlxkj.crlbj.engine.EngineState
+import xyz.mlxkj.crlbj.service.ReceiveForegroundService
 
 /**
  * 全局收发枢纽：解码事件流 / StatusFrame / 日志 / 设置。
@@ -35,12 +43,46 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
     val status: StateFlow<xyz.mlxkj.crlbj.engine.StatusFrame?> get() = engine.status
     val logs: StateFlow<List<String>> get() = engine.logs
 
+    /** 历史库（Room）：最近记录 + 条数，uid upsert */
+    private val db = LbjDatabase.get(app)
+    val records: StateFlow<List<RecordEntity>> =
+        db.recordDao().recent(500)
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val recordCount: StateFlow<Int> =
+        db.recordDao().count()
+            .stateIn(viewModelScope, SharingStarted.Lazily, 0)
+
+    private val _csvMsg = MutableStateFlow<String?>(null)
+    val csvMsg: StateFlow<String?> = _csvMsg
+
     init {
         syncBusinessParams(_settings.value)
+        // 解码事件 → uid 去重入库（窗口内被更优记录替换时同 uid 更新）
+        viewModelScope.launch(Dispatchers.IO) {
+            engine.events.collect { list ->
+                list.firstOrNull()?.let { ev ->
+                    runCatching { db.recordDao().upsert(RecordEntity.fromEvent(ev)) }
+                }
+            }
+        }
         // 应用启动即初始化 native 引擎（一键开始的前提）
         viewModelScope.launch(Dispatchers.IO) {
             engine.init(_settings.value)
             engine.log("[初始化] native 引擎已创建")
+        }
+        // 前台服务随接收状态启停
+        viewModelScope.launch {
+            _running.collect { running ->
+                val ctx = getApplication<Application>()
+                ReceiveForegroundService.ensureChannel(ctx)
+                if (running) {
+                    ctx.startForegroundService(Intent(ctx, ReceiveForegroundService::class.java))
+                } else {
+                    ctx.startService(
+                        Intent(ctx, ReceiveForegroundService::class.java)
+                            .setAction(ReceiveForegroundService.ACTION_STOP))
+                }
+            }
         }
     }
 
@@ -127,6 +169,56 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
         watchdog = null
         engine.stop()
         _running.value = false
+    }
+
+    /** 导出历史为 CSV（SAF 目标 Uri，由页面 CreateDocument 启动器提供） */
+    fun exportCsv(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val all = db.recordDao().all()
+                getApplication<Application>().contentResolver.openOutputStream(uri)?.use { out ->
+                    CsvExporter.export(out, all)
+                }
+                _csvMsg.value = "已导出 ${all.size} 条记录"
+            } catch (t: Throwable) {
+                _csvMsg.value = "导出失败: ${t.message}"
+            }
+        }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch(Dispatchers.IO) { db.recordDao().clear() }
+    }
+
+    /** IQ 录制状态（null = 未录制；DecodePage/设置页用 SAF CreateDocument 提供 Uri） */
+    private val _recording = MutableStateFlow(false)
+    val recording: StateFlow<Boolean> = _recording
+
+    /** 开始/停止 IQ 原始录制（仅网络源可用；USB 模式 native 直读 fd 不支持） */
+    fun toggleIqRecord(uri: Uri?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val src = engine.sourceIfTcp()
+            if (src == null) {
+                engine.log("[录制] 当前为 USB 模式或未在接收，暂不支持 IQ 录制")
+                return@launch
+            }
+            val cur = src.recordOut
+            if (cur != null) {
+                src.recordOut = null
+                try { cur.close() } catch (_: Throwable) { }
+                _recording.value = false
+                engine.log("[录制] IQ 录制已停止")
+            } else if (uri != null) {
+                try {
+                    val out = getApplication<Application>().contentResolver.openOutputStream(uri)
+                    src.recordOut = out
+                    _recording.value = true
+                    engine.log("[录制] IQ 录制开始（uint8 交错 IQ，采样率 ${_settings.value.sampleRate}）")
+                } catch (t: Throwable) {
+                    engine.log("[录制] 打开录制文件失败: ${t.message}")
+                }
+            }
+        }
     }
 
     override fun onCleared() {

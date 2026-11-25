@@ -1,5 +1,7 @@
 package xyz.mlxkj.crlbj.ui.pages
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +51,12 @@ fun DecodePage(vm: ReceiverViewModel) {
     val logs by vm.logs.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val events by vm.events.collectAsStateWithLifecycle()
+    val recording by vm.recording.collectAsStateWithLifecycle()
+
+    // IQ 录制（SAF 建档）
+    val recordLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri -> uri?.let { vm.toggleIqRecord(it) } }
 
     // RSSI 历史环形缓冲（轮询帧驱动，最多 240 点 ≈ 36s）
     val rssiHistory = remember { ArrayDeque<Float>(240) }
@@ -66,13 +74,23 @@ fun DecodePage(vm: ReceiverViewModel) {
     }
 
     Column(Modifier.fillMaxSize().padding(12.dp)) {
-        // 一键开始
+        // 一键开始 + IQ 录制
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(
                 onClick = { vm.toggleStartStop() },
                 modifier = Modifier.weight(1f).height(52.dp),
             ) {
                 Text(if (running) "■ 停止接收" else "▶ 一键开始", fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    if (recording) vm.toggleIqRecord(null)
+                    else if (running) recordLauncher.launch("iq_${System.currentTimeMillis() / 1000}.iq")
+                },
+                modifier = Modifier.height(52.dp),
+            ) {
+                Text(if (recording) "● 录制中" else "录 IQ")
             }
         }
 

@@ -140,6 +140,10 @@ class DecoderEngine(private val context: Context) {
     /** 当前数据源是否存活（监护用） */
     fun isSourceOpen(): Boolean = source?.isOpen == true
 
+    /** 当前数据源若是 rtl_tcp/OWRX 管道源则返回（IQ 录制用） */
+    fun sourceIfTcp(): xyz.mlxkj.crlbj.core.RtlTcpSource? =
+        source as? xyz.mlxkj.crlbj.core.RtlTcpSource
+
     fun stop() {
         if (_state.value != EngineState.RUNNING && source == null) return
         LbjNative.nativeStop()

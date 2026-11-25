@@ -38,6 +38,12 @@ data class ReceiverSettings(
     val etaMaxMin: Double = 360.0,         // ETA 最大估算分钟数 (6h)
     val userKm: String = "",               // 本站公里标 (km)，空=未设置
     val routeKmText: String = "",          // 线路公里标: "线路=km,线路=km"
+    // 地图（高德 Web/SDK Key 由用户提供，缺省降级文本卡）
+    val amapKey: String = "",
+    val amapSecurity: String = "",
+    val mapZoom: Int = 12,
+    val mapFollow: Boolean = true,          // 自动跟随最新列车
+    val mapNight: Boolean = true,           // 深色底图
 ) {
     val isUsb: Boolean get() = sourceType == "usb"
 
@@ -97,6 +103,11 @@ data class ReceiverSettings(
                 etaMaxMin = Double.fromBits(sp.getLong("etaMaxMin", d.etaMaxMin.toRawBits())),
                 userKm = sp.getString("userKm", d.userKm) ?: d.userKm,
                 routeKmText = sp.getString("routeKmText", d.routeKmText) ?: d.routeKmText,
+                amapKey = sp.getString("amapKey", d.amapKey) ?: d.amapKey,
+                amapSecurity = sp.getString("amapSecurity", d.amapSecurity) ?: d.amapSecurity,
+                mapZoom = sp.getInt("mapZoom", d.mapZoom),
+                mapFollow = sp.getBoolean("mapFollow", d.mapFollow),
+                mapNight = sp.getBoolean("mapNight", d.mapNight),
             )
         }
 
@@ -124,6 +135,11 @@ data class ReceiverSettings(
             e.putLong("etaMaxMin", s.etaMaxMin.toRawBits())
             e.putString("userKm", s.userKm)
             e.putString("routeKmText", s.routeKmText)
+            e.putString("amapKey", s.amapKey)
+            e.putString("amapSecurity", s.amapSecurity)
+            e.putInt("mapZoom", s.mapZoom)
+            e.putBoolean("mapFollow", s.mapFollow)
+            e.putBoolean("mapNight", s.mapNight)
             e.apply()
         }
     }
