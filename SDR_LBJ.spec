@@ -67,16 +67,16 @@ def _keep_qt(name: str) -> bool:
 
 
 a = Analysis(
-    ['SDR_ALL_LBJ_GUI.py'],
+    ['main.py'],                    # v2.5 分层后统一入口
     pathex=[],
     binaries=[],
     datas=[
         # 只读资源打包到 _MEIPASS
         ('国铁.ico', '.'),
         ('lbj_config.json', '.'),   # 初始配置模板
-        ('loco_info.py', '.'),      # 机车信息映射表
+        ('cr_lbj/data/loco_info.py', '.'),  # 机车信息映射表（便于查阅/核对）
         ('README.md', '.'),
-        ('docs', 'docs'),           # 用户手册 / 高德地图手册 / 技术参考
+        ('docs', 'docs'),           # 用户手册 / 高德地图手册 / 技术参考 / 架构说明
     ] + _RTL_DATAS,
     hiddenimports=[
         # PySide6 插件
@@ -95,10 +95,30 @@ a = Analysis(
         'qfluentwidgets.window',
         'qframelesswindow',
         'darkdetect',
-        # 地图面板
-        'map_panel',
-        # 界面外观封装层
-        'ui_kit',
+        # 分层包（v2.5）：入口会静态导入，这里显式列出全部实现模块更保险，
+        # 尤其是 gui.py 用 importlib.import_module 取模块对象的那些
+        'cr_lbj',
+        'cr_lbj.runtime',
+        'cr_lbj.gui',
+        'cr_lbj.app',
+        'cr_lbj.core.decoder',
+        'cr_lbj.core.bridge',
+        'cr_lbj.data.loco_info',
+        'cr_lbj.data.history',
+        'cr_lbj.ui.theme',
+        'cr_lbj.ui.widgets',
+        'cr_lbj.ui.map_panel',
+        'cr_lbj.ui.components.spectrum',
+        'cr_lbj.ui.components.basics',
+        'cr_lbj.ui.components.info_panels',
+        'cr_lbj.ui.components.history_panel',
+        'cr_lbj.ui.components.train_query',
+        'cr_lbj.ui.dialogs.detail_dialogs',
+        'cr_lbj.ui.dialogs.config_ui',
+        'cr_lbj.ui.dialogs.log_ui',
+        'cr_lbj.ui.dialogs.help_dialogs',
+        'cr_lbj.ui.windows.main_window',
+        'cr_lbj.utils.helpers',
         # pyqtgraph
         'pyqtgraph',
         'pyqtgraph.graphicsItems',

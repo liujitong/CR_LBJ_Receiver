@@ -73,7 +73,7 @@ v2.4 把外观换成 **Fluent Design**，「输出 1 / 输出 2」收成一条�
 - **输出 2 · 接收状态**：一句话说清当前状况（「接收正常」/「AFC 置信度偏低」/「信号偏弱」…），
   下面一行小字附信号、AFC、门控读数，点一下直通仪表板
 - **Fluent Design 外观**：控件来自 [qfluentwidgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
-  （GPLv3），圆角卡片、悬停动画、深浅色一体；`ui_kit.py` 只做封装，缺库时自动退回原生外观
+  （GPLv3），圆角卡片、悬停动画、深浅色一体；`cr_lbj/ui/widgets.py` 只做封装，缺库时自动退回原生外观
 - **自适应布局**：窗口或屏幕变化时自动调分栏比例、字段列数、标题显隐，不必手拖
 - **字号按屏幕分档**：小屏 / 笔记本 / 中屏 / 大屏四档，底栏大字另有四档（15 / 17 / 19 / 21 px），
   不再出现「4K 屏上还是 12 px」的情况
@@ -91,7 +91,7 @@ v2.4 把外观换成 **Fluent Design**，「输出 1 / 输出 2」收成一条�
 - 历史留档：SQLite 本地库（含经纬度与唯一 `uid`），同一条记录被更优报文替换时原地更新
 - 导出 CSV（UTF-8 with BOM，18 列，Excel 双击不乱码）
 - 2026 车次规则：X/G/T/K/D/C/S/Z/N/V/B/DH/DJ 新字头，自动兼容 2014 旧规则
-- ETA 到达估算（按本站公里标 + 速度）、12306 时刻表查询（按报文类别智能判断可查性）、机车资料与图片
+- ETA 到达估算（按本站公里标 + 速度）、12306 时刻表查询（按报文类别智能判断可查性）、机车技术参数
 
 
 ---
@@ -154,7 +154,7 @@ Windows 下 RTL2832U 默认是 DVB-T 电视棒驱动，必须换成 WinUSB：
 
 ```bash
 pip install PySide6 PySide6-Addons pyqtgraph numpy scipy PySide6-Fluent-Widgets
-python SDR_ALL_LBJ_GUI.py
+python main.py
 ```
 
 - Python 3.10+（已在 3.14 上验证）
@@ -175,33 +175,42 @@ python build.py --reset-config  # 连 dist/lbj_config.json 一起清掉（回到
 > 打包**不会动** `dist/lbj_config.json`——高德 Key、数据源、主题都在里面，
 > 每次重打包都清掉等于让你重填一遍。要重置才加 `--reset-config`。
 
-产物：`dist/CR-LBJ-Receiver.exe`（单文件，约 281 MB），以及 `dist/README.md` 与 `dist/docs/`。
+产物：`dist/CR-LBJ-Receiver.exe`（单文件，约 283 MB），以及 `dist/README.md` 与 `dist/docs/`。
 
-`SDR_LBJ.spec` + `build.py` 负责把 RTL 工具、三份文档一并带进产物，剔除无关依赖
-（单文件从 575 MB 降到 281 MB），并在构建后清理过程文件，交付目录保持干净。
+`SDR_LBJ.spec` + `build.py` 负责把 RTL 工具、四份文档一并带进产物，剔除无关依赖
+（单文件从 575 MB 降到 283 MB），并在构建后清理过程文件，交付目录保持干净。
+
+> 源码仓库默认**不保留** `dist/` / `build/` / `__pycache__` 等构建产物，需要 EXE 时
+> 执行 `python build.py` 重新生成。含高德 Key 的本机配置请另存为
+> `lbj_config.local.json`（已在 `.gitignore` 中，不入库）；程序读取的是项目根的
+> `lbj_config.json`。
 
 ---
 
 ## 目录结构
 
-构建完成后，项目目录只保留三类内容：
+构建完成后，项目目录只保留四类内容（v2.5 起源码按职责分层，
+完整说明见 [架构说明](docs/架构说明.md)）：
 
 ```
 CR_LBJ_Receiver/
-├── 源码
-│   ├── RTL_LBJ_core.py        核心库：DSP / POCSAG 解码 / 报文解析 / 车次规则 / 数据源 / 去重
-│   ├── SDR_ALL_LBJ_GUI.py     界面：主窗口、各面板、日志总线、配置与帮助
-│   ├── map_panel.py           高德地图卡片（WebView + 纠偏 + 日夜样式）
-│   ├── ui_kit.py              外观层：qfluentwidgets 封装 / 字号分档 / 缺库降级
-│   ├── theme.py               主题调色板：中国铁路红蓝 + 夜间/日间 QSS
-│   ├── loco_info.py           机车车型资料表
-│   ├── build.py               一键构建脚本
-│   ├── SDR_LBJ.spec           PyInstaller 打包描述
-│   ├── lbj_config.json        默认配置模板（同时作为打包资源）
-│   └── 国铁.ico / LICENSE / README.md
-├── docs/                      三份文档
-├── tools/rtl/                 随包分发的 RTL-SDR 命令行工具（GPLv2，见其 README.txt）
-└── dist/                      构建产物：EXE + README + docs
+├── main.py                     程序入口（源码运行 / 打包共用）
+├── cr_lbj/                     应用包
+│   ├── runtime.py              共享运行时：路径 / 常量 / 缩放 / 控件别名
+│   ├── gui.py                  GUI 组装层
+│   ├── app.py                  启动层（参数 / 配置 / 主题 / QApplication）
+│   ├── core/                   解码内核：decoder.py、bridge.py
+│   ├── data/                   数据：loco_info.py（车型表）、history.py（SQLite）
+│   ├── ui/                     界面：theme.py / widgets.py / map_panel.py
+│   │   ├── components/         频谱、基础组件、信息面板、历史面板、车次查询
+│   │   ├── dialogs/            详情、配置、日志、帮助对话框
+│   │   └── windows/            main_window.py（主窗口 + 状态仪表板）
+│   └── utils/                  通用纯函数 helpers.py
+├── build.py / SDR_LBJ.spec     构建脚本与打包配置
+├── lbj_config.json / 国铁.ico / LICENSE / README.md
+├── docs/                       四份文档（含 架构说明.md）
+├── tools/rtl/                  随包分发的 RTL-SDR 命令行工具
+└── dist/                       构建产物：EXE + README + docs
 ```
 
 运行时还会在同目录生成 `lbj_config.json`（首次运行的默认配置）与 `history.db`（历史库）。
@@ -212,7 +221,7 @@ CR_LBJ_Receiver/
 
 | 版本 | 概要 |
 |---|---|
-| **v2.5** | 修复多屏混合 DPI（100% / 200% 屏）下窗口溢出与布局错乱；详情记录改 5 页签；配置菜单直接列分项；开始/停止合成状态开关；去掉写死的频率标签；底栏并成真正的一行；中段压缩、上段放大；修底部黑条；联网重核机车参数并清理失效图片 |
+| **v2.5** | 修复多屏混合 DPI（100% / 200% 屏）下窗口溢出与布局错乱；详情记录改 5 页签；配置菜单直接列分项；开始/停止合成状态开关；去掉写死的频率标签；底栏并成真正的一行；中段压缩、上段放大；修底部黑条；联网重核机车参数并移除机车图片区域；源码按 core / data / ui / utils 分层，GUI 巨石拆成 29 个模块，入口统一为 `main.py` |
 | **v2.4** | 外观换成 Fluent Design（qfluentwidgets）；底栏压成一条（左边最新一条日志、右边一句话状态），地图变大；字号按屏幕四档放大；「当前解码」与「历史记录」列统一为 10 列；地图底图跟随界面日夜 |
 | **v2.3.1** | 地图体验修复版：解决「来车后拖不动地图」和定位点偏移；新增默认中心（填地名即可，不加标记）与「中心」按钮；修好夜间配色不生效 |
 | **v2.3** | 三段全景布局（取消页签）、主题即时切换、运行状态仪表板改分组卡片、接收状态分块 |
@@ -227,8 +236,8 @@ CR_LBJ_Receiver/
 ## 常见问题
 
 **需要联网吗？**
-解码不需要。只有地图瓦片/脚本、12306 时刻表、机车图片需要联网（v2.5 起机车图片
-只保留能核准车型的少数几张，其余显示「暂无该机型图片」）。
+解码不需要。只有地图瓦片/脚本、12306 时刻表需要联网；机车参数已内置在程序里，
+查「机车详情」不需要联网（v2.5 起移除了机车图片区域）。
 
 **能收多远？**
 取决于天线与地形。车载 LBJ 功率有限，通常几公里内；高架天线 + 好馈线可到十几公里。
@@ -281,7 +290,7 @@ v2.2 已修复「普速旅客列车、普通旅客快车/慢车被误判为不�
 
 ## 数据来源
 
-- 机车图片与资料：[Trainfanz.com（我们的火车站）](https://www.trainfanz.com)
+- 机车参数：中国中车官网、维基百科、百度百科等公开资料核对（v2.5 联网重核）
 - 12306 时刻表：公开接口实时查询
 - RTL-SDR 工具：[osmocom/rtl-sdr](https://github.com/osmocom/rtl-sdr)（GPLv2），见 `tools/rtl/README.txt`
 - 地图底图与服务：高德开放平台

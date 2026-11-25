@@ -17,7 +17,7 @@ License: GPL v3
   6. 输出原始数据（含 BCD 字符串、地址码、功能码、码字列表）
 
 典型用法:
-    from RTL_LBJ_core import LbjCore
+    from cr_lbj.core.decoder import LbjCore
 
     core = LbjCore(host='rig.example.com', port=5678,
                    sampleRate=960000, freqMhz=821.2375)
@@ -1601,7 +1601,7 @@ def _runtime_dirs() -> List[str]:
     dirs = []
     for root in roots:
         p = os.path.abspath(root)
-        for _ in range(4):  # 逐级向上，兼容 tools/rtl、RTL_TCP_Server 与程序目录
+        for _ in range(6):  # 逐级向上，兼容 tools/rtl、RTL_TCP_Server 与程序目录
             dirs += [p, os.path.join(p, 'tools', 'rtl'),
                      os.path.join(p, 'rtl'),
                      os.path.join(p, 'RTL_TCP_Server')]

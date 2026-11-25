@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
 )
 
-import theme as TH
+from . import theme as TH
 
 
 def _c(key: str, fallback: str = '#888888') -> str:
@@ -673,7 +673,7 @@ class MapPanel(QWidget):
         cfg = self.config
         from urllib.parse import quote
         try:
-            import theme as TH
+            from . import theme as TH
             colors = TH.mapColors()
         except Exception:
             colors = {'up': '#4C8DFF', 'down': '#F0604F', 'unknown': '#E0A400'}

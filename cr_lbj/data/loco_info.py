@@ -14,10 +14,8 @@ loco_info.py — 中国铁路机车车辆信息映射表。
       - DF11G 功率口径细化为 2×3040 kW（标称）；
       - DF4B / DF4C / DF4D / DF11 区分「标称功率」与「柴油机装车/运用功率」；
       - 补齐 CRH / CR400 等动车组的牵引功率（原表为「—」）。
-  * 旧 LOCO_IMAGES 使用 aka.doubaocdn.com 短链，2026-11 实测已全部返回 403，
-    改为 Trainfanz.com 页面内 alt 明确标注、实测可访问的真实图片地址；
-    页面其余图片为无 alt 的懒加载图且无法可靠对应车型，故不再保留，
-    查不到图片时界面会显示「暂无该机型图片」。
+  * 机车图片整体移除：公开图源无法与车型精准对应，留着反而误导，
+    详情窗口只保留可靠的参数文字与资料来源链接（v2.5 最终决定）。
 
 字段口径约定：
   * power  优先用「机车标称/额定（轮周牵引）功率」；内燃机车口径差异大时
@@ -37,7 +35,7 @@ LOCO_DATA_SOURCES: List[Tuple[str, str]] = [
      "https://zh.wikipedia.org/"),
     ("百度百科·和谐系列货运电力机车 / 复兴号动车组", "https://baike.baidu.com/"),
     ("互动百科·和谐号电力动车组（CRH 牵引功率）", "https://www.baike.com/"),
-    ("Trainfanz.com（我们的火车站）· 车型图片", "https://www.trainfanz.com/"),
+    ("Trainfanz.com（我们的火车站）· 车型资料", "https://www.trainfanz.com/"),
 ]
 
 
@@ -460,27 +458,7 @@ LOCO_INFO: Dict[str, Dict[str, Any]] = {
 }
 
 
-# 机车图片 URL 映射表
-# 2026-11-25 重新抓取：原 aka.doubaocdn.com 短链已全部 403 失效。
-# 现使用 Trainfanz.com 页面内 alt 明确标注车型、且实测可访问的真实图片地址；
-# 未被 alt 覆盖的车型无法可靠对应，故不保留（界面显示「暂无该机型图片」）。
-_IMG_BASE = "https://26561303.s21i.faiusr.com/"
-LOCO_IMAGES: Dict[str, str] = {
-    # --- 和谐电系列 ---
-    "HXD1":   _IMG_BASE + "2/1/ABUIABACGAAg5eD9pgYolK-BGDDUAjjUAg.jpg",
-    "HXD1B":  _IMG_BASE + "2/1/ABUIABACGAAg5eD9pgYopc-v-QUw1AI41AI.jpg",
-    "HXD1C":  _IMG_BASE + "2/1/ABUIABACGAAg5eD9pgYo1IfxlgYw1AI41AI.jpg",
-    "HXD1D":  _IMG_BASE + "2/1/ABUIABACGAAg5eD9pgYo4dm19AUw1AI41AI.jpg",
-    "HXD2":   _IMG_BASE + "2/1/ABUIABACGAAg5eD9pgYolti0sAcw1AI41AI.jpg",
-    "HXD3C":  _IMG_BASE + "2/1/ABUIABACGAAgx6bCqQYo2tG1gwEw1AI41AI.jpg",
-    # --- 东风 / 和谐内系列 ---
-    "DF7":    _IMG_BASE + "2/1/ABUIABACGAAg18XKqAYotNKdxwcw1AI41AI.jpg",
-    "DF8B":   _IMG_BASE + "2/1/ABUIABACGAAg-ZLQqAYouqqoqAYw1AI41AI.jpg",
-    "DF11":   _IMG_BASE + "2/1/ABUIABACGAAg2MXKqAYokIyBUzDUAjjUAg.jpg",
-    "DF11G":  _IMG_BASE + "2/1/ABUIABACGAAg2MXKqAYo8q7sGzDUAjjUAg.jpg",
-}
-
-# 机车来源标注（图片来源页；参数来源见 LOCO_DATA_SOURCES）
+# 机车来源标注（参数来源清单见 LOCO_DATA_SOURCES；v2.5 起不再提供图片）
 LOCO_SOURCE = "Trainfanz.com · 参数经公开资料核对"
 LOCO_SOURCE_URL_ELECTRIC = "https://www.trainfanz.com/h-col-229.html"
 LOCO_SOURCE_URL_DIESEL = "https://www.trainfanz.com/h-col-141.html"
@@ -548,12 +526,10 @@ def lookup_loco(loco_code: Optional[str] = None, loco_number: Optional[str] = No
 
 
 def _enrich_loco_info(key: str) -> Optional[Dict[str, Any]]:
-    """构建机车信息字典，并附加图片URL和来源标注。"""
+    """构建机车信息字典，并附加来源标注与资料核对信息。"""
     info = dict(LOCO_INFO[key])
     info['matchedBy'] = 'lookup'
     info['matchedKey'] = key
-    # 附加图片 URL（无可靠图片时为空串，界面显示「暂无该机型图片」）
-    info['imageUrl'] = LOCO_IMAGES.get(key, '')
     # 附加来源
     info['source'] = LOCO_SOURCE
     loco_type = info.get('type', '')

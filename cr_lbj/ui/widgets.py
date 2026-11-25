@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-import theme as TH
+from . import theme as TH
 
 from PySide6.QtCore import Qt, QObject, QEvent, Signal
 from PySide6.QtGui import QFont, QColor, QPalette

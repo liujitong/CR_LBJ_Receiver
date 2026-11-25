@@ -12,9 +12,10 @@ build/
 dist/
 *.spec.bak
 
-# 运行时生成
+# 运行时生成 / 本机私密配置（含高德 Key，不入库）
 history.db
 *.log
+lbj_config.local.json
 
 # IDE
 .idea/

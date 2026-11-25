@@ -11,10 +11,12 @@
 约定：打包**不再动 dist/lbj_config.json**——高德 Key、数据源、主题这些都在里面，
 每次重打包都清掉等于让用户重填一遍。只有明确加 --reset-config 才删除。
 
-构建完成后目录应只剩三类内容：
-    源码   *.py / SDR_LBJ.spec / lbj_config.json / 国铁.ico / LICENSE / README.md
-    文档   docs/
-    产物   dist/  (CR-LBJ-Receiver.exe + README.md + docs/)
+源码结构（v2.5 起按职责分层）：
+    main.py            程序入口
+    cr_lbj/            应用包（core / data / ui / utils + runtime / gui / app）
+    SDR_LBJ.spec       打包配置；build.py 本脚本
+    文档   docs/       用户手册 / 高德地图配置手册 / 技术参考 / 架构说明
+    产物   dist/       CR-LBJ-Receiver.exe + README.md + docs/
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ BUILD = os.path.join(ROOT, 'build')
 EXE_NAME = 'CR-LBJ-Receiver.exe'
 
 # 构建产物中必须存在的文档（相对 dist/docs）
-REQUIRED_DOCS = ['用户手册.md', '高德地图配置手册.md', '技术参考.md']
+REQUIRED_DOCS = ['用户手册.md', '高德地图配置手册.md', '技术参考.md', '架构说明.md']
 
 
 def log(msg: str) -> None:
@@ -135,11 +137,12 @@ def verify() -> bool:
 
 def summary() -> None:
     log('-' * 46)
-    src = ['RTL_LBJ_core.py', 'SDR_ALL_LBJ_GUI.py', 'map_panel.py', 'loco_info.py',
-           'ui_kit.py', 'theme.py',
-           'SDR_LBJ.spec', 'lbj_config.json', '国铁.ico', 'LICENSE', 'README.md',
-           'build.py']
+    src = ['main.py', 'cr_lbj', 'SDR_LBJ.spec', 'lbj_config.json',
+           '国铁.ico', 'LICENSE', 'README.md', 'build.py']
     log('源码: ' + ', '.join(n for n in src if os.path.exists(os.path.join(ROOT, n))))
+    _py_n = sum(1 for _, _, fs in os.walk(os.path.join(ROOT, 'cr_lbj'))
+                for f in fs if f.endswith('.py'))
+    log('应用包 cr_lbj/: %d 个 Python 模块' % _py_n)
     log('工具: tools/rtl (%d 个文件)' %
         len(os.listdir(os.path.join(ROOT, 'tools', 'rtl'))))
     log('文档: docs/ (' + ', '.join(REQUIRED_DOCS) + ')')
