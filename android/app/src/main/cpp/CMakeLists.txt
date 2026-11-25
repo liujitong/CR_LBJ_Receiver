@@ -11,5 +11,8 @@ add_library(lbj SHARED
     lbj_jni.cpp
 )
 
+# 16 KB 页对齐（Android 15+ 设备与新版模拟器的兼容要求）
+target_link_options(lbj PRIVATE "-Wl,-z,max-page-size=16384")
+
 find_library(log-lib log)
 target_link_libraries(lbj PRIVATE ${log-lib})

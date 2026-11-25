@@ -30,9 +30,6 @@ android {
         // 手机端代际 v3：versionName 从 3.0 起算（桌面版 v2.x 体系独立）
         versionCode = 1
         versionName = "3.0"
-        ndk {
-            abiFilters += setOf("arm64-v8a", "armeabi-v7a")
-        }
     }
 
     signingConfigs {
@@ -49,9 +46,13 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // debug 保留全部 ABI：x86_64/x86 供模拟器验证（做法与 cw2 一致）
+            ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86") }
         }
         release {
             isMinifyEnabled = false
+            // release 只打 arm：arm64 覆盖现代手机，v7a 兜底老机器
+            ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a") }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
