@@ -3,7 +3,7 @@
 > 用一支几十元的 RTL-SDR，接收 821.2375 MHz 上的 LBJ 列车防护报警信号，
 > 实时解出车次、机车、线路、公里标、速度与经纬度，并在地图上跟着车跑。
 
-**版本** v2.5（2026-11） ｜ **平台** Windows 10 / 11 ｜ **许可** GPL v3 ｜ **作者** BG2GBQ
+**版本** v2.6（2026-11） ｜ **平台** Windows 10 / 11 ｜ **许可** GPL v3 ｜ **作者** BG2GBQ
 
 **目录**：[界面一览](#界面一览) ｜ [功能](#功能) ｜ [快速开始](#快速开始) ｜ [文档](#文档) ｜
 [运行与构建](#运行与构建) ｜ [目录结构](#目录结构) ｜ [更新记录](#更新记录) ｜
@@ -60,7 +60,7 @@ v2.4 把外观换成 **Fluent Design**，「输出 1 / 输出 2」收成一条�
 
 - 821.2375 MHz，POCSAG 1200 bps，BCH(31,21) 单比特纠错，同步字容错 ≤2 bit
 - 全字段解析：车次（含前缀）、机车号/代号、线路、公里标、方向、速度、**经纬度**、报文类别
-- 三种数据源，可保存多套随时切换：本机 USB（自动拉起 rtl_tcp）、局域网/本地 RTL-TCP、OpenWebRX
+- 四种数据源，可保存多套随时切换：本机 USB 直连（ctypes 调 librtlsdr，不经过 TCP）、本机 USB 经 rtl_tcp 中转、局域网/本地 RTL-TCP、OpenWebRX
 - **一站式启动**：`rtl_tcp.exe` / `rtlsdr.dll` 等随包内附，装完驱动插上棒子点「开始」就能收
 - **重复报文合并**：同一次广播的多帧只留最优一条，列表、地图、历史库都不再堆重复行
 
@@ -113,7 +113,7 @@ Windows 下 RTL2832U 默认是 DVB-T 电视棒驱动，必须换成 WinUSB：
 
 打开程序 →「配置 → 配置...」（`Ctrl+,`）→「数据源配置」页：
 
-- 棒子插在本机 → 选 **本机 RTL-SDR (USB 自动)**（默认就是它）
+- 棒子插在本机 → 选 **本机 RTL-SDR (USB 直连)**（默认就是它，打不开会自动退回中转）
 - 连局域网/本机的 rtl_tcp → 选 **局域网 / 本地 RTL-TCP**，填地址端口
 - 连 OpenWebRX → 选 **OWRX**（注意 DC 偏移要设 0）
 
@@ -199,7 +199,8 @@ CR_LBJ_Receiver/
 │   ├── runtime.py              共享运行时：路径 / 常量 / 缩放 / 控件别名
 │   ├── gui.py                  GUI 组装层
 │   ├── app.py                  启动层（参数 / 配置 / 主题 / QApplication）
-│   ├── core/                   解码内核：decoder.py、bridge.py
+│   ├── core/                   内核：decoder.py（DSP/解码）、usb_direct.py（USB 直连）、
+│   │                           source_stats.py（诊断口径）、rtl_paths.py（文件定位）、bridge.py
 │   ├── data/                   数据：loco_info.py（车型表）、history.py（SQLite）
 │   ├── ui/                     界面：theme.py / widgets.py / map_panel.py
 │   │   ├── components/         频谱、基础组件、信息面板、历史面板、车次查询
@@ -209,7 +210,7 @@ CR_LBJ_Receiver/
 ├── build.py / SDR_LBJ.spec     构建脚本与打包配置
 ├── lbj_config.json / 国铁.ico / LICENSE / README.md
 ├── docs/                       四份文档（含 架构说明.md）
-├── tools/rtl/                  随包分发的 RTL-SDR 命令行工具
+├── tools/rtl/                  随包分发：rtl_tcp / rtl_test / rtlsdr.dll
 └── dist/                       构建产物：EXE + README + docs
 ```
 
@@ -221,6 +222,7 @@ CR_LBJ_Receiver/
 
 | 版本 | 概要 |
 |---|---|
+| **v2.6** | 本机 USB 改为 **librtlsdr 直连**（ctypes 调 `rtlsdr.dll`，不再拉起 rtl_tcp 子进程、不走 TCP），直连失败自动回退中转；「检测设备」可读 tuner 型号并按型号推荐采样率/增益/DC；数据源类型扩为 4 种；诊断统计抽成网络源与 USB 源共用口径；块率/丢块/抖动指标不变 |
 | **v2.5** | 修复多屏混合 DPI（100% / 200% 屏）下窗口溢出与布局错乱；详情记录改 5 页签；配置菜单直接列分项；开始/停止合成状态开关；去掉写死的频率标签；底栏并成真正的一行；中段压缩、上段放大；修底部黑条；联网重核机车参数并移除机车图片区域；源码按 core / data / ui / utils 分层，GUI 巨石拆成 29 个模块，入口统一为 `main.py` |
 | **v2.4** | 外观换成 Fluent Design（qfluentwidgets）；底栏压成一条（左边最新一条日志、右边一句话状态），地图变大；字号按屏幕四档放大；「当前解码」与「历史记录」列统一为 10 列；地图底图跟随界面日夜 |
 | **v2.3.1** | 地图体验修复版：解决「来车后拖不动地图」和定位点偏移；新增默认中心（填地名即可，不加标记）与「中心」按钮；修好夜间配色不生效 |

@@ -85,11 +85,11 @@ class DspBridge(QThread):
         self.statusUpdated.emit(st)
 
     def _emitDiagnostics(self):
-        """发射网络诊断信息到日志和信号 (每 10 秒一次)。"""
+        """发射链路诊断信息到日志和信号 (每 10 秒一次)。"""
         if not self.core:
             return
         diag = self.core.getNetworkDiagnostics()
-        # 更新 _lastStats 中的网络字段
+        # 更新 _lastStats 中的链路字段
         self._lastStats['reconnectCount'] = diag.get('reconnectCount', 0)
         self._lastStats['blocksPerSec'] = diag.get('blocksPerSec', 0.0)
         self._lastStats['jitterCv'] = diag.get('jitterCv', 0.0)
@@ -100,7 +100,7 @@ class DspBridge(QThread):
         if issues:
             self._lastStats['diagnostics'] = issues[0]
         elif diag.get('blocksPerSec', 0) > 0:
-            self._lastStats['diagnostics'] = '网络正常'
+            self._lastStats['diagnostics'] = '正常'
         else:
             self._lastStats['diagnostics'] = '等待数据'
         # 发射结构化信号

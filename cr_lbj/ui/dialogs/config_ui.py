@@ -10,16 +10,32 @@ from __future__ import annotations
 from cr_lbj.runtime import *  # noqa: F401,F403
 
 class DeviceDetectThread(QThread):
-    """后台检测 RTL-SDR 设备，避免阻塞界面。"""
+    """后台检测 RTL-SDR 设备，避免阻塞界面。
 
-    done = Signal(bool, str)
+    优先用 librtlsdr 直连枚举（能拿到 tuner 型号与可用增益，据此推荐参数）；
+    拿不到时退回 rtl_test -t，至少告诉用户设备在不在。
+    """
+
+    done = Signal(bool, str, object)
 
     def run(self):
+        info = {'devices': [], 'profiles': [], 'via': 'usb'}
         try:
-            ok, msg = detect_rtl_devices(10.0)
+            info = probeDevices()
+            ok, msg = bool(info.get('devices')), info.get('text', '')
         except Exception as e:
-            ok, msg = False, str(e)
-        self.done.emit(ok, msg)
+            ok, msg = False, f'USB 直连检测失败: {e}'
+        if not ok:
+            ok2, msg2 = False, ''
+            try:
+                ok2, msg2 = detect_rtl_devices(10.0)
+            except Exception as e:
+                msg2 = str(e)
+            msg = msg + '\n\n[rtl_test -t]\n' + msg2
+            ok = ok or ok2
+            if ok2:
+                info['via'] = 'rtl_test'
+        self.done.emit(ok, msg, info)
 
 
 class SourceEditDialog(QDialog):
@@ -91,7 +107,7 @@ class SourceEditDialog(QDialog):
 
     def _onType(self):
         t = self.typeCombo.currentData()
-        if t == 'rtl_usb':
+        if t in ('rtl_usb', 'rtl_usb_tcp'):
             self.hostEdit.setText('127.0.0.1')
             if self.dcSpin.value() < 1:
                 self.dcSpin.setValue(50000)
@@ -171,7 +187,7 @@ class ConfigPanel(QWidget):
         self.devIndexSpin.setToolTip('多支 RTL-SDR 时选择设备序号 (0 为第一支)')
 
         self.rtlPathEdit = QLineEdit(getattr(config, 'rtlTcpPath', '') or '')
-        self.rtlPathEdit.setPlaceholderText('留空自动查找 rtl_tcp.exe')
+        self.rtlPathEdit.setPlaceholderText('留空自动查找（仅 rtl_tcp 中转模式需要）')
         pathBtn = K.small_button('浏览', h=26, px=11.5)
         pathBtn.clicked.connect(self._browseRtlTcp)
 
@@ -505,8 +521,7 @@ class ConfigPanel(QWidget):
         self.sourceCombo.blockSignals(True)
         self.sourceCombo.clear()
         for s in self._sources:
-            tag = {'rtl_usb': 'USB', 'rtl_tcp': 'TCP', 'owrx': 'OWRX'}.get(
-                s.get('type', 'rtl_tcp'), '?')
+            tag = SOURCE_TYPE_TAGS.get(s.get('type', 'rtl_tcp'), '?')
             self.sourceCombo.addItem(f"{s.get('name', '数据源')}  [{tag}]")
         self.sourceCombo.setCurrentIndex(self._activeSource)
         self.sourceCombo.blockSignals(False)
@@ -559,7 +574,7 @@ class ConfigPanel(QWidget):
         if self._updating_mode:
             return
         t = self.srcTypeCombo.currentData()
-        if t == 'rtl_usb':
+        if t in ('rtl_usb', 'rtl_usb_tcp'):
             self.hostEdit.setText('127.0.0.1')
             if abs(self.dcSpin.value()) < 1:
                 self.dcSpin.setValue(50000)
@@ -609,17 +624,58 @@ class ConfigPanel(QWidget):
         self._detectThread.done.connect(self._onDetectDone)
         self._detectThread.start()
 
-    def _onDetectDone(self, ok: bool, msg: str):
+    def _onDetectDone(self, ok: bool, msg: str, info: Optional[dict] = None):
         self.srcDetectBtn.setEnabled(True)
         self.srcDetectBtn.setText('检测设备')
+        info = info or {}
+        profiles = info.get('profiles') or []
         box = QMessageBox(self)
         box.setWindowTitle('RTL-SDR 设备检测')
         box.setIcon(QMessageBox.Information if ok else QMessageBox.Warning)
         box.setText('已找到 RTL-SDR 设备' if ok else '未检测到可用设备')
-        box.setInformativeText('可直接选择“本机 USB (自动启动 rtl_tcp)”数据源。'
-                               if ok else '请检查 USB 连接与 WinUSB 驱动（Zadig）。')
-        box.setDetailedText(msg[-3000:] if msg else '(无输出)')
+        if profiles:
+            p = profiles[0]
+            box.setInformativeText(
+                f"tuner: {p['tuner']}    推荐 {p['sampleRate'] // 1000} kS/s · "
+                f"{p['gainDb']} dB 手动 · AGC 关 · DC {int(p['dcOffsetHz'])} Hz\n"
+                '点「应用推荐参数」填进当前数据源（本机 USB 直连）。')
+        elif ok:
+            box.setInformativeText('设备可用，但未能读取 tuner 型号。'
+                                   '可直接使用「本机 USB (直连)」数据源。')
+        else:
+            box.setInformativeText('请检查 USB 连接与 WinUSB 驱动（Zadig）。'
+                                   '若直连不可用，程序会自动回退到 rtl_tcp 中转。')
+        box.setDetailedText(msg[-4000:] if msg else '(无输出)')
+        applyBtn = None
+        if profiles:
+            applyBtn = box.addButton('应用推荐参数', QMessageBox.AcceptRole)
+        box.addButton('关闭', QMessageBox.RejectRole)
         box.exec()
+        if applyBtn is not None and box.clickedButton() is applyBtn:
+            self._applyProfile(profiles[0])
+
+    def _applyProfile(self, prof: dict):
+        """把推荐参数写进当前数据源，并把类型切到本机 USB 直连。"""
+        sr = int(prof.get('sampleRate', 960000))
+        idx = self.srCombo.findData(sr)
+        if idx < 0:
+            self.srCombo.addItem(f'{sr // 1000} kS/s', sr)
+            idx = self.srCombo.count() - 1
+        self._updating_mode = True
+        try:
+            self.srCombo.setCurrentIndex(idx)
+            self.gainSpin.setValue(float(prof.get('gainDb', 19.7)))
+            self.dcSpin.setValue(float(prof.get('dcOffsetHz', 50000.0)))
+            self.devIndexSpin.setValue(int(prof.get('index', 0) or 0))
+            ti = self.srcTypeCombo.findData('rtl_usb')
+            if ti >= 0:
+                self.srcTypeCombo.setCurrentIndex(ti)
+        finally:
+            self._updating_mode = False
+        self._storeFieldsToSource(self._activeSource)
+        name = f"本机 RTL-SDR ({prof.get('tuner', 'USB')} 直连)"
+        self._sources[self._activeSource]['name'] = name
+        self._refreshSourceCombo()
 
     def _readConfig(self) -> Optional[CoreConfig]:
         try:

@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.5')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.6')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -423,7 +423,7 @@ class MainWindow(QMainWindow):
         self.titleLabel = QLabel('中国铁路 LBJ 列车预警器')
         self.titleLabel.setStyleSheet(
             f'color: {CLR("accent")}; font-size: {spx(15)}px; font-weight: bold;')
-        self.titleLabel.setToolTip('中国铁路 LBJ 列车预警器解码程序 v2.5')
+        self.titleLabel.setToolTip('中国铁路 LBJ 列车预警器解码程序 v2.6')
         # 按 QSS 的真实字号量宽度：widget 的 fontMetrics() 此刻还是应用默认
         # 字体（QSS 尚未 polish），旧版算出的 156px 小于实际需要的 192px，
         # 结果标题被 setMaximumWidth 截断。这里显式按 spx(15) 构造字体度量。
@@ -963,7 +963,7 @@ class MainWindow(QMainWindow):
             self.connIndicator.setStyleSheet(f'color: {CLR("err")}; font-size: 12px; font-weight: bold;')
 
     def _onDiagnostics(self, diag: dict):
-        """网络诊断信号回调。
+        """链路诊断信号回调。
 
         v2.2 起主界面不再有「系统状态」页签：诊断结果进日志与仪表板
         （Ctrl+D → 链路组），这里只做轻量提示，不参与布局刷新。
@@ -1028,8 +1028,11 @@ class MainWindow(QMainWindow):
         diag = str(stats.get('diagnostics', 'OK'))
 
         group('链路')
-        kv('数据源', '%s  %s:%s' % (getattr(cfg, 'sourceType', '-'),
-                                 getattr(cfg, 'host', '-'), getattr(cfg, 'port', '-')))
+        # USB 直连没有端点，只有网络源才显示 host:port
+        srcLabel = str(st.get('sourceName') or getattr(cfg, 'sourceType', '-'))
+        if getattr(cfg, 'sourceType', '') in ('rtl_tcp', 'owrx'):
+            srcLabel += '  %s:%s' % (getattr(cfg, 'host', '-'), getattr(cfg, 'port', '-'))
+        kv('数据源', srcLabel)
         kv('连接', '已连接' if conn else '未连接', 'ok' if conn else 'err')
         recon = int(stats.get('reconnectCount', 0) or 0)
         kv('重连次数', str(recon), 'warn' if recon else '')

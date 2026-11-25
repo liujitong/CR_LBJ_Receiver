@@ -31,8 +31,9 @@ from cr_lbj.core.decoder import (
     DEFAULT_BW_KHZ, DEFAULT_RSSI_THRESHOLD_DB, DEFAULT_RSSI_HYST_DB,
     DEFAULT_RSSI_HOLD_MS, DEFAULT_AFC_MAX_HZ, DEFAULT_ETA_MAX_SECONDS,
     HW_GAIN_DB, PPM, BLOCK_SIZE, BASEBAND_RATE,
-    detect_rtl_devices, find_rtl_tool,
+    detect_rtl_devices, find_rtl_tool, SOURCE_TYPE_NAMES,
 )
+from cr_lbj.core.usb_direct import probeDevices, probeDevice, recommendProfile
 from cr_lbj.data.loco_info import lookup_loco, format_loco_brief
 from cr_lbj.ui.map_panel import MapPanel, HAS_WEBENGINE
 from cr_lbj.ui import theme as TH

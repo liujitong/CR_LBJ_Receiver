@@ -46,6 +46,11 @@ import numpy as np
 from scipy.signal import firwin, lfilter, lfilter_zi
 import scipy.signal as ssig
 
+# 同层基础模块：路径查找、块级统计、USB 直连数据源
+from cr_lbj.core.rtl_paths import runtime_dirs as _runtime_dirs, find_rtl_tool
+from cr_lbj.core.source_stats import buildDiagnostics, recordBlock
+from cr_lbj.core.usb_direct import RtlSdrDirectSource, RtlSdrError
+
 
 # ===========================================================================
 # 全局常量
@@ -80,6 +85,15 @@ CMD_SET_GAINMODE = 3           # 设置增益模式 (0=auto, 1=manual)
 CMD_SET_GAIN = 4               # 设置增益 (1/10 dB)
 CMD_SET_FREQCORR = 5           # 设置频率校正 (ppm)
 CMD_SET_AGC = 8                # 设置 AGC (0=off, 1=on)
+
+# 数据源类型 → 日志/状态栏显示名（界面下拉的完整文案见 SOURCE_TYPE_LABELS）
+SOURCE_TYPE_NAMES = {
+    'rtl_usb': '本机 USB 直连',
+    'rtl_usb_tcp': '本机 USB (rtl_tcp 中转)',
+    'rtl_tcp': 'RTL-TCP',
+    'owrx': 'OWRX',
+}
+_SOURCE_TYPES = tuple(SOURCE_TYPE_NAMES)
 
 
 # ===========================================================================
@@ -186,7 +200,9 @@ class CoreConfig:
     blockSize: int = BLOCK_SIZE            # 每次读取 IQ 样本数
     dcOffsetHz: float = DEFAULT_DC_OFFSET_HZ  # DDC 偏移 (Hz)，传统模式默认 50000
     owrxMode: bool = False                  # 是否为 OWRX 模式 (默认传统 RTL-TCP)
-    # 数据源: 'rtl_tcp' 远程/本地 rtl_tcp | 'owrx' OpenWebRX 兼容 | 'rtl_usb' 本机 USB 自动拉起 rtl_tcp
+    # 数据源: 'rtl_usb' 本机 USB 直连 librtlsdr (推荐, 无 TCP) |
+    #         'rtl_usb_tcp' 本机 USB 经 rtl_tcp 子进程中转 (兼容模式) |
+    #         'rtl_tcp' 远程/本地 rtl_tcp | 'owrx' OpenWebRX 兼容
     sourceType: str = 'rtl_tcp'
     sources: List[Dict[str, Any]] = field(default_factory=list)  # 数据源配置列表
     activeSource: int = 0                   # 当前数据源索引
@@ -257,7 +273,7 @@ class CoreConfig:
         if not c.sources:
             c.sources = [{
                 'name': 'OWRX 数据源' if c.sourceType == 'owrx' else 'RTL-TCP 数据源',
-                'type': c.sourceType if c.sourceType in ('rtl_tcp', 'owrx', 'rtl_usb') else 'rtl_tcp',
+                'type': c.sourceType if c.sourceType in _SOURCE_TYPES else 'rtl_tcp',
                 'host': c.host, 'port': c.port, 'sampleRate': c.sampleRate,
                 'gainDb': c.gainDb, 'ppm': c.ppm, 'dcOffsetHz': c.dcOffsetHz,
             }]
@@ -1444,19 +1460,8 @@ class RtlTcpSource:
                     # uint8 → complex64
                     raw = np.frombuffer(data, dtype=np.uint8).astype(np.float32)
                     iq = (raw[0::2] - 127.5) / 128.0 + 1j * (raw[1::2] - 127.5) / 128.0
-                    # ---- 网络诊断统计 ----
-                    now = time.time()
-                    if self.lastBlockTime > 0:
-                        interval = now - self.lastBlockTime
-                        self.blockIntervals.append(interval)
-                        if len(self.blockIntervals) > 30:
-                            self.blockIntervals.pop(0)
-                    self.lastBlockTime = now
-                    self.blockSizes.append(len(iq))  # 样本数
-                    if len(self.blockSizes) > 30:
-                        self.blockSizes.pop(0)
-                    self.blockCount += 1
-                    self.bytesRecv += len(data)
+                    # ---- 块级统计（与 USB 直连源共用同一口径）----
+                    recordBlock(self, len(iq), len(data))
                     try:
                         self.queue.put_nowait(iq.astype(np.complex64))
                     except queue.Full:
@@ -1538,95 +1543,15 @@ class RtlTcpSource:
             reconnectCount: 重连次数
             jitterCv: 块间隔变异系数 (std/mean)
             issues: 已识别的问题列表
+
+        具体计算见 cr_lbj/core/source_stats.py，USB 直连源用同一套口径。
         """
-        intervals = self.blockIntervals
-        sizes = self.blockSizes
-        avgInterval = sum(intervals) / len(intervals) if intervals else 0.0
-        avgSize = sum(sizes) / len(sizes) if sizes else 0.0
-        blocksPerSec = (1.0 / avgInterval) if avgInterval > 0 else 0.0
-        # 等效数据速率: 样本数 × 8(complex64 bytes/sample) × 8(bits/byte) / 1e6
-        dataRateMbps = (avgSize * 8 * 8 * blocksPerSec) / 1e6 if blocksPerSec > 0 else 0.0
-        # 抖动 CV = std / mean
-        cv = 0.0
-        if len(intervals) >= 2 and avgInterval > 0:
-            variance = sum((x - avgInterval) ** 2 for x in intervals) / len(intervals)
-            cv = (variance ** 0.5) / avgInterval
-        queueSize = self.queue.qsize()
-        queueMax = self.queue.maxsize
-        # 问题识别
-        issues: List[str] = []
-        if avgInterval > 0.5:
-            issues.append(f'块间隔过长 {avgInterval:.2f}s (服务器响应慢)')
-        elif avgInterval > 0.1 and blocksPerSec < 15:
-            issues.append(f'数据速率低 {blocksPerSec:.1f} 块/s (正常 30+)')
-        if queueSize > queueMax - 5:
-            issues.append(f'队列积压 {queueSize}/{queueMax} (处理跟不上)')
-        if self.droppedBlocks > 0:
-            issues.append(f'已丢弃 {self.droppedBlocks} 块 (DSP 跟不上)')
-        if self.reconnectCount > 0:
-            issues.append(f'已重连 {self.reconnectCount} 次')
-        if avgSize > 0 and avgSize < 1024:
-            issues.append(f'块过小 {avgSize:.0f} 样本 (服务器可能限流)')
-        if cv > 0.5:
-            issues.append(f'抖动大 CV={cv:.2f} (网络不稳定)')
-        return {
-            'blocksPerSec': blocksPerSec,
-            'avgIntervalMs': avgInterval * 1000,
-            'avgBlockSize': avgSize,
-            'dataRateMbps': dataRateMbps,
-            'queueSize': queueSize,
-            'queueMax': queueMax,
-            'droppedBlocks': self.droppedBlocks,
-            'totalBlocks': self.blockCount,
-            'reconnectCount': self.reconnectCount,
-            'jitterCv': cv,
-            'issues': issues,
-        }
+        return buildDiagnostics(self, 'net')
 
 
 # ===========================================================================
-# 本机 RTL-SDR: 自动查找并拉起 rtl_tcp
+# 本机 RTL-SDR: 设备检测与 rtl_tcp 兜底方案
 # ===========================================================================
-def _runtime_dirs() -> List[str]:
-    """返回可能存放 rtl_tcp.exe 的目录（按优先级）。"""
-    import sys
-    roots = []
-    if getattr(sys, 'frozen', False):
-        roots.append(os.path.dirname(os.path.abspath(sys.executable)))
-        meipass = getattr(sys, '_MEIPASS', '')
-        if meipass:
-            roots.append(os.path.join(meipass, 'rtl'))
-    roots.append(os.path.dirname(os.path.abspath(__file__)))
-    roots.append(os.getcwd())
-    dirs = []
-    for root in roots:
-        p = os.path.abspath(root)
-        for _ in range(6):  # 逐级向上，兼容 tools/rtl、RTL_TCP_Server 与程序目录
-            dirs += [p, os.path.join(p, 'tools', 'rtl'),
-                     os.path.join(p, 'rtl'),
-                     os.path.join(p, 'RTL_TCP_Server')]
-            parent = os.path.dirname(p)
-            if parent == p:
-                break
-            p = parent
-    out = []
-    for d in dirs:
-        d = os.path.abspath(d)
-        if d not in out and os.path.isdir(d):
-            out.append(d)
-    return out
-
-
-def find_rtl_tool(name: str) -> Optional[str]:
-    """查找 rtl_tcp.exe / rtl_test.exe 等工具，找不到返回 None。"""
-    exe = name if name.lower().endswith('.exe') else name + '.exe'
-    for d in _runtime_dirs():
-        p = os.path.join(d, exe)
-        if os.path.isfile(p):
-            return p
-    return shutil.which(exe) or shutil.which(name)
-
-
 def detect_rtl_devices(timeout: float = 10.0) -> (bool, str):
     """调用 rtl_test -t 检测本机 RTL-SDR 设备。
 
@@ -1676,10 +1601,12 @@ def _free_port(start: int = 1234) -> int:
 
 
 class RtlUsbSource(RtlTcpSource):
-    """本机 USB RTL-SDR 数据源：自动拉起 rtl_tcp 后复用 TCP 协议。
+    """本机 USB RTL-SDR 数据源（经 rtl_tcp 中转，兼容模式）。
 
-    省去用户手动开命令行启动 rtl_tcp 的步骤。若目标端口已有 rtl_tcp 在跑，
-    直接复用；否则用 rtl_tcp.exe 在空闲端口启动，并在 close() 时结束进程。
+    v2.5 起「本机 USB」默认走 librtlsdr 直连（见 usb_direct.RtlSdrDirectSource），
+    本类保留为兜底：直连不可用时由 RtlUsbAutoSource 自动启用，也允许用户在
+    数据源类型里显式选择。行为与旧版一致——若目标端口已有 rtl_tcp 在跑就直接
+    复用，否则用 rtl_tcp.exe 在空闲端口启动，并在 close() 时结束进程。
     """
 
     def __init__(self, host: str, port: int, freqHz: float, sampleRate: int,
@@ -1746,6 +1673,49 @@ class RtlUsbSource(RtlTcpSource):
                     pass
         self._proc = None
         self._spawned = False
+
+
+class RtlUsbAutoSource:
+    """本机 USB 数据源：优先 librtlsdr 直连，失败时回退 rtl_tcp 中转。
+
+    界面上的「本机 USB」只给用户一个选项，走哪条路由这里决定：直连可用就
+    省掉子进程和本地 TCP；直连不可用（dll 缺失、位数不符、设备被占用）时
+    自动退回旧方案，行为与 v2.5 之前一致，用户无感。
+
+    只做转发，不复制统计逻辑：所有属性访问都落到当前激活的那个数据源上。
+    """
+
+    _fallback = None      # 类级默认值，避免 __getattr__ 递归
+
+    def __init__(self, direct, fallbackFactory: Optional[Callable[[], Any]] = None,
+                 log: Optional[Callable[[str], None]] = None):
+        self._direct = direct
+        self._fallbackFactory = fallbackFactory
+        self._log = log
+        self.mode = 'direct'
+
+    @property
+    def active(self):
+        """当前真正在用的数据源对象。"""
+        return self._fallback or self._direct
+
+    def open(self):
+        try:
+            self._direct.open()
+            self.mode = 'direct'
+        except Exception as e:
+            fb = self._fallbackFactory() if self._fallbackFactory else None
+            if fb is None:
+                raise
+            if self._log:
+                self._log(f'[数据源] USB 直连不可用（{e}），改用 rtl_tcp 中转')
+            self._fallback = fb
+            self.mode = 'tcp'
+            fb.open()
+
+    def __getattr__(self, name):
+        # 除上面显式定义的成员外，一律透传给激活的数据源
+        return getattr(self.active, name)
 
 
 # ===========================================================================
@@ -2287,6 +2257,19 @@ class LbjCore:
         self._thread: Optional[threading.Thread] = None
         self._buildChain(userKm, routeKm, etaMaxMin)
 
+    def _usbTcpFallback(self, freqHz: float):
+        """生成「回退到 rtl_tcp 中转」的工厂函数；没有 rtl_tcp.exe 则返回 None。"""
+        path = self.rtlTcpPath or find_rtl_tool('rtl_tcp')
+        if not path or not os.path.isfile(path):
+            return None
+
+        def make() -> RtlUsbSource:
+            return RtlUsbSource(
+                self.host, self.port, freqHz, self.sampleRate, self.blockSize,
+                dcOffsetHz=self.dcOffsetHz, gainDb=self.gainDb, ppm=self.ppm,
+                rtlTcpPath=path, deviceIndex=self.rtlDeviceIndex)
+        return make
+
     def _buildChain(self, userKm, routeKm, etaMaxMin):
         """构造 DSP 链路。"""
         freqHz = self.freqMhz * 1e6
@@ -2295,6 +2278,15 @@ class LbjCore:
             userKm=userKm, maxSeconds=max(1.0, etaMaxMin * 60.0),
             routeKmMap=routeKmMap)
         if self.sourceType == 'rtl_usb':
+            # 直连优先，不经过 rtl_tcp 子进程；失败自动回退中转（见 RtlUsbAutoSource）
+            self.source = RtlUsbAutoSource(
+                RtlSdrDirectSource(
+                    freqHz, self.sampleRate, self.blockSize,
+                    dcOffsetHz=self.dcOffsetHz, gainDb=self.gainDb,
+                    ppm=self.ppm, deviceIndex=self.rtlDeviceIndex),
+                self._usbTcpFallback(freqHz),
+                log=self._log)
+        elif self.sourceType == 'rtl_usb_tcp':
             self.source = RtlUsbSource(
                 self.host, self.port, freqHz, self.sampleRate, self.blockSize,
                 dcOffsetHz=self.dcOffsetHz, gainDb=self.gainDb, ppm=self.ppm,
@@ -2361,9 +2353,10 @@ class LbjCore:
         self.running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        srcName = {'rtl_usb': '本机 USB RTL-SDR', 'owrx': 'OWRX',
-                   'rtl_tcp': 'RTL-TCP'}.get(self.sourceType, self.sourceType)
-        self._log(f'[启动] {srcName} {self.host}:{self.port} '
+        srcName = SOURCE_TYPE_NAMES.get(self.sourceType, self.sourceType)
+        # 直连 / OWRX 不走 TCP，端点信息没意义，只报射频参数
+        endpoint = '' if self.sourceType in ('rtl_usb', 'owrx') else f' {self.host}:{self.port}'
+        self._log(f'[启动] {srcName}{endpoint} '
                   f'采样率 {self.sampleRate // 1000}k 频率 {self.freqMhz:.4f} MHz')
         self._log(f'[链路] {self.frontend.chainDesc}')
 
@@ -2482,6 +2475,13 @@ class LbjCore:
         except queue.Empty:
             return None
 
+    def _sourceDisplayName(self) -> str:
+        """数据源显示名；USB 直连失败回退中转时在名字上标出来。"""
+        name = SOURCE_TYPE_NAMES.get(self.sourceType, self.sourceType)
+        if self.sourceType == 'rtl_usb' and getattr(self.source, 'mode', '') == 'tcp':
+            name += ' (已回退中转)'
+        return name
+
     def getStatus(self) -> Dict[str, Any]:
         """获取当前状态快照。"""
         return {
@@ -2497,17 +2497,16 @@ class LbjCore:
             'freqMhz': self.freqMhz,
             'chainDesc': self.frontend.chainDesc,
             'sourceType': self.sourceType,
-            'sourceName': {'rtl_usb': '本机 USB', 'owrx': 'OWRX',
-                           'rtl_tcp': 'RTL-TCP'}.get(self.sourceType, self.sourceType),
+            'sourceName': self._sourceDisplayName(),
             'dedupeWindow': self.dedupeWindow,
             'dupDropped': self._dedupe.dropped if hasattr(self, '_dedupe') else 0,
             'dupUpgraded': self._dedupe.upgraded if hasattr(self, '_dedupe') else 0,
         }
 
     def getNetworkDiagnostics(self) -> Dict[str, Any]:
-        """获取网络层诊断数据 (来自 RtlTcpSource)。
+        """获取链路层诊断数据（网络源与 USB 直连源同口径）。
 
-        返回 RtlTcpSource.getDiagnostics() 的结果；若数据源尚未建立则返回空诊断。
+        返回当前数据源 getDiagnostics() 的结果；若数据源尚未建立则返回空诊断。
         """
         if hasattr(self, 'source') and self.source:
             return self.source.getDiagnostics()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""build.py — CR-LBJ-Receiver 一键构建（v2.5）
+"""build.py — CR-LBJ-Receiver 一键构建（v2.6）
 
 用法:
     python build.py                # 清理 -> 打包 -> 清理过程文件 -> 校验
@@ -15,7 +15,7 @@
     main.py            程序入口
     cr_lbj/            应用包（core / data / ui / utils + runtime / gui / app）
     SDR_LBJ.spec       打包配置；build.py 本脚本
-    文档   docs/       用户手册 / 高德地图配置手册 / 技术参考 / 架构说明
+    文档   docs/       用户手册 / 高德地图配置手册 / 技术参考 / 架构说明 / USB 直连调研
     产物   dist/       CR-LBJ-Receiver.exe + README.md + docs/
 """
 
@@ -34,7 +34,8 @@ BUILD = os.path.join(ROOT, 'build')
 EXE_NAME = 'CR-LBJ-Receiver.exe'
 
 # 构建产物中必须存在的文档（相对 dist/docs）
-REQUIRED_DOCS = ['用户手册.md', '高德地图配置手册.md', '技术参考.md', '架构说明.md']
+REQUIRED_DOCS = ['用户手册.md', '高德地图配置手册.md', '技术参考.md',
+                 '架构说明.md', '调研-USB直连与设备自适应连接.md']
 
 
 def log(msg: str) -> None:

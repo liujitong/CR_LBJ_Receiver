@@ -330,7 +330,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v2.5  ·  2026-11')
+        ver = QLabel('v2.6  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)

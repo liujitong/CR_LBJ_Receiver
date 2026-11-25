@@ -115,7 +115,9 @@ def default_sources(cfg: CoreConfig) -> List[Dict[str, Any]]:
     base = {'sampleRate': cfg.sampleRate, 'gainDb': cfg.gainDb,
             'ppm': cfg.ppm}
     return [
-        dict(base, name='本机 RTL-SDR (USB 自动)', type='rtl_usb',
+        dict(base, name='本机 RTL-SDR (USB 直连)', type='rtl_usb',
+             host='127.0.0.1', port=1234, dcOffsetHz=50000.0),
+        dict(base, name='本机 RTL-SDR (rtl_tcp 中转)', type='rtl_usb_tcp',
              host='127.0.0.1', port=1234, dcOffsetHz=50000.0),
         dict(base, name='本地 rtl_tcp', type='rtl_tcp',
              host='127.0.0.1', port=1234, dcOffsetHz=50000.0),
@@ -125,10 +127,15 @@ def default_sources(cfg: CoreConfig) -> List[Dict[str, Any]]:
 
 
 SOURCE_TYPE_LABELS = [
-    ('本机 USB (自动启动 rtl_tcp)', 'rtl_usb'),
+    ('本机 USB (直连，推荐)', 'rtl_usb'),
+    ('本机 USB (经 rtl_tcp 中转)', 'rtl_usb_tcp'),
     ('局域网 / 本地 RTL-TCP', 'rtl_tcp'),
     ('OWRX (OpenWebRX)', 'owrx'),
 ]
+
+#: 数据源类型在列表里的短标签
+SOURCE_TYPE_TAGS = {'rtl_usb': 'USB', 'rtl_usb_tcp': 'USB*',
+                    'rtl_tcp': 'TCP', 'owrx': 'OWRX'}
 
 #: 配置分页名（与 ConfigPanel 里的 page(...) 名字一一对应）。
 #: 「配置」菜单直接列这几项，点哪项就单独开哪一页，不再用页签切换。

@@ -1,21 +1,21 @@
 {
-  "host": "nc.example.com",
-  "port": 5678,
+  "host": "127.0.0.1",
+  "port": 1234,
   "sampleRate": 960000,
   "freqMhz": 821.2375,
   "gainDb": 15.7,
   "ppm": 1.0,
   "bwKhz": 35.0,
   "blockSize": 65536,
-  "dcOffsetHz": 0.0,
-  "owrxMode": true,
-  "sourceType": "owrx",
+  "dcOffsetHz": 50000.0,
+  "owrxMode": false,
+  "sourceType": "rtl_usb",
   "sources": [
     {
       "sampleRate": 960000,
       "gainDb": 15.7,
       "ppm": 1.0,
-      "name": "本机 RTL-SDR (USB 自动)",
+      "name": "本机 RTL-SDR (USB 直连)",
       "type": "rtl_usb",
       "host": "127.0.0.1",
       "port": 1234,
@@ -25,8 +25,8 @@
       "sampleRate": 960000,
       "gainDb": 15.7,
       "ppm": 1.0,
-      "name": "本机 RTL-SDR (USB 自动)",
-      "type": "rtl_tcp",
+      "name": "本机 RTL-SDR (rtl_tcp 中转)",
+      "type": "rtl_usb_tcp",
       "host": "127.0.0.1",
       "port": 1234,
       "dcOffsetHz": 50000.0
@@ -34,7 +34,7 @@
     {
       "sampleRate": 960000,
       "gainDb": 15.7,
-      "ppm": 1,
+      "ppm": 1.0,
       "name": "本地 rtl_tcp",
       "type": "rtl_tcp",
       "host": "127.0.0.1",
@@ -52,7 +52,7 @@
       "dcOffsetHz": 0.0
     }
   ],
-  "activeSource": 3,
+  "activeSource": 0,
   "rtlTcpPath": "",
   "rtlDeviceIndex": 0,
   "rssiThresholdDb": -55.0,
