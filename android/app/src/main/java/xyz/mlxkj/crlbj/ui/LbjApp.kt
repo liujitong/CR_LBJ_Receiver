@@ -65,7 +65,7 @@ fun LbjApp() {
             1 -> DecodePage(vm)
             2 -> HistoryPage()
             3 -> StatusPage(vm)
-            4 -> SettingsPage()
+            4 -> SettingsPage(vm)
         }
     }
 }

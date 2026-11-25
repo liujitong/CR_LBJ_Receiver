@@ -44,3 +44,7 @@ android/.kotlin/
 *.tmp
 *~
 android/_verify/
+
+# 对拍录制产物（大文件/调试）
+android/tools/duipai/*.iq
+android/tools/duipai/*_dbg.jsonl

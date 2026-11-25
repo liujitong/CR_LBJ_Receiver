@@ -32,6 +32,12 @@ data class ReceiverSettings(
     val afcMaxHz: Double = 8000.0,
     val afcGain: Double = 0.45,
     val keepAfcAfterPacket: Boolean = false,
+    // 业务层
+    val trainScheme: String = "auto",      // 车次规则: auto / 2026 / legacy
+    val dedupeWindow: Double = 2.5,        // 同车次重复报文合并窗口(秒)
+    val etaMaxMin: Double = 360.0,         // ETA 最大估算分钟数 (6h)
+    val userKm: String = "",               // 本站公里标 (km)，空=未设置
+    val routeKmText: String = "",          // 线路公里标: "线路=km,线路=km"
 ) {
     val isUsb: Boolean get() = sourceType == "usb"
 
@@ -57,7 +63,6 @@ data class ReceiverSettings(
         put("keepAfcAfterPacket", keepAfcAfterPacket)
         put("baudRate", 1200.0)
     }.toString()
-
     companion object {
         /** USB 直连推荐参数（桌面版 rtl_usb 档位） */
         val USB_DEFAULTS = ReceiverSettings(
@@ -87,6 +92,11 @@ data class ReceiverSettings(
                 afcMaxHz = Double.fromBits(sp.getLong("afcMaxHz", d.afcMaxHz.toRawBits())),
                 afcGain = Double.fromBits(sp.getLong("afcGain", d.afcGain.toRawBits())),
                 keepAfcAfterPacket = sp.getBoolean("keepAfcAfterPacket", d.keepAfcAfterPacket),
+                trainScheme = sp.getString("trainScheme", d.trainScheme) ?: d.trainScheme,
+                dedupeWindow = Double.fromBits(sp.getLong("dedupeWindow", d.dedupeWindow.toRawBits())),
+                etaMaxMin = Double.fromBits(sp.getLong("etaMaxMin", d.etaMaxMin.toRawBits())),
+                userKm = sp.getString("userKm", d.userKm) ?: d.userKm,
+                routeKmText = sp.getString("routeKmText", d.routeKmText) ?: d.routeKmText,
             )
         }
 
@@ -109,6 +119,11 @@ data class ReceiverSettings(
             e.putLong("afcMaxHz", s.afcMaxHz.toRawBits())
             e.putLong("afcGain", s.afcGain.toRawBits())
             e.putBoolean("keepAfcAfterPacket", s.keepAfcAfterPacket)
+            e.putString("trainScheme", s.trainScheme)
+            e.putLong("dedupeWindow", s.dedupeWindow.toRawBits())
+            e.putLong("etaMaxMin", s.etaMaxMin.toRawBits())
+            e.putString("userKm", s.userKm)
+            e.putString("routeKmText", s.routeKmText)
             e.apply()
         }
     }

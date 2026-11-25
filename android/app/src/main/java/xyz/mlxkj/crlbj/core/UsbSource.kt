@@ -10,6 +10,7 @@ import android.hardware.usb.UsbManager
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.IOException
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * USB 直连数据源（RTL-SDR 电视棒）。
@@ -59,10 +60,15 @@ class UsbSource(private val context: Context) : Source {
                     }
                 }
             }
-            context.registerReceiver(
-                receiver, IntentFilter(ACTION_USB_PERMISSION),
-                Context.RECEIVER_EXPORTED if (false) 0 else 0
-            )
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                context.registerReceiver(
+                    receiver, IntentFilter(ACTION_USB_PERMISSION),
+                    Context.RECEIVER_EXPORTED
+                )
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                context.registerReceiver(receiver, IntentFilter(ACTION_USB_PERMISSION))
+            }
             val pi = PendingIntent.getBroadcast(
                 context, 0,
                 Intent(ACTION_USB_PERMISSION).setPackage(context.packageName),
