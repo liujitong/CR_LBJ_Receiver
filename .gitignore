@@ -43,3 +43,4 @@ android/.kotlin/
 # 临时文件
 *.tmp
 *~
+android/_verify/
