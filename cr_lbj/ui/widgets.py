@@ -509,10 +509,13 @@ class CardBox(SimpleCardWidget if FLUENT else QFrame):
 
     用 Fluent 的 `SimpleCardWidget` 作底（自带圆角、卡片底色、深浅色适配），
     标题用加粗小字，右侧可挂一个小控件（如频谱的「图形 / 终端」分段选择器）。
+
+    title 传空字符串则不生成标题行：内容本身已带标识（比如页签写着
+    「当前解码 / 历史记录」）时，再来一行大字标题纯属重复，还占高度。
     """
 
-    def __init__(self, title: str, content: QWidget, right: QWidget = None,
-                 margins=(8, 6, 8, 6)):
+    def __init__(self, title: str = '', content: QWidget = None,
+                 right: QWidget = None, margins=(8, 6, 8, 6)):
         super().__init__()
         self.content = content
         self.setObjectName('cardBox')
@@ -522,22 +525,32 @@ class CardBox(SimpleCardWidget if FLUENT else QFrame):
                              spx(margins[2]), spx(margins[3]))
         v.setSpacing(spx(4))
 
-        head = QHBoxLayout()
-        head.setContentsMargins(spx(2), 0, spx(2), 0)
-        head.setSpacing(spx(6))
-        self.titleLabel = QLabel(title)
-        self.titleLabel.setStyleSheet(
-            f'background: transparent; color: {accentColor()};'
-            f' font-size: {fontPx(12)}px; font-weight: bold;')
-        head.addWidget(self.titleLabel, 0)
-        head.addStretch(1)
-        if right is not None:
+        self.titleLabel = None
+        if title:
+            head = QHBoxLayout()
+            head.setContentsMargins(spx(2), 0, spx(2), 0)
+            head.setSpacing(spx(6))
+            self.titleLabel = QLabel(title)
+            self.titleLabel.setStyleSheet(
+                f'background: transparent; color: {accentColor()};'
+                f' font-size: {fontPx(12)}px; font-weight: bold;')
+            head.addWidget(self.titleLabel, 0)
+            head.addStretch(1)
+            if right is not None:
+                head.addWidget(right, 0, Qt.AlignVCenter)
+            v.addLayout(head)
+        elif right is not None:
+            # 没标题但仍有右侧控件：单独一行放控件，避免它和内容抢高度
+            head = QHBoxLayout()
+            head.setContentsMargins(spx(2), 0, spx(2), 0)
             head.addWidget(right, 0, Qt.AlignVCenter)
-        v.addLayout(head)
+            head.addStretch(1)
+            v.addLayout(head)
         v.addWidget(content, 1)
 
     def setTitle(self, text: str) -> None:
-        self.titleLabel.setText(text)
+        if self.titleLabel is not None:
+            self.titleLabel.setText(text)
 
     # F-luent 的 CardWidget 只画一层「白色 + 13/170 透明度」的底，
     # 靠父控件透上来定深浅；父层是 Fusion 默认的浅色时整张卡就发白。

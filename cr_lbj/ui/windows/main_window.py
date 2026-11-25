@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.6')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v2.6.1')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -175,8 +175,6 @@ class MainWindow(QMainWindow):
             if geom is not None:
                 self.setGeometry(geom)
         self._isFullScreen = bool(on)
-        if hasattr(self, 'fullBtn'):
-            self.fullBtn.setText('退出全屏' if on else '全屏')
         if hasattr(self, 'actFullScreen'):
             self.actFullScreen.setChecked(bool(on))
         # 地图与频谱需要重新布局
@@ -269,10 +267,6 @@ class MainWindow(QMainWindow):
                 card.setMinimumWidth(
                     min(spx(168) if narrow else spx(210), maxCardW))
 
-        # 很窄时收起左上角标题，把宽度让给频率与连接状态
-        if hasattr(self, 'titleLabel'):
-            self.titleLabel.setVisible(w >= spx(980))
-
         # 地图重绘（尺寸变了，Leaflet 必须收到 resize）
         QTimer.singleShot(0, self._afterFullScreen)
 
@@ -302,21 +296,24 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def _buildMenu(self):
+        """菜单栏即顶栏（v2.6）：菜单在左，接收开关与连接指示在右侧角标。
+
+        旧版在菜单栏下面还有一整行「标题 + 接收开关 + 夜间 + 全屏」，字大、
+        占一行高度，还和菜单功能重复——全屏本来就是 视图→全屏 (F11)，
+        夜间切换是 视图→切换日间/夜间 (Ctrl+T)，标题则由操作系统标题栏显示。
+        「文件」菜单里只剩启动/停止/退出三项，前两项归入接收开关，退出挪进
+        帮助菜单底部，于是整个文件菜单撤掉，窗口省出一行。
+        """
         menubar = self.menuBar()
 
-        fileMenu = menubar.addMenu('文件(&F)')
-        actStart = QAction('启动 DSP', self)
-        actStart.triggered.connect(self.startDsp)
-        fileMenu.addAction(actStart)
-        actStop = QAction('停止 DSP', self)
-        actStop.triggered.connect(self.stopDsp)
-        fileMenu.addAction(actStop)
-        fileMenu.addSeparator()
-        actQuit = QAction('退出', self, shortcut='Ctrl+Q')
-        actQuit.triggered.connect(self.close)
-        fileMenu.addAction(actQuit)
-
         viewMenu = menubar.addMenu('视图(&V)')
+        self.actReceive = QAction('开始接收', self, shortcut='Ctrl+R')
+        self.actReceive.setCheckable(True)
+        self.actReceive.setToolTip('启动 / 停止 DSP 接收；全屏时也可用 Ctrl+R')
+        self.actReceive.triggered.connect(self._onRxSwitch)
+        viewMenu.addAction(self.actReceive)
+        viewMenu.addSeparator()
+
         self.actFullScreen = QAction('全屏', self, shortcut='F11')
         self.actFullScreen.setCheckable(True)
         self.actFullScreen.triggered.connect(
@@ -384,6 +381,44 @@ class MainWindow(QMainWindow):
         actAbout = QAction('关于', self)
         actAbout.triggered.connect(lambda: AboutDialog(self).exec())
         helpMenu.addAction(actAbout)
+        helpMenu.addSeparator()
+        actQuit = QAction('退出', self, shortcut='Ctrl+Q')
+        actQuit.triggered.connect(self.close)
+        helpMenu.addAction(actQuit)
+
+        # ---- 菜单栏右侧角标：连接指示 + 接收开关 ----
+        # 接收是最高频操作，不能藏进下拉菜单，放在菜单栏行尾一眼可见；
+        # 全屏隐藏菜单栏时仍可用 Ctrl+R 或 Esc 退出全屏后再操作。
+        corner = QWidget()
+        lay = QHBoxLayout(corner)
+        lay.setContentsMargins(spx(4), 0, spx(10), 0)
+        lay.setSpacing(spx(10))
+        self.connIndicator = QLabel('● 未连接')
+        self.connIndicator.setStyleSheet(self._connStyle('err'))
+        lay.addWidget(self.connIndicator)
+        self.rxSwitch = K.switch('接收', on_text='接收中')
+        self.rxSwitch.setToolTip('启动 / 停止 DSP 接收 (Ctrl+R)')
+        self.rxSwitch.checkedChanged.connect(self._onRxSwitch)
+        lay.addWidget(self.rxSwitch)
+        # Qt 文档：corner widget 的生存期由调用方负责，Qt 不会替你删；
+        # Python 侧必须长期持有引用，否则对象被 GC，角标整块消失。
+        self._menuCorner = corner
+        menubar.setCornerWidget(corner, Qt.TopRightCorner)
+
+    @staticmethod
+    def _connStyle(color_key: str) -> str:
+        """连接指示的统一内联样式（跟随主题色与界面倍率）。"""
+        return (f'background: transparent; color: {CLR(color_key)};'
+                f' font-size: {spx(12)}px; font-weight: bold;')
+
+    def _setConnIndicator(self, connected: bool):
+        """更新菜单栏右侧的连接指示（文本、颜色、提示一次到位）。"""
+        ind = getattr(self, 'connIndicator', None)
+        if ind is None:
+            return
+        ind.setText('● 已连接' if connected else '● 未连接')
+        ind.setStyleSheet(self._connStyle('ok' if connected else 'err'))
+        ind.setToolTip('数据源已连接' if connected else '数据源未连接')
 
     def _setUiScale(self, value: float):
         self.config.uiScale = float(value)
@@ -417,50 +452,9 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(spx(4), spx(4), spx(4), spx(2))
         root.setSpacing(spx(4))
 
-        # ---------------- 标题栏 ----------------
-        header = QHBoxLayout()
-        header.setSpacing(spx(8))
-        self.titleLabel = QLabel('中国铁路 LBJ 列车预警器')
-        self.titleLabel.setStyleSheet(
-            f'color: {CLR("accent")}; font-size: {spx(15)}px; font-weight: bold;')
-        self.titleLabel.setToolTip('中国铁路 LBJ 列车预警器解码程序 v2.6')
-        # 按 QSS 的真实字号量宽度：widget 的 fontMetrics() 此刻还是应用默认
-        # 字体（QSS 尚未 polish），旧版算出的 156px 小于实际需要的 192px，
-        # 结果标题被 setMaximumWidth 截断。这里显式按 spx(15) 构造字体度量。
-        _tf = QFont(self.titleLabel.font())
-        _tf.setPixelSize(spx(15))
-        _titleW = QFontMetrics(_tf).horizontalAdvance(
-            self.titleLabel.text()) + spx(16)
-        self.titleLabel.setMinimumWidth(0)
-        self.titleLabel.setMaximumWidth(_titleW)
-        self.titleLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        header.addWidget(self.titleLabel, 0)
-
-        # 接收开关：一个开关代替原来的「开始 / 停止」两个按钮，状态一眼可见
-        self.rxSwitch = K.switch('接收', on_text='接收中')
-        self.rxSwitch.setToolTip('启动 / 停止 DSP 接收 (Ctrl+R)')
-        self.rxSwitch.checkedChanged.connect(self._onRxSwitch)
-        header.addWidget(self.rxSwitch)
-        header.addSpacing(spx(12))
-
-        self.connIndicator = QLabel('● 未连接')
-        self.connIndicator.setStyleSheet(
-            f'background: transparent; color: {CLR("err")};'
-            f' font-size: {spx(13)}px; font-weight: bold;')
-        header.addWidget(self.connIndicator)
-        header.addStretch()
-
-        # 日/夜配色开关（按钮文字是“点一下会切到哪”）
-        self.btnTheme = K.button('日间')
-        self.btnTheme.setToolTip('切换日间 / 夜间配色，立即生效 (Ctrl+T)')
-        self.btnTheme.clicked.connect(self._toggleTheme)
-        header.addWidget(self.btnTheme)
-
-        self.fullBtn = K.button('全屏')
-        self.fullBtn.setToolTip('全屏显示 (F11)')
-        self.fullBtn.clicked.connect(lambda: self.toggleFullScreen())
-        header.addWidget(self.fullBtn)
-        root.addLayout(header)
+        # 顶栏即菜单栏（见 _buildMenu）：标题交给操作系统标题栏，
+        # 接收开关/连接指示是菜单栏角标，日/夜与全屏并入视图菜单。
+        # 这里不再单独排一行，窗口纵向省出约一行高度。
 
         # ---------------- 全景三段式（v2.3） ----------------
         #   ① 上段：地图（约六成） | 当前解码/历史记录 + 列车信息
@@ -499,7 +493,8 @@ class MainWindow(QMainWindow):
         rightCol = QSplitter(Qt.Vertical)
         rightCol.setChildrenCollapsible(False)
         rightCol.setHandleWidth(spx(8))
-        self.decodeCard = CardBox('当前解码 / 历史记录', self.tabs)
+        # 页签自己写着「当前解码 / 历史记录」，卡片不再挂一行大字标题
+        self.decodeCard = CardBox('', self.tabs)
         self.trainCard = CardBox('列车信息', self.trainPanel)
         rightCol.addWidget(self.decodeCard)
         rightCol.addWidget(self.trainCard)
@@ -584,7 +579,6 @@ class MainWindow(QMainWindow):
         # 留一条空的状态栏只会多出那条“黑条”（重绘跟不上时是纯黑）
         self.statusBar().hide()
         self._applyTouchTweaks()
-        self._syncThemeButton()
         self._syncRxSwitch(False)
         # 首次布局完成后按实际窗口尺寸定一次比例
         QTimer.singleShot(0, lambda: self._applyResponsive(force=True))
@@ -709,11 +703,6 @@ class MainWindow(QMainWindow):
             self.logTail.relayout()
         except Exception:
             pass
-        # 日/夜按钮文字跟着变（显示的是“点一下会切到哪”）
-        try:
-            self._syncThemeButton(resolved)
-        except Exception:
-            pass
         return resolved
 
     def _syncMapNight(self, resolved: str = ''):
@@ -733,17 +722,6 @@ class MainWindow(QMainWindow):
             self.mapPanel.setNightMode(night)
         except Exception:
             pass
-
-    def _syncThemeButton(self, resolved: str = ''):
-        if not hasattr(self, 'btnTheme'):
-            return
-        resolved = resolved or TH.P.get('mode', 'dark')
-        if resolved == 'dark':
-            self.btnTheme.setText('日间')
-            self.btnTheme.setToolTip('当前夜间配色 · 点击切到日间 (Ctrl+T)')
-        else:
-            self.btnTheme.setText('夜间')
-            self.btnTheme.setToolTip('当前日间配色 · 点击切到夜间 (Ctrl+T)')
 
     def _setTheme(self, mode: str):
         """切换外观主题：立即生效，不再要求重启。"""
@@ -785,16 +763,21 @@ class MainWindow(QMainWindow):
             self.stopDsp()
 
     def _syncRxSwitch(self, on: bool):
-        """把开关状态同步成实际运行状态（不触发 start/stop）。"""
+        """把开关与菜单项状态同步成实际运行状态（不触发 start/stop）。"""
         sw = getattr(self, 'rxSwitch', None)
-        if sw is None:
-            return
-        try:
-            sw.blockSignals(True)
-            sw.setChecked(bool(on))
-            sw.blockSignals(False)
-        except Exception:
-            pass
+        if sw is not None:
+            try:
+                sw.blockSignals(True)
+                sw.setChecked(bool(on))
+                sw.blockSignals(False)
+            except Exception:
+                pass
+        act = getattr(self, 'actReceive', None)
+        if act is not None:
+            act.blockSignals(True)
+            act.setChecked(bool(on))
+            act.setText('停止接收' if on else '开始接收')
+            act.blockSignals(False)
 
     def startDsp(self):
         if self.worker and self.worker.isRunning():
@@ -889,13 +872,7 @@ class MainWindow(QMainWindow):
             self.terminalSpectrumPanel.setRssiThreshold(rssiThresh)
             self.terminalSpectrumPanel.updateStatus(st_term)
         # 更新连接指示器
-        conn = st.get('connected', False)
-        if conn:
-            self.connIndicator.setText('● 已连接')
-            self.connIndicator.setStyleSheet(f'color: {CLR("ok")}; font-size: 12px; font-weight: bold;')
-        else:
-            self.connIndicator.setText('● 未连接')
-            self.connIndicator.setStyleSheet(f'color: {CLR("err")}; font-size: 12px; font-weight: bold;')
+        self._setConnIndicator(bool(st.get('connected', False)))
 
 
     def _onSpectrum(self, data: np.ndarray):
@@ -955,12 +932,7 @@ class MainWindow(QMainWindow):
 
     def _onConnection(self, connected: bool):
         self.statusBar().showMessage('已连接' if connected else '未连接')
-        if connected:
-            self.connIndicator.setText('● 已连接')
-            self.connIndicator.setStyleSheet(f'color: {CLR("ok")}; font-size: 12px; font-weight: bold;')
-        else:
-            self.connIndicator.setText('● 未连接')
-            self.connIndicator.setStyleSheet(f'color: {CLR("err")}; font-size: 12px; font-weight: bold;')
+        self._setConnIndicator(connected)
 
     def _onDiagnostics(self, diag: dict):
         """链路诊断信号回调。

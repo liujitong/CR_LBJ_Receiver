@@ -10,7 +10,7 @@ from __future__ import annotations
 from cr_lbj.runtime import *  # noqa: F401,F403
 
 class ManualDialog(QDialog):
-    """使用手册对话框：传统 TCP 与 OWRX 配置说明。"""
+    """使用手册对话框：USB 直连 / rtl_tcp / OWRX 配置说明。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,34 +24,32 @@ class ManualDialog(QDialog):
         contentLayout = QVBoxLayout(content)
 
         # ---- 传统 RTL-TCP 模式 ----
-        title1 = QLabel('一、传统 RTL-TCP 模式')
+        title1 = QLabel('一、本机 USB 直连（推荐）')
         title1.setStyleSheet(f'color: {CLR("accent")}; font-size: 15px; font-weight: bold;')
         contentLayout.addWidget(title1)
 
         text1 = QLabel(
-            '<p>使用 RTL-SDR Blog v4 等硬件接收器，通过 <b>rtl_tcp</b> 服务将 IQ 数据'
-            '通过网络传输到本程序。</p>'
+            '<p>棒子插在本机时的默认方式：程序用 <b>librtlsdr</b>（内附 '
+            '<code>rtlsdr.dll</code>）直接读取 RTL2832U，不经过 rtl_tcp、不走 TCP，'
+            '少一个后台进程和一层本地转发。</p>'
             '<p><b>配置步骤：</b></p>'
-            '<p>1. 安装 RTL-SDR 驱动：使用 <b>Zadig</b> 将 RTL2832U 设备的 Windows 驱动'
-            '替换为 <b>WinUSB</b>（在 Zadig 中勾选 "List All Devices"，选择 RTL2832U，'
-            '选择 WinUSB 后点击 Replace Driver）。</p>'
-            '<p>2. 启动 rtl_tcp 服务：在命令行中运行<br>'
-            '<code>rtl_tcp -a 127.0.0.1 -p 1234</code></p>'
-            '<p>3. 在本程序配置中设置：</p>'
+            '<p>1. 安装驱动：用 <b>Zadig</b> 把 RTL2832U 的驱动替换为 '
+            '<b>WinUSB</b>（勾选 "List All Devices"，选 Bulk-In Interface，'
+            '点 Replace Driver）。装过一次即可。</p>'
+            '<p>2. 数据源类型选「本机 USB (直连)」（默认就是它），点「检测设备」'
+            '可确认设备与 tuner 型号，并一键应用推荐参数。</p>'
+            '<p>3. 射频参数（推荐值，检测设备后可自动填入）：</p>'
             '<ul style="margin-left: 20px;">'
-            '<li>模式：传统 RTL-TCP</li>'
-            '<li>主机：127.0.0.1</li>'
-            '<li>端口：1234</li>'
-            '<li>DC 偏移：50000 Hz（推荐值，避开零频 DC 干扰）</li>'
-            '<li>采样率：960000 Hz</li>'
+            '<li>采样率：960000 Hz（DSP 链路的甜点值）</li>'
             '<li>频率：821.2375 MHz</li>'
-            '<li>增益：15.7 dB（根据信号强度调整）</li>'
-            '<li>PPM 校正：1.0（根据晶振偏差调整）</li>'
-            '<li>信道带宽：35 kHz</li>'
-            '<li>AFC：建议开启</li>'
+            '<li>增益：手动，R820T 19.7 dB / R828D 15.7 dB，按设备增益表就近取</li>'
+            '<li>AGC：关闭（突发窄带信号不能被 AGC 拉平）</li>'
+            '<li>DC 偏移：50000 Hz（避开零频 DC 干扰）</li>'
+            '<li>PPM 校正：按晶振偏差调整（默认 1）</li>'
+            '<li>信道带宽：35 kHz；AFC：建议开启</li>'
             '</ul>'
-            '<p><b>说明：</b>传统模式下，SDR 硬件调谐在目标频率 - DC偏移 处，'
-            '通过 DDC（数字下变频）将信号搬移到基带，避免零频 DC 分量干扰。</p>'
+            '<p><b>说明：</b>直连打不开（dll 缺失、被占用等）会自动退回 rtl_tcp 中转，'
+            '日志里会写明原因，不影响使用。</p>'
         )
         text1.setWordWrap(True)
         text1.setStyleSheet('font-size: 13px; line-height: 1.5;')
@@ -124,20 +122,23 @@ class ManualDialog(QDialog):
         title4.setStyleSheet(f'color: {CLR("accent")}; font-size: 15px; font-weight: bold;')
         contentLayout.addWidget(title4)
         text4 = QLabel(
-            '<p>2.0 版支持保存多套数据源，在“配置 → 数据源”中切换：</p>'
+            '<p>支持保存多套数据源，在“配置 → 数据源配置”中切换（列表里带短标签：'
+            '[USB] 直连、[USB*] 中转、[TCP] 网络、[OWRX]）：</p>'
             '<ul style="margin-left: 20px;">'
-            '<li><b>本机 USB（自动）</b>：插上 RTL-SDR 即可，程序自动查找并启动 '
-            '<code>rtl_tcp.exe</code>，退出时自动关闭，无需再开命令行。'
-            '要求已用 Zadig 安装 WinUSB 驱动。</li>'
+            '<li><b>本机 USB（直连，推荐）</b>：插上 RTL-SDR 即可。程序直接调用内附的'
+            ' <code>rtlsdr.dll</code> 收数，不经过 rtl_tcp、不走 TCP；'
+            '要求已用 Zadig 安装 WinUSB 驱动。直连打不开时会自动退回 rtl_tcp 中转。</li>'
+            '<li><b>本机 USB（rtl_tcp 中转）</b>：兼容模式，程序自动拉起 '
+            '<code>rtl_tcp.exe</code> 并连本地端口，退出时自动关闭。</li>'
             '<li><b>RTL-TCP</b>：连接局域网或本机已有的 rtl_tcp 服务（默认 1234 端口）。</li>'
             '<li><b>OWRX</b>：连接 OpenWebRX 的 rtl_tcp 兼容端口（DC 偏移设为 0）。</li>'
             '</ul>'
             '<p>发布包已内附 <code>rtl_tcp.exe</code>、<code>rtlsdr.dll</code> 等工具，'
             '装好驱动、插上棒子就能用，无需另外安装工具包。'
             '源码运行时把它们放在项目的 <code>tools/rtl/</code> 目录即可（也兼容'
-            '<code>RTL_TCP_Server</code> 子目录与 PATH）；'
-            '也可在配置里手动指定路径。“检测设备”按钮会调用 '
-            '<code>rtl_test -t</code> 列出本机设备。</p>'
+            '<code>RTL_TCP_Server</code> 子目录与 PATH）。'
+            '“检测设备”会读出 tuner 型号（R820T / R828D 等）并按型号推荐'
+            '采样率与增益，点“应用推荐参数”一键填入。</p>'
         )
         text4.setWordWrap(True)
         text4.setStyleSheet('font-size: 13px; line-height: 1.5;')
@@ -330,7 +331,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v2.6  ·  2026-11')
+        ver = QLabel('v2.6.1  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)
