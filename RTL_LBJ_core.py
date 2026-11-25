@@ -33,6 +33,8 @@ import re
 import time
 import socket
 import struct
+import shutil
+import subprocess
 import threading
 import queue
 import unicodedata
@@ -100,6 +102,8 @@ class DecodeResult:
     locoCode: str = '---'               # 机车代号 (如 207)
     route: str = '----'                 # 线路名 (如 京沪线)
     category: str = '未知类别'          # 列车类别
+    latitude: Optional[float] = None    # 纬度 (WGS-84 十进制度)
+    longitude: Optional[float] = None   # 经度 (WGS-84 十进制度)
     isDetailed: bool = False            # 是否为详细报文 (含机车/线路)
     routeValid: bool = False            # 线路名是否通过校验
     msgTypeError: bool = False          # 是否存在 BCH 不可纠错
@@ -113,6 +117,9 @@ class DecodeResult:
     rawIsShort: bool = False            # 报文类型: 短报文
     rawIsMerged: bool = False           # 报文类型: 合并报文
     rawIsStandalone: bool = False       # 报文类型: 独立长报文
+
+    # --- 记录标识（v2.1 去重用） ---
+    uid: str = ''                       # 同一次发射的唯一标识；窗口内更优记录沿用同一 uid
 
     # --- 信号质量 ---
     rssi: float = -140.0               # 接收信号强度 (dB)
@@ -134,6 +141,7 @@ class DecodeResult:
             'direction': self.direction, 'speed': self.speed, 'position': self.position,
             'loco': self.loco, 'locoCode': self.locoCode, 'route': self.route,
             'category': self.category, 'isDetailed': self.isDetailed,
+            'latitude': self.latitude, 'longitude': self.longitude,
             'routeValid': self.routeValid, 'msgTypeError': self.msgTypeError,
             'hasInterference': self.hasInterference,
             'rawBcd': self.rawBcd, 'rawAddr': self.rawAddr, 'rawFunc': self.rawFunc,
@@ -142,7 +150,7 @@ class DecodeResult:
             'rssi': self.rssi, 'afcHz': self.afcHz, 'afcErrHz': self.afcErrHz,
             'afcScore': self.afcScore, 'etaSeconds': self.etaSeconds,
             'etaTime': self.etaTime, 'etaDistanceKm': self.etaDistanceKm,
-            'etaStatus': self.etaStatus,
+            'etaStatus': self.etaStatus, 'uid': self.uid,
         }
 
 
@@ -178,6 +186,12 @@ class CoreConfig:
     blockSize: int = BLOCK_SIZE            # 每次读取 IQ 样本数
     dcOffsetHz: float = DEFAULT_DC_OFFSET_HZ  # DDC 偏移 (Hz)，传统模式默认 50000
     owrxMode: bool = False                  # 是否为 OWRX 模式 (默认传统 RTL-TCP)
+    # 数据源: 'rtl_tcp' 远程/本地 rtl_tcp | 'owrx' OpenWebRX 兼容 | 'rtl_usb' 本机 USB 自动拉起 rtl_tcp
+    sourceType: str = 'rtl_tcp'
+    sources: List[Dict[str, Any]] = field(default_factory=list)  # 数据源配置列表
+    activeSource: int = 0                   # 当前数据源索引
+    rtlTcpPath: str = ''                    # rtl_tcp.exe 路径，留空自动查找
+    rtlDeviceIndex: int = 0                 # 本机 USB 设备序号 (多棒时使用)
 
     # --- RSSI 门控 ---
     rssiThresholdDb: float = DEFAULT_RSSI_THRESHOLD_DB  # 开启门限 (dB)
@@ -197,6 +211,23 @@ class CoreConfig:
 
     # --- UI 偏好 (不影响 DSP，热更新) ---
     spectrumMode: str = 'graph'            # 频谱显示模式: 'graph'(pyqtgraph曲线) 或 'terminal'(终端块字符)
+    trainScheme: str = 'auto'              # 车次规则: auto(自动兼容) / 2026 / legacy(2014旧版)
+    dedupeWindow: float = 2.5              # 同车次重复报文合并窗口(秒)，0 表示关闭去重
+    uiScale: float = 0.0                   # 界面缩放倍率，0 表示按屏幕自动
+    theme: str = 'dark'                    # 外观主题: dark(夜间) / light(日间) / auto(跟随系统)
+
+    # --- 高德地图 (仅 GUI 使用，不参与 DSP) ---
+    amapKey: str = ''                      # Web端(JS API) Key
+    amapSecurity: str = ''                 # JS API 安全密钥 securityJsCode
+    mapZoom: int = 12                      # 默认缩放级别
+    mapFollow: bool = True                 # 是否自动跟随最新列车
+    mapShowTrail: bool = True              # 是否显示最近列车轨迹点
+    mapNight: bool = True                  # 地图夜间模式 (深色底图)
+    # 开机中心点：填一个地名（如“南昌站”），启动时用高德地理编码定位到这里；
+    # 留空则用上次记住的坐标，再没有就显示全国概览（不再固定北京）。
+    mapCenterAddress: str = ''
+    mapCenterLng: float = 0.0              # 上次解析出的中心经度（缓存，断网可用）
+    mapCenterLat: float = 0.0              # 上次解析出的中心纬度
 
     def toDict(self) -> Dict[str, Any]:
         """转换为字典 (便于 JSON 序列化)。"""
@@ -204,6 +235,8 @@ class CoreConfig:
         for k, v in self.__dict__.items():
             if k == 'routeKm':
                 d[k] = list(v) if v else []
+            elif k == 'sources':
+                d[k] = [dict(x) for x in v] if v else []
             else:
                 d[k] = v
         return d
@@ -218,6 +251,18 @@ class CoreConfig:
                     if k == 'routeKm' and isinstance(v, str):
                         v = [v]
                     setattr(c, k, v)
+        # 兼容旧配置: 只有 host/port/owrxMode 时生成一个数据源条目
+        if d and 'sourceType' not in d and d.get('owrxMode'):
+            c.sourceType = 'owrx'
+        if not c.sources:
+            c.sources = [{
+                'name': 'OWRX 数据源' if c.sourceType == 'owrx' else 'RTL-TCP 数据源',
+                'type': c.sourceType if c.sourceType in ('rtl_tcp', 'owrx', 'rtl_usb') else 'rtl_tcp',
+                'host': c.host, 'port': c.port, 'sampleRate': c.sampleRate,
+                'gainDb': c.gainDb, 'ppm': c.ppm, 'dcOffsetHz': c.dcOffsetHz,
+            }]
+        if not (0 <= int(c.activeSource) < len(c.sources)):
+            c.activeSource = 0
         return c
 
     def save(self, path: str) -> bool:
@@ -246,25 +291,175 @@ class CoreConfig:
 # ===========================================================================
 # 工具函数
 # ===========================================================================
-def classifyTrainCategory(trainNo: str, isDetailed: bool) -> str:
-    """根据车次号判断列车类别。
+def parseDmCoordinate(degText: str, minText: str,
+                      isLatitude: bool = False) -> Optional[float]:
+    """解析 LBJ 长报文中的“度分”坐标 (DDD + MM.MMMM)。
+
+    LBJ 扩展报文用 3 位度 + 6 位分表示经度、2 位度 + 6 位分表示纬度，
+    分值为整数形式，需除以 10000 得到实际分值。返回 WGS-84 十进制度。
+    """
+    try:
+        deg = int(str(degText))
+        minute = int(str(minText)) / 10000.0
+    except (TypeError, ValueError):
+        return None
+    if minute >= 60.0:
+        return None
+    value = deg + minute / 60.0
+    if isLatitude:
+        if not (0.0 < value <= 60.0):
+            return None
+    else:
+        if not (70.0 <= value <= 140.0):
+            return None
+    return round(value, 6)
+
+
+def _speedValue(speed: Any) -> Optional[float]:
+    """把速度字段转成数值；无效返回 None。"""
+    try:
+        v = float(str(speed).replace('km/h', '').strip())
+    except (TypeError, ValueError):
+        return None
+    return v if 0 <= v <= 500 else None
+
+
+# 2026 版动车组车次正式启用时间（第二批，12 月下旬）
+TRAIN_2026_EMU_DATE = datetime(2026, 12, 25)
+
+
+def _category2026(prefix: str, numText: str) -> Optional[str]:
+    """按 2026 版《列车车次编排规定》分类。"""
+    try:
+        n = int(numText) if numText else -1
+    except ValueError:
+        n = -1
+    if prefix == 'X':
+        return '新时速动车组 (350km/h+)'
+    if prefix == 'G':
+        return '高速动车组 (350km/h)'
+    if prefix == 'T':
+        return '特快动车组 (300km/h)'
+    if prefix == 'K':
+        return '快速动车组 (200~250km/h)'
+    if prefix == 'D':
+        return '动力集中动车组 (≤200km/h)'
+    if prefix == 'C':
+        return '城际动车组 (≤200km/h)'
+    if prefix == 'S':
+        return '市郊(域)列车 (≤160km/h)'
+    if prefix == 'Z':
+        return '快速旅客列车 (160km/h)'
+    if prefix == 'N':
+        return '快速旅客列车 (140km/h)'
+    if prefix == 'V':
+        if 6001 <= n <= 6998:
+            return '普通旅客快车 (120km/h)'
+        if 7001 <= n <= 7998:
+            return '普通旅客慢车 (120km/h)'
+        return '快速旅客列车 (120km/h)'
+    if prefix == 'Y':
+        return '普速旅游专线列车' if n <= 998 else '普速旅游专列'
+    if prefix == 'B':
+        if 1 <= n <= 198:
+            return '特快城际班列 (160km/h)'
+        if 201 <= n <= 998:
+            return '快速多式联运班列 (120km/h)'
+        if 1001 <= n <= 1998:
+            return '快速城际班列 (120km/h)'
+        if 2001 <= n <= 2998:
+            return '快速中欧班列 (120km/h)'
+        if 3001 <= n <= 3998:
+            return '快速中亚班列 (120km/h)'
+        if 4001 <= n <= 5998:
+            return '普快多式联运班列 (90km/h)'
+        if 6001 <= n <= 7998:
+            return '普快城际班列 (90km/h)'
+        if 8001 <= n <= 8998:
+            return '普快中欧班列 (90km/h)'
+        if 9001 <= n <= 9998:
+            return '普快中亚班列 (90km/h)'
+        return '货运班列'
+    if prefix == 'DH':
+        return '动车组快运 (250km/h+)' if n <= 998 else '动车组快运 (≤250km/h)'
+    if prefix == 'DJ':
+        return '动车组检测/确认列车'
+    return None
+
+
+def _categoryLegacy(prefix: str, numText: str, isDetailed: bool) -> str:
+    """按 2014 版旧规则分类（兼容仍在过渡期的车次）。"""
+    legacyLetters = {
+        'K': '快速旅客列车', 'Z': '直达特快列车', 'T': '特快旅客列车',
+        'G': '高速动车组', 'D': '动车组列车', 'C': '城际动车组',
+        'X': '行包货物列车', 'Y': '旅游旅客列车',
+    }
+    if prefix in legacyLetters:
+        return legacyLetters[prefix]
+    return ''
+
+
+def classifyTrainCategory(trainNo: str, isDetailed: bool,
+                          speed: Any = None, scheme: str = 'auto') -> str:
+    """根据车次号判断列车类别（兼容 2026 新版与 2014 旧版）。
 
     参数:
-        trainNo: 车次号 (如 T398, G1234, 50001)。
+        trainNo: 车次号 (如 T398, G1234, V6001, 50001)。
         isDetailed: 是否已收到详细报文。
+        speed: 当前速度 (km/h)，用于 auto 模式下区分新旧 T/K/X 含义。
+        scheme: 'auto' 自动兼容 / '2026' 新版 / 'legacy' 旧版。
     返回:
         类别中文名称。
     """
     if not trainNo or trainNo in ('等待信号...', '----'):
         return '等待信号...'
-    tn = trainNo.replace(' ', '').strip().upper()
-    # 字母前缀 -> 列车类别
-    for p, c in [('K', '快速旅客列车'), ('Z', '直达特快列车'), ('T', '特快旅客列车'),
-                 ('G', '高速动车组'), ('D', '动车组列车'), ('C', '城际动车组'),
-                 ('X', '行包货物列车'), ('Y', '旅游旅客列车')]:
-        if tn.startswith(p):
-            return c
-    # 00 开头 -> 回送列车
+    tn = str(trainNo).replace(' ', '').strip().upper()
+    m = re.match(r'^([A-Z]+)(\d*)', tn)
+    prefix = m.group(1) if m else ''
+    numText = m.group(2) if m else ''
+    # 车次前缀可能带 0/无数字；纯数字车次 prefix 为空
+    if prefix and not numText and tn.isalpha():
+        numText = ''
+    scheme = (scheme or 'auto').lower()
+
+    # ---------- 2026 新版 ----------
+    if scheme == '2026':
+        cat = _category2026(prefix, numText)
+        if cat:
+            return cat
+        return _categoryNumeric(numText, tn, isDetailed, newScheme=True)
+
+    # ---------- 2014 旧版 ----------
+    if scheme == 'legacy':
+        cat = _categoryLegacy(prefix, numText, isDetailed)
+        if cat:
+            return cat
+        return _categoryNumeric(numText, tn, isDetailed, newScheme=False)
+
+    # ---------- 自动兼容 ----------
+    # Z/N/V/B/DH/DJ/Y 以及 G/D/C/S 含义稳定，直接按新版
+    if prefix in ('Z', 'N', 'V', 'B', 'DH', 'DJ', 'Y', 'G', 'D', 'C', 'S'):
+        cat = _category2026(prefix, numText)
+        if cat:
+            return cat
+    # T/K/X 新旧含义冲突：用速度判定（新 T=300、K=200~250、X=350+）
+    if prefix in ('T', 'K', 'X'):
+        spd = _speedValue(speed)
+        if spd is not None:
+            if spd >= 200:
+                return _category2026(prefix, numText) or '未知类别'
+            return _categoryLegacy(prefix, numText, isDetailed) or '未知类别'
+        # 速度缺失：按过渡期日期判断（2026-12-25 前动车组仍用旧车次）
+        if datetime.now() < TRAIN_2026_EMU_DATE:
+            return _categoryLegacy(prefix, numText, isDetailed) or '未知类别'
+        return _category2026(prefix, numText) or '未知类别'
+    return _categoryNumeric(numText, tn, isDetailed, newScheme=True)
+
+
+def _categoryNumeric(numText: str, tn: str, isDetailed: bool,
+                     newScheme: bool = True) -> str:
+    """纯数字车次（货物/路用/回送等）分类。"""
+    # 00 开头 -> 回送列车（新旧规则一致）
     if tn.startswith('00'):
         d = ''.join(filter(str.isdigit, tn))
         if d:
@@ -279,10 +474,25 @@ def classifyTrainCategory(trainNo: str, isDetailed: bool) -> str:
                 return '跨局回送客车'
             if 401 <= n <= 498:
                 return '管内回送客车'
-    # 纯数字 -> 货物/单机等
-    d = ''.join(filter(str.isdigit, tn))
-    if d:
-        n = int(d)
+    d = ''.join(filter(str.isdigit, numText or tn))
+    if not d:
+        return '未知类别'
+    n = int(d)
+    if newScheme:
+        ranges = [(10001, 19998, '技术直达货运列车'), (20001, 29998, '直通货运列车'),
+                  (30001, 39998, '区段货运列车'), (40001, 44998, '摘挂列车'),
+                  (45001, 49998, '小运转列车'), (50001, 50998, '客车单机'),
+                  (51001, 51998, '货车单机'), (52001, 52998, '小运转单机'),
+                  (53001, 54998, '补机'), (55001, 55998, '试运行列车'),
+                  (56001, 56998, '轨道车、小型工程车'), (57001, 57998, '路用列车'),
+                  (58101, 58998, '救援列车'), (60001, 69998, '工厂自备车'),
+                  (70001, 70998, '超限货运列车'), (71001, 77998, '重载货物列车'),
+                  (80001, 81748, '直达货运/五定班列'), (81751, 81998, '快运货运列车'),
+                  (82001, 84998, '煤炭直达列车'), (85001, 85998, '石油直达列车'),
+                  (86001, 86998, '始发直达列车'), (87001, 87998, '空车直达列车'),
+                  (88001, 88998, '汽运专列'), (90001, 91998, '军用列车(满载)'),
+                  (93001, 94998, '军用列车(空车)')]
+    else:
         ranges = [(10001, 19998, '技术直达货运列车'), (20001, 29998, '直通货运列车'),
                   (30001, 39998, '区段货运列车'), (40001, 44998, '摘挂列车'),
                   (45001, 49998, '小运转列车'), (50001, 50998, '客车单机'),
@@ -297,12 +507,105 @@ def classifyTrainCategory(trainNo: str, isDetailed: bool) -> str:
                   (86001, 86998, '始发直达列车'), (87001, 87998, '空车直达列车'),
                   (88001, 88998, '汽运专列'), (90001, 91998, '军用列车(满载)'),
                   (93001, 94998, '军用列车(空车)')]
-        for lo, hi, cat in ranges:
-            if lo <= n <= hi:
-                return cat
-        if 1 <= n <= 9998 and (not tn.startswith('00')):
-            return '普通旅客列车' if isDetailed else '等待详细报文确认...'
+    for lo, hi, cat in ranges:
+        if lo <= n <= hi:
+            return cat
+    if 1 <= n <= 9998 and not tn.startswith('00'):
+        return '普通旅客列车' if isDetailed else '等待详细报文确认...'
     return '未知类别'
+
+
+class RecordDeduplicator:
+    """同一车次短窗口内的重复解码合并 (v2.1)。
+
+    POCSAG 同一次发射常被连续解出 2~4 次（重发、码字重排、误码差异），
+    表现为“同一车次同一秒出现多行、字段略有不同”。这里按 (车次, 方向)
+    做窗口合并：
+
+    * 窗口内第一条立即放行，并分配 uid；
+    * 后续记录质量更高时，沿用同一 uid 放行 —— 上层据此替换已有记录；
+    * 质量不更高则丢弃。
+
+    既去掉重复，又保证留下的是“最好的那一条”。
+    """
+
+    def __init__(self, window: float = 2.5, maxSlots: int = 256):
+        self.window = float(window)
+        self.maxSlots = int(maxSlots)
+        self._slots: Dict[str, Dict[str, Any]] = {}
+        self.dropped = 0        # 被合并丢弃的重复记录数
+        self.upgraded = 0       # 窗口内被更优记录替换的次数
+
+    @staticmethod
+    def keyOf(d: DecodeResult) -> str:
+        base = str(d.baseTrain or d.train or '').strip()
+        if base in ('', '----', '未知'):
+            return ''
+        return '%s|%s' % (base, d.direction)
+
+    @staticmethod
+    def quality(d: DecodeResult) -> float:
+        """记录质量分，越大越好。详细报文、有坐标、无 BCH 错优先。"""
+        score = 0.0
+        if d.isDetailed:
+            score += 100.0
+        if d.latitude is not None and d.longitude is not None:
+            score += 40.0
+        if not d.msgTypeError:
+            score += 20.0
+        if d.routeValid:
+            score += 10.0
+        if d.loco and d.loco not in ('----', ''):
+            score += 15.0
+        if d.route and d.route not in ('----', ''):
+            score += 10.0
+        if d.speed not in ('---', '', None):
+            score += 5.0
+        if d.position not in ('---.-', '', None):
+            score += 5.0
+        try:  # RSSI 只作为同分时的微弱权重 (0~1)
+            score += max(0.0, min(60.0, float(d.rssi) + 140.0)) / 60.0
+        except (TypeError, ValueError):
+            pass
+        return score
+
+    def apply(self, d: DecodeResult) -> Optional[DecodeResult]:
+        """返回要放行的记录（可能沿用窗口内 uid），None 表示丢弃。"""
+        key = self.keyOf(d)
+        if not key:
+            return d
+        now = float(d.timestamp or time.time())
+        if self.window <= 0:      # 关闭去重：仍分配 uid，便于 GUI/DB 唯一标识
+            d.uid = '%s-%.3f' % (key.replace('|', '-'), now)
+            return d
+        slot = self._slots.get(key)
+        if slot is not None and now - slot['ts'] > self.window:
+            slot = None
+        if slot is None:
+            d.uid = '%s-%.3f' % (key.replace('|', '-'), now)
+            self._slots[key] = {'uid': d.uid, 'ts': now,
+                                'score': self.quality(d)}
+            self._prune(now)
+            return d
+        score = self.quality(d)
+        # 只有明显更优才替换（避免 RSSI 抖动导致反复刷新）
+        if score > slot['score'] + 3.0:
+            slot['score'] = score
+            d.uid = slot['uid']
+            self.upgraded += 1
+            return d
+        self.dropped += 1
+        return None
+
+    def _prune(self, now: float) -> None:
+        if len(self._slots) <= self.maxSlots:
+            return
+        expire = now - self.window * 4
+        for k in [k for k, v in self._slots.items() if v['ts'] < expire]:
+            self._slots.pop(k, None)
+
+    def reset(self) -> None:
+        self._slots.clear()
 
 
 def sanitizeRouteName(route: Optional[str]) -> str:
@@ -1087,12 +1390,13 @@ class RtlTcpSource:
         self._sendCommand(CMD_SET_FREQCORR, int(ppm))
 
     def _startAndroidDriver(self):
-        """启动 Android RTL-SDR 驱动 (仅非 OWRX 模式)。"""
+        """启动 Android RTL-SDR 驱动 (仅 Android 且非 OWRX 模式)。"""
         if self.owrxMode:
+            return
+        if os.name == 'nt' or shutil.which('am') is None:
             return
         uri = f'iqsrc://-a 127.0.0.1 -p {self.port} -s {int(self.sampleRate)} -f {int(self.targetFreqHz)} -T 0'
         try:
-            import subprocess
             subprocess.run(['am', 'start', '-a', 'android.intent.action.VIEW', '-d', uri],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
             time.sleep(3.0)
@@ -1281,6 +1585,170 @@ class RtlTcpSource:
 
 
 # ===========================================================================
+# 本机 RTL-SDR: 自动查找并拉起 rtl_tcp
+# ===========================================================================
+def _runtime_dirs() -> List[str]:
+    """返回可能存放 rtl_tcp.exe 的目录（按优先级）。"""
+    import sys
+    roots = []
+    if getattr(sys, 'frozen', False):
+        roots.append(os.path.dirname(os.path.abspath(sys.executable)))
+        meipass = getattr(sys, '_MEIPASS', '')
+        if meipass:
+            roots.append(os.path.join(meipass, 'rtl'))
+    roots.append(os.path.dirname(os.path.abspath(__file__)))
+    roots.append(os.getcwd())
+    dirs = []
+    for root in roots:
+        p = os.path.abspath(root)
+        for _ in range(4):  # 逐级向上，兼容 tools/rtl、RTL_TCP_Server 与程序目录
+            dirs += [p, os.path.join(p, 'tools', 'rtl'),
+                     os.path.join(p, 'rtl'),
+                     os.path.join(p, 'RTL_TCP_Server')]
+            parent = os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+    out = []
+    for d in dirs:
+        d = os.path.abspath(d)
+        if d not in out and os.path.isdir(d):
+            out.append(d)
+    return out
+
+
+def find_rtl_tool(name: str) -> Optional[str]:
+    """查找 rtl_tcp.exe / rtl_test.exe 等工具，找不到返回 None。"""
+    exe = name if name.lower().endswith('.exe') else name + '.exe'
+    for d in _runtime_dirs():
+        p = os.path.join(d, exe)
+        if os.path.isfile(p):
+            return p
+    return shutil.which(exe) or shutil.which(name)
+
+
+def detect_rtl_devices(timeout: float = 10.0) -> (bool, str):
+    """调用 rtl_test -t 检测本机 RTL-SDR 设备。
+
+    返回 (是否找到设备, 原始输出/错误说明)。
+    """
+    exe = find_rtl_tool('rtl_test')
+    if not exe:
+        return False, ('未找到 rtl_test.exe。\n'
+                       '请把 RTL-SDR 官方工具包（含 rtl_tcp.exe / rtl_test.exe）'
+                       '放到程序目录或 RTL_TCP_Server 子目录。')
+    flags = 0
+    if os.name == 'nt':
+        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    try:
+        r = subprocess.run([exe, '-t'], capture_output=True, text=True,
+                           errors='replace', timeout=timeout, creationflags=flags)
+        out = (r.stdout or '') + (r.stderr or '')
+        low = out.lower()
+        ok = bool(re.search(r'found\s+\d+\s+device', low)) or 'sn:' in low
+        if 'no supported devices' in low or 'no devices found' in low:
+            ok = False
+        return ok, out.strip() or f'退出码 {r.returncode}'
+    except subprocess.TimeoutExpired:
+        return False, 'rtl_test 超时（设备可能被其他程序占用）'
+    except Exception as e:
+        return False, f'检测失败: {e}'
+
+
+def _port_open(host: str, port: int, timeout: float = 0.4) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _free_port(start: int = 1234) -> int:
+    """从 start 开始找一个空闲 TCP 端口。"""
+    for p in range(start, start + 50):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('127.0.0.1', p))
+                return p
+            except OSError:
+                continue
+    return start
+
+
+class RtlUsbSource(RtlTcpSource):
+    """本机 USB RTL-SDR 数据源：自动拉起 rtl_tcp 后复用 TCP 协议。
+
+    省去用户手动开命令行启动 rtl_tcp 的步骤。若目标端口已有 rtl_tcp 在跑，
+    直接复用；否则用 rtl_tcp.exe 在空闲端口启动，并在 close() 时结束进程。
+    """
+
+    def __init__(self, host: str, port: int, freqHz: float, sampleRate: int,
+                 blockSize: int, dcOffsetHz: float = 0.0,
+                 gainDb: float = HW_GAIN_DB, ppm: float = PPM,
+                 rtlTcpPath: str = '', deviceIndex: int = 0):
+        super().__init__(host, port, freqHz, sampleRate, blockSize,
+                         dcOffsetHz=dcOffsetHz, owrxMode=False,
+                         gainDb=gainDb, ppm=ppm)
+        self.rtlTcpPath = rtlTcpPath or find_rtl_tool('rtl_tcp')
+        self.deviceIndex = int(deviceIndex or 0)
+        self._proc: Optional[subprocess.Popen] = None
+        self._spawned = False
+
+    def open(self):
+        if not self.rtlTcpPath or not os.path.isfile(self.rtlTcpPath):
+            raise RuntimeError(
+                '未找到 rtl_tcp.exe。请把 RTL-SDR 工具包放到程序目录，'
+                '或在配置中指定 rtl_tcp.exe 路径。')
+        if not _port_open(self.host, self.port):
+            self.port = _free_port(self.port)
+            self._spawn(self.port)
+        super().open()
+
+    def _spawn(self, port: int):
+        hwFreq = int(self.targetFreqHz - self.dcOffsetHz)
+        args = [self.rtlTcpPath,
+                '-a', '127.0.0.1', '-p', str(port),
+                '-f', str(hwFreq), '-s', str(int(self.sampleRate)),
+                '-g', str(self.gainDb)]
+        if self.ppm:
+            args += ['-P', str(int(self.ppm))]
+        if self.deviceIndex > 0:
+            args += ['-d', str(self.deviceIndex)]
+        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
+        self._proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, text=True,
+                                      errors='replace', creationflags=flags)
+        self._spawned = True
+        deadline = time.time() + 8.0
+        while time.time() < deadline:
+            if self._proc.poll() is not None:
+                out = ''
+                try:
+                    out = (self._proc.stdout.read() or '').strip()
+                except Exception:
+                    pass
+                raise RuntimeError(f'rtl_tcp 启动失败（退出码 {self._proc.returncode}）: {out}')
+            if _port_open('127.0.0.1', port, 0.3):
+                return
+            time.sleep(0.2)
+        raise RuntimeError('rtl_tcp 启动超时（8 秒内端口未就绪）')
+
+    def close(self):
+        super().close()
+        if self._spawned and self._proc and self._proc.poll() is None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+        self._proc = None
+        self._spawned = False
+
+
+# ===========================================================================
 # LBJ 解码器
 # ===========================================================================
 class LbjDecoder:
@@ -1321,15 +1789,18 @@ class LbjDecoder:
                   330: 'CJ2', 331: 'CJ3', 332: 'CJ4', 333: 'CJ5', 334: 'CJ6'}
 
     def __init__(self, fs: float = 48000, baudRate: int = 1200,
-                 arrivalEstimator: Optional[ArrivalEstimator] = None):
+                 arrivalEstimator: Optional[ArrivalEstimator] = None,
+                 trainScheme: str = 'auto'):
         """初始化解码器。
 
         参数:
             fs: 输入 PCM 采样率 (Hz)。
             baudRate: LBJ 波特率 (bps)。
             arrivalEstimator: 关联的到达估算器实例。
+            trainScheme: 车次规则 auto / 2026 / legacy。
         """
         self.arrivalEstimator = arrivalEstimator
+        self.trainScheme = trainScheme or 'auto'
         self.syndromeLut = buildSyndromeLut()  # BCH 伴随式反查表
         # 高斯 FIR 平滑滤波器 (截止 1200 Hz)
         taps = ssig.firwin(numtaps=31, cutoff=1200, fs=fs, window=('gaussian', 7.0))
@@ -1547,6 +2018,7 @@ class LbjDecoder:
                     'baseTrain': baseTrain, 'prefix': '', 'direction': direction,
                     'speed': speed, 'position': position, 'loco': '----',
                     'locoCode': '---', 'route': '----', 'routeValid': False,
+                    'latitude': None, 'longitude': None,
                     'isDetailed': False}
             else:
                 s = self.sessions[baseTrain]
@@ -1606,6 +2078,11 @@ class LbjDecoder:
                                 ru = dec
                         except Exception:
                             pass
+                    # 解析经纬度 (30..38 经度 DDD+MM.MMMM, 39..46 纬度 DD+MM.MMMM)
+                    lat = lon = None
+                    if len(ih) >= 47:
+                        lon = parseDmCoordinate(ih[30:33], ih[33:39], False)
+                        lat = parseDmCoordinate(ih[39:41], ih[41:47], True)
                     # 写回会话
                     if lc:
                         self.sessions[tid]['prefix'] = lc
@@ -1615,6 +2092,9 @@ class LbjDecoder:
                     if validForEta and ru != '----' and isValidRouteName(ru):
                         self.sessions[tid]['route'] = ru
                         self.sessions[tid]['routeValid'] = True
+                    if lat is not None and lon is not None:
+                        self.sessions[tid]['latitude'] = lat
+                        self.sessions[tid]['longitude'] = lon
                     self.sessions[tid]['isDetailed'] = True
                     self.sessions[tid]['timestamp'] = ct
 
@@ -1623,7 +2103,9 @@ class LbjDecoder:
         if aid and aid in self.sessions:
             s = self.sessions[aid]
             fullTrain = f"{s['prefix']}{s['baseTrain']}".replace(' ', '').strip()
-            category = classifyTrainCategory(fullTrain, s['isDetailed'])
+            category = classifyTrainCategory(
+                fullTrain, s['isDetailed'], speed=s.get('speed'),
+                scheme=getattr(self, 'trainScheme', 'auto'))
             # ETA 估算
             etaInfo = {'etaSeconds': None, 'etaTime': '--:--:--',
                        'etaDistanceKm': None, 'etaStatus': '等待信号'}
@@ -1639,6 +2121,7 @@ class LbjDecoder:
                 direction=s['direction'], speed=s['speed'], position=s['position'],
                 loco=s['loco'], locoCode=s['locoCode'], route=s['route'],
                 category=category, isDetailed=s['isDetailed'],
+                latitude=s.get('latitude'), longitude=s.get('longitude'),
                 routeValid=bool(s.get('routeValid', False)),
                 msgTypeError=self.currentMsgHasError,
                 hasInterference=hasInterference,
@@ -1690,6 +2173,8 @@ class LbjCore:
                  userKm: Optional[float] = None,
                  routeKm: Optional[Any] = None,
                  etaMaxMin: float = DEFAULT_ETA_MAX_SECONDS / 60.0,
+                 sourceType: str = '', rtlTcpPath: str = '',
+                 rtlDeviceIndex: int = 0, trainScheme: str = 'auto',
                  config: Optional[CoreConfig] = None):
         """初始化核心引擎。
 
@@ -1744,6 +2229,10 @@ class LbjCore:
             userKm = config.userKm
             routeKm = config.routeKm
             etaMaxMin = config.etaMaxMin
+            sourceType = getattr(config, 'sourceType', 'owrx' if config.owrxMode else 'rtl_tcp')
+            rtlTcpPath = getattr(config, 'rtlTcpPath', '')
+            rtlDeviceIndex = getattr(config, 'rtlDeviceIndex', 0)
+            trainScheme = getattr(config, 'trainScheme', 'auto')
         self.host = host
         self.port = port
         self.sampleRate = sampleRate
@@ -1754,6 +2243,14 @@ class LbjCore:
         self.blockSize = blockSize
         self.dcOffsetHz = dcOffsetHz
         self.owrxMode = owrxMode
+        self.sourceType = sourceType or ('owrx' if owrxMode else 'rtl_tcp')
+        if self.sourceType == 'owrx':
+            self.owrxMode = True
+        self.rtlTcpPath = rtlTcpPath
+        self.rtlDeviceIndex = int(rtlDeviceIndex or 0)
+        self.trainScheme = trainScheme or 'auto'
+        # 去重窗口：同车次在此窗口内的重复报文只保留最优一条 (0=关闭)
+        self.dedupeWindow = float(getattr(config, 'dedupeWindow', 2.5) or 0.0)
         self.rssiThresholdDb = rssiThresholdDb
         self.rssiHystDb = rssiHystDb
         self.rssiHoldMs = rssiHoldMs
@@ -1797,40 +2294,43 @@ class LbjCore:
         self.arrivalEstimator = ArrivalEstimator(
             userKm=userKm, maxSeconds=max(1.0, etaMaxMin * 60.0),
             routeKmMap=routeKmMap)
-        self.source = RtlTcpSource(
-            self.host, self.port, freqHz, self.sampleRate, self.blockSize,
-            dcOffsetHz=self.dcOffsetHz, owrxMode=self.owrxMode,
-            gainDb=self.gainDb, ppm=self.ppm)
+        if self.sourceType == 'rtl_usb':
+            self.source = RtlUsbSource(
+                self.host, self.port, freqHz, self.sampleRate, self.blockSize,
+                dcOffsetHz=self.dcOffsetHz, gainDb=self.gainDb, ppm=self.ppm,
+                rtlTcpPath=self.rtlTcpPath, deviceIndex=self.rtlDeviceIndex)
+        else:
+            self.source = RtlTcpSource(
+                self.host, self.port, freqHz, self.sampleRate, self.blockSize,
+                dcOffsetHz=self.dcOffsetHz, owrxMode=self.owrxMode,
+                gainDb=self.gainDb, ppm=self.ppm)
         self.frontend = FrontendChain(
             self.sampleRate, dcOffsetHz=self.dcOffsetHz,
             bwHz=self.bwKhz * 1000.0, afcEnable=self.afcEnable,
             afcMaxHz=self.afcMaxHz, afcGain=self.afcGain)
         self.decoder = LbjDecoder(
             self.frontend.actualOut, BAUD_RATE,
-            arrivalEstimator=self.arrivalEstimator)
+            arrivalEstimator=self.arrivalEstimator,
+            trainScheme=self.trainScheme)
         # 设置解码回调
         self.decoder.onDecode = self._onDecode
         self.decoder.onInterference = self._onInterference
+        self._dedupe = RecordDeduplicator(self.dedupeWindow)
 
     def _onDecode(self, result: DecodeResult):
-        """解码回调: 更新信号质量字段并转发。
+        """解码回调: 补信号质量 → 同车次去重 → 转发。
 
-        含去重: 与上次解码结果完全相同且间隔 <0.8s 时跳过，
-        避免 LBJ 连续重发同一报文导致 UI 闪烁。
+        v2.1 起改用 RecordDeduplicator：同一车次在 dedupeWindow 内
+        只保留质量最高的一条；更优记录沿用同一 uid，供 UI/DB 就地替换。
         """
-        now = result.timestamp
-        prev = getattr(self, '_lastDecodeSnapshot', None)
-        snap = (result.train, result.direction, result.speed,
-                result.position, result.rawAddr, result.rawFunc)
-        if prev is not None:
-            prevTs, prevSnap = prev
-            if snap == prevSnap and now - prevTs < 0.8:
-                return  # 重复报文，跳过
-        self._lastDecodeSnapshot = (now, snap)
         result.rssi = self.rssi
         result.afcHz = self.afcHz
         result.afcErrHz = self.afcErrHz
         result.afcScore = self.afcScore
+        kept = self._dedupe.apply(result)
+        if kept is None:
+            return
+        result = kept
         # 放入队列
         try:
             self._decodeQueue.put_nowait(result)
@@ -1861,7 +2361,9 @@ class LbjCore:
         self.running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        self._log(f'[启动] 连接 {self.host}:{self.port} '
+        srcName = {'rtl_usb': '本机 USB RTL-SDR', 'owrx': 'OWRX',
+                   'rtl_tcp': 'RTL-TCP'}.get(self.sourceType, self.sourceType)
+        self._log(f'[启动] {srcName} {self.host}:{self.port} '
                   f'采样率 {self.sampleRate // 1000}k 频率 {self.freqMhz:.4f} MHz')
         self._log(f'[链路] {self.frontend.chainDesc}')
 
@@ -1994,6 +2496,12 @@ class LbjCore:
             'sampleRate': self.sampleRate,
             'freqMhz': self.freqMhz,
             'chainDesc': self.frontend.chainDesc,
+            'sourceType': self.sourceType,
+            'sourceName': {'rtl_usb': '本机 USB', 'owrx': 'OWRX',
+                           'rtl_tcp': 'RTL-TCP'}.get(self.sourceType, self.sourceType),
+            'dedupeWindow': self.dedupeWindow,
+            'dupDropped': self._dedupe.dropped if hasattr(self, '_dedupe') else 0,
+            'dupUpgraded': self._dedupe.upgraded if hasattr(self, '_dedupe') else 0,
         }
 
     def getNetworkDiagnostics(self) -> Dict[str, Any]:
@@ -2041,6 +2549,9 @@ class LbjCore:
             userKm=self.arrivalEstimator.defaultKm,
             routeKm=[f'{r}={km}' for r, km in self.arrivalEstimator.routeKmMap.items()],
             etaMaxMin=self.arrivalEstimator.maxSeconds / 60.0,
+            sourceType=self.sourceType, rtlTcpPath=self.rtlTcpPath,
+            rtlDeviceIndex=self.rtlDeviceIndex, trainScheme=self.trainScheme,
+            dedupeWindow=self.dedupeWindow,
         )
 
     def applyHotConfig(self, config: CoreConfig):
@@ -2055,6 +2566,13 @@ class LbjCore:
         self.rssiHystDb = config.rssiHystDb
         self.rssiHoldMs = config.rssiHoldMs
         self.keepAfcAfterPacket = config.keepAfcAfterPacket
+        self.trainScheme = getattr(config, 'trainScheme', self.trainScheme)
+        if hasattr(self, 'decoder'):
+            self.decoder.trainScheme = self.trainScheme
+        self.dedupeWindow = float(getattr(config, 'dedupeWindow',
+                                          self.dedupeWindow) or 0.0)
+        if hasattr(self, '_dedupe'):
+            self._dedupe.window = self.dedupeWindow
         if hasattr(self, '_rssiGate'):
             self._rssiGate.updateThreshold(config.rssiThresholdDb)
             self._rssiGate.hysteresisDb = config.rssiHystDb
@@ -2090,6 +2608,11 @@ class LbjCore:
         self.blockSize = config.blockSize
         self.dcOffsetHz = config.dcOffsetHz
         self.owrxMode = config.owrxMode
+        self.sourceType = getattr(config, 'sourceType',
+                                  'owrx' if config.owrxMode else 'rtl_tcp')
+        self.rtlTcpPath = getattr(config, 'rtlTcpPath', '')
+        self.rtlDeviceIndex = getattr(config, 'rtlDeviceIndex', 0)
+        self.trainScheme = getattr(config, 'trainScheme', 'auto')
         self.rssiThresholdDb = config.rssiThresholdDb
         self.rssiHystDb = config.rssiHystDb
         self.rssiHoldMs = config.rssiHoldMs
