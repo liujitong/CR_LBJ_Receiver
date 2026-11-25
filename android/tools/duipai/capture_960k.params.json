@@ -1,0 +1,19 @@
+{
+  "freqMhz": 821.2375,
+  "sampleRate": 960000,
+  "bwKhz": 35.0,
+  "dcOffsetHz": 0.0,
+  "userOffsetHz": 0.0,
+  "gainDb": 15.7,
+  "ppm": 1.0,
+  "blockSize": 65536,
+  "rssiThresholdDb": -55.0,
+  "rssiHystDb": 3.0,
+  "rssiHoldMs": 700.0,
+  "afcEnable": true,
+  "afcMaxHz": 8000.0,
+  "afcGain": 0.45,
+  "keepAfcAfterPacket": false,
+  "baudRate": 1200.0,
+  "trainScheme": "auto"
+}
