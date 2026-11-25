@@ -77,6 +77,11 @@
     color: var(--text); font-size: 13px; line-height: 1.8; text-align: center;
     background: var(--card); padding: 14px 18px; border-radius: 6px;
     border: 1px solid var(--border); max-width: 80%; display: none; z-index: 800; }
+  /* 失败提示里的「一键换底图」按钮 */
+  #hint button.hb { margin: 0 4px; padding: 4px 10px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    font: 12px/1.4 "Microsoft YaHei", sans-serif; cursor: pointer; }
+  #hint button.hb:hover { border-color: var(--accent); color: var(--accent); }
   #hint b { color: var(--warn); }
 
   /* Leaflet 署名条跟随主题 */
@@ -562,8 +567,19 @@
   function showHint(on) {
     var el = document.getElementById('hint');
     if (on) {
-      el.innerHTML = '<b>底图瓦片加载失败</b><br>当前网络无法访问该底图。<br>' +
-        '打开右上角「图层」换一张底图。';
+      // 给出可直接点的备选：国内网络下 OpenTopoMap/OSM/CARTO 常被阻断，
+      // 而 Esri（WGS-84，可与铁路图层共存）与高德（GCJ-02）通常可达。
+      el.innerHTML = '<b>底图瓦片加载失败</b><br>' +
+        '当前网络访问不到「' + escapeHtml((BASE_SOURCES[baseId] || {}).name || baseId) + '」。<br>' +
+        '国内一般可达的两张：Esri 卫星（可继续叠铁路图层）、高德（会自动关闭铁路图层）。' +
+        '<div style="margin-top:8px">' +
+        '<button class="hb" data-base="esri_img">换成 Esri 卫星</button>' +
+        '<button class="hb" data-base="amap">换成高德街道</button>' +
+        '</div>';
+      var btns = el.querySelectorAll('button.hb');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].onclick = function () { setBase(this.getAttribute('data-base')); };
+      }
       el.style.display = 'block';
     } else {
       el.style.display = 'none';
@@ -744,13 +760,17 @@
     baseId = id;
     tilesTotal = 0; tilesFailed = 0;
     buildBase();
+    // 面板下拉同步：工具栏/程序换的底图，页面内的 <select> 也要跟着变
+    // （否则会出现「工具栏写着 OpenTopoMap、面板还显示 OSM」的错位）
+    var sbNow = document.getElementById('selBase');
+    if (sbNow && sbNow.value !== id) sbNow.value = id;
     // GCJ 底图与 WGS 铁路图层不混叠：自动关掉铁路图层
     if (BASE_SOURCES[id].coord === 'gcj' && railId !== 'off') {
       railId = 'off';
       if (railLayer) { map.removeLayer(railLayer); railLayer = null; }
       var sr = document.getElementById('selRail'); if (sr) sr.value = 'off';
       toast('<b>铁路图层已关闭</b>：高德底图为 GCJ-02，与 OpenRailwayMap（WGS-84）叠加会错位。<br>' +
-        '需要看铁路图源请换成 OSM / Carto / Esri 底图。', 7000);
+        '需要看铁路图源请换成 Esri / OSM / Carto（WGS-84）底图。', 7000);
     } else if (BASE_SOURCES[id].coord === 'wgs' && railId === 'off' && !railUserOff && CONFIG.rail && CONFIG.rail !== 'off') {
       railId = CONFIG.rail;
       buildRail();
@@ -763,19 +783,23 @@
   function setRailStyle(id) {
     if (!RAIL_SOURCES[id]) return;
     if (BASE_SOURCES[baseId].coord === 'gcj' && id !== 'off') {
-      toast('<b>无法叠加</b>：当前底图是高德（GCJ-02），铁路图源是 WGS-84。请先把底图换成 OSM 系列。', 6500);
+      toast('<b>无法叠加</b>：当前底图是高德（GCJ-02），铁路图源是 WGS-84。请先把底图换成 Esri / OSM 系列。', 6500);
       var sr = document.getElementById('selRail'); if (sr) sr.value = railId;
       return;
     }
     railId = id;
     railUserOff = (id === 'off');
     buildRail();
+    var srNow = document.getElementById('selRail');
+    if (srNow && srNow.value !== id) srNow.value = id;
     refreshStatus();
   }
 
   function railOpacity(v) {
     CONFIG.railOpacity = Number(v);
     if (railLayer) railLayer.setOpacity(Math.min(1, Math.max(0.2, CONFIG.railOpacity)));
+    var rng = document.getElementById('rngRail');
+    if (rng) rng.value = Math.round(CONFIG.railOpacity * 100);
     refreshStatus();
   }
 
