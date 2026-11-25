@@ -118,8 +118,11 @@ class RecordDetailDialog(QDialog):
         train = record.get('train', '----')
         time_str = record.get('timeStr', record.get('time', ''))
         self.setWindowTitle(f'记录详情 — {train} ({time_str})')
-        self.setMinimumSize(760, 600)
-        self.resize(880, 700)
+        # v2.6.1：用户反馈默认太宽（880）。解码结果是两列网格，值列可换行，
+        # 680 就放得下；「解码过程 / 纠错码字」等宽文本页窄了会出横向滚动条，
+        # 属可接受的取舍。最小尺寸也跟着收，小屏不会被顶宽。
+        self.setMinimumSize(620, 540)
+        self.resize(680, 620)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         # 底色自己铺：QSS 里的 QDialog 规则会被后面的 QWidget{transparent} 盖掉，
         # 不铺就会露出系统白底，深色主题下按钮直接看不见

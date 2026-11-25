@@ -84,6 +84,27 @@ def cleanDistRunData(keepConfig: bool = True) -> None:
         rm(os.path.join(DIST, name))
 
 
+def preCleanDistExe() -> bool:
+    """打包前先移除旧 EXE，被占用时立刻报错。
+
+    旧 EXE 还在时 PyInstaller 要自己删它：删除被占用文件会失败，而失败发生在
+    收集完 4000 多个文件**之后**（约 6 分钟），白等一趟。这里提前用
+    os.remove 直接删（绕开回收站），删得掉就说明没锁；删不掉就明确告诉用户
+    先关程序，2 秒内返回。
+    """
+    exe = os.path.join(DIST, EXE_NAME)
+    if not os.path.isfile(exe):
+        return True
+    try:
+        os.remove(exe)
+        log('已移除旧 EXE（如有正在运行的旧版，关掉后重开即是新版）')
+        return True
+    except OSError as e:
+        log(f'错误: 旧 EXE 无法删除（{e}）')
+        log('      CR-LBJ-Receiver 正在运行？请先退出程序再打包。')
+        return False
+
+
 def checkDeps() -> None:
     """打包前确认外观层依赖在不在。
 
@@ -167,6 +188,8 @@ def main() -> int:
         cleanProcessFiles()
 
     checkDeps()
+    if not preCleanDistExe():
+        return 2
     rc = runPyInstaller()
     if rc != 0:
         log('打包失败，保留 build/ 以便排查')
