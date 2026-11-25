@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 仅作 Compose 容器宿主；视觉全部由 Compose FluentTheme + 自绘承担 -->
+    <style name="Theme.CRLBJ" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0F1115</item>
+    </style>
+</resources>

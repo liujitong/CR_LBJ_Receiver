@@ -28,6 +28,18 @@ Thumbs.db
 .DS_Store
 desktop.ini
 
+# Android 端（android/）
+android/.gradle/
+android/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/captures/
+android/.cxx/
+android/app/.cxx/
+android/app/build/
+android/.kotlin/
+
 # 临时文件
 *.tmp
 *~
