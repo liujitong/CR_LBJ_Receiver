@@ -1063,8 +1063,7 @@ class ConfigDialog(QDialog):
     def __init__(self, config: CoreConfig, parent=None, page: str = None):
         super().__init__(parent)
         self.setWindowTitle('配置 · ' + (page or CONFIG_PAGES[0]))
-        self.setMinimumSize(720, 560)
-        self.resize(820, 660)
+        fit_dialog_to_screen(self, 820, 660, 720, 560)    # v3.2.4：原裸像素→设计像素 + 按屏收尺寸
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         # 底色自己铺：QSS 里的 QDialog 规则会被后面的 QWidget{transparent} 盖掉，
         # 不铺就会露出系统白底，深色主题下按钮直接看不见

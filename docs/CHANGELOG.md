@@ -15,6 +15,79 @@
 
 ---
 
+## v3.2.4 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.2.4`，安卓 `versionName = 3.2.4` / `versionCode = 324`。
+> 主题：**桌面端二级窗口「大得超出屏幕 / 不自适应」修复；顺带修复配置对话框 `CONFIG_PAGES`
+> 崩溃回归；核对 ORM 透明度链路并清理死方法。**
+
+### 一、新增 `fit_dialog_to_screen()`（`ui/widgets.py`）
+
+各对话框原先写死 `resize(spx(1040), spx(700))` 这类尺寸。在 1366×768、或 1280×800@200%
+（逻辑可用区只有 640×400）的副屏上，`spx()` 还会按 UI_SCALE 放大 → 窗口顶出屏幕、
+右侧/底部内容被裁、按钮点不到。
+
+新函数（经 `cr_lbj.runtime` 转发，所有 `from cr_lbj.runtime import *` 的模块都能用）：
+
+* 取窗口所在屏（`windowHandle().screen()`）；**未 show 时用鼠标所在屏**兜底
+  （与主窗口 `_currentScreen` 同一思路）；
+* 目标尺寸 = `min(spx(design), 可用区 - 边距)`；**下限同样不超屏幕**；
+* 居中到该屏可用区；异常时退回"按设计尺寸"，绝不让自适应本身把窗口搞崩。
+
+### 二、六个二级窗口改造
+
+| 窗口 | 原 | 现 |
+|---|---|---|
+| 历史记录 `history_dialog.py` | `spx(760)×spx(460)` / `spx(1040)×spx(700)` | `fit(1040, 700, 760, 460)` |
+| 车次/机车配属 `query_ui.py` | `spx(620)×spx(480)` / `spx(860)×spx(720)` | `fit(860, 720, 620, 480)` |
+| 用户手册 `ManualDialog` | `resize(spx(700), spx(640))` | `fit(700, 640, 460, 400)` |
+| 关于 `AboutDialog` | **`setFixedSize(spx(540), spx(480))`（不可缩放）** | `fit(540, 480, 420, 360)`，**改为可缩放** |
+| 状态仪表板 `StatusDashboard` | `resize(spx(720), spx(660))` | `fit(720, 660, 520, 440)` |
+| 配置 `ConfigDialog` | **裸像素** `setMinimumSize(720,560)` / `resize(820,660)` | `fit(820, 660, 720, 560)`（设计像素） |
+
+### 三、表格列宽自适应
+
+* **历史记录**：原先 9 列全 `ResizeToContents` + 线路列 `Stretch` —— 列一宽窗口就被撑大、
+  出现横向滚动条。现在只让「时间」列按内容自适应，其余 `Interactive`（可压缩），
+  「线路」吃余量；`table.setMinimumWidth(0)` + `ScrollBarAsNeeded`。
+* **车次时刻表**：站名 `Stretch`；只让「到点/发点」两个关键列 `ResizeToContents`，
+  「停留/里程」`Interactive` 并给默认宽度；同样放开最小宽度。
+
+### 四、状态仪表板网格列数自适应
+
+`_grid_cols()`：窗口宽度 **< spx(520) → 2 列**、**< spx(700) → 3 列**、否则 **4 列**；
+`resizeEvent` 里列数档位变化时按上次分组自动重排（`_lastGroups` / `_builtCols`）。
+窄窗口不再把每个指标方块压成一团。
+
+### 五、ORM 透明度核对 + 死方法清理
+
+* 链路确认已通：`ConfigDialog` 的滑块 → `cfg.mapRailOpacity` → 保存后
+  `MainWindow._onConfigChanged()` → `mapPanel.setConfig()` → `host.apply_config()` →
+  payload `railOpacity` → 页面 `applyConfig()` 里的 `railOpacity(cfg.railOpacity)` → 生效。
+  冒烟断言 `_config_json()['railOpacity'] == 0.55` 通过，**未重复实现**。
+* 删除 `map_panel.setRailOpacity()`：全仓库无调用方（透明度只走 `apply_config`），
+  属僵尸方法。
+
+### 六、顺带修复的回归（重要）
+
+**配置对话框打开即崩**：`ConfigDialog.__init__` 用 `CONFIG_PAGES`，但 v3.1.1 把
+`HistoryPanel` 删掉后这些常量留在 `ui/components/history_panel.py`，而
+`config_ui.py` / `main_window.py` 是 `from cr_lbj.runtime import *`、**从未导入该模块** →
+`NameError: CONFIG_PAGES is not defined`（配置菜单构建、首次运行预设 `default_sources()` 同样会炸）。
+现在把 `CONFIG_PAGES` / `SOURCE_TYPE_LABELS` / `SOURCE_TYPE_TAGS` / `default_sources()`
+移到 `cr_lbj/runtime.py` 共享层；`history_panel.py` 退化为兼容壳（只 re-export）。
+
+### 七、验证
+
+* `pytest`：**110 passed**（新增 `tests/test_desktop_ui_v324.py`：适配函数、六个窗口改造、
+  表格列策略、仪表板列数、ORM 透明度 payload、死方法清理、CONFIG_PAGES 回归防护）。
+* 离屏冒烟（800×800 可用区）：6 个窗口全部落在屏内且下限不超屏
+  （history 768×700 / query 768×720 / manual 700×640 / about 540×480 / config 768×660 /
+  dashboard 720×660）；dashboard 列数 480px→2、640px→3、720/900px→4。
+* 桌面 `pytest` 与 `desktop/build.py` 均通过。
+
+---
+
 ## v3.2.3 · 2026-11-26
 
 > 版本号：桌面 `cr_lbj.__version__ = 3.2.3`，安卓 `versionName = 3.2.3` / `versionCode = 323`。

@@ -15,7 +15,7 @@ class ManualDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('使用手册')
-        self.resize(spx(700), spx(640))
+        fit_dialog_to_screen(self, 700, 640, 460, 400)    # v3.2.4：按所在屏收尺寸并居中
         layout = QVBoxLayout(self)
 
         scroll = QScrollArea()
@@ -382,7 +382,7 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('关于')
-        self.setFixedSize(spx(540), spx(480))
+        fit_dialog_to_screen(self, 540, 480, 420, 360)    # v3.2.4：改为可缩放 + 按屏收尺寸
         layout = QVBoxLayout(self)
 
         title = QLabel('中国铁路 LBJ 列车预警器解码程序')
@@ -391,7 +391,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v3.2.3  ·  2026-11')
+        ver = QLabel('v3.2.4  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)

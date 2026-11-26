@@ -146,8 +146,7 @@ class QueryDialog(QDialog):
         self._loco_result: Dict[str, Any] = {}
 
         self.setWindowTitle('车次 / 机车配属查询')
-        self.setMinimumSize(spx(620), spx(480))
-        self.resize(spx(860), spx(720))
+        fit_dialog_to_screen(self, 860, 720, 620, 480)    # v3.2.4：按所在屏收尺寸并居中
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         K.paintBackground(self)
 
@@ -349,9 +348,17 @@ class QueryDialog(QDialog):
             table.setSelectionBehavior(QTableWidget.SelectRows)
             table.verticalHeader().setVisible(False)
             header = table.horizontalHeader()
+            # v3.2.4：站名吃余量；只让「到点 / 发点」两个关键列按内容自适应，
+            # 其余 Interactive（可压缩），窄窗口下不撑出横向滚动条。
+            header.setSectionResizeMode(QHeaderView.Interactive)
             header.setSectionResizeMode(0, QHeaderView.Stretch)
-            for c in (1, 2, 3, 4):
+            for c in (1, 2):
                 header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+            for c in (3, 4):
+                header.resizeSection(c, spx(64))
+            header.setStretchLastSection(False)
+            table.setMinimumWidth(0)
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             for r, s in enumerate(stops):
                 stop_min = s.get('stop') or 0
                 vals = [

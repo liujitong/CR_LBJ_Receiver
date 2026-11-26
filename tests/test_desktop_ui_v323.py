@@ -91,9 +91,9 @@ def _read(*parts: str) -> str:
 
 def test_version_is_v321():
     init = _read('cr_lbj', '__init__.py')
-    assert "__version__ = '3.2.3'" in init
+    assert "__version__ = '3.2.4'" in init
     main = _read('cr_lbj', 'ui', 'windows', 'main_window.py')
-    assert 'v3.2.3' in main
+    assert 'v3.2.4' in main
     assert 'v3.2.0' not in main
 
 
@@ -115,7 +115,9 @@ def test_train_info_panel_slimmed():
 
 
 def test_config_pages_merged():
-    const = _read('cr_lbj', 'ui', 'components', 'history_panel.py')
+    # v3.2.4：常量从 history_panel.py 移到 runtime 共享层（config_ui/main_window 只
+    # star-import runtime，留在旧模块会 NameError，打开配置对话框直接崩）
+    const = _read('cr_lbj', 'runtime.py')
     assert "CONFIG_PAGES = ['数据源与射频'" in const
     pages_line = next(line for line in const.splitlines()
                       if line.startswith('CONFIG_PAGES = '))

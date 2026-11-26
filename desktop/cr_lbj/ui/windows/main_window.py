@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.3')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.4')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -1404,7 +1404,7 @@ class MainWindow(QMainWindow):
            if data_update.auto_enabled(self.config) else '关')
 
         group('界面')
-        kv('版本', 'v3.2.3')
+        kv('版本', 'v3.2.4')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(
@@ -1470,7 +1470,7 @@ class StatusDashboard(QDialog):
         super().__init__(parent or (main if isinstance(main, QWidget) else None))
         self.main = main
         self.setWindowTitle('运行状态仪表板 —— 全部实时指标')
-        self.resize(spx(720), spx(660))
+        fit_dialog_to_screen(self, 720, 660, 520, 440)    # v3.2.4：按所在屏收尺寸并居中
         self.setSizeGripEnabled(True)
 
         outer = QVBoxLayout(self)
@@ -1511,6 +1511,9 @@ class StatusDashboard(QDialog):
         #: (组, 项目) -> (值标签, 方块, 上次色调)
         self.tiles: Dict[tuple, tuple] = {}
         self._structure = None
+        # v3.2.4：网格列数按窗口宽度自适应，记住上次分组与列数供 resize 时重排
+        self._lastGroups = None
+        self._builtCols = self._grid_cols()
 
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
@@ -1530,6 +1533,35 @@ class StatusDashboard(QDialog):
             if w is not None:
                 w.deleteLater()
         self.tiles.clear()
+
+    def _grid_cols(self, width: int = None) -> int:
+        """指标网格列数按窗口宽度自适应（v3.2.4）：宽 4 列 / 中 3 列 / 窄 2 列。
+
+        以前固定 4 列：窄窗口（1366×768 或 200% 缩放的副屏）里每个方块被压到
+        一百来像素，标签换行、数值挤爆。现在窄了自动减列，方块保持可读宽度。
+        """
+        try:
+            w = int(width if width is not None else self.width())
+        except Exception:
+            w = 720
+        if w < spx(520):
+            return 2
+        if w < spx(700):
+            return 3
+        return 4
+
+    def resizeEvent(self, event):                     # noqa: N802 (Qt 命名)
+        """窗口尺寸变化时，列数档位变了就按上次分组重排一次。"""
+        try:
+            super().resizeEvent(event)
+        except Exception:
+            pass
+        try:
+            cols = self._grid_cols(event.size().width())
+            if cols != self._builtCols and self._lastGroups:
+                self._buildBody(self._lastGroups)
+        except Exception:
+            pass
 
     def _buildBody(self, groups):
         """按分组结构建卡片与方块（只在项目集合变化时重建一次）。"""
@@ -1552,7 +1584,8 @@ class StatusDashboard(QDialog):
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setHorizontalSpacing(spx(6))
             grid.setVerticalSpacing(spx(5))
-            cols = 4
+            cols = self._grid_cols()
+            self._builtCols = cols
             for i, (label, _val, _tone) in enumerate(rows):
                 tile = QWidget()
                 tile.setObjectName('chip')
@@ -1586,6 +1619,7 @@ class StatusDashboard(QDialog):
         except Exception as e:                     # 绝不让仪表板把主程序带崩
             groups = [('采集失败', [('错误', repr(e), 'err')])]
         structure = tuple((t, tuple(k for k, _v, _x in rows)) for t, rows in groups)
+        self._lastGroups = groups
         if structure != self._structure:
             self._structure = structure
             self._buildBody(groups)

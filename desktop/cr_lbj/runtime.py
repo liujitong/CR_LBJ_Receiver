@@ -42,6 +42,49 @@ from cr_lbj.ui.theme import c as CLR
 # Fluent Design 外观层（qfluentwidgets 封装，见 ui_kit.py；缺库自动退回原生控件）
 from cr_lbj.ui import widgets as K
 from cr_lbj.ui.widgets import CardBox
+from cr_lbj.ui.widgets import fit_dialog_to_screen  # noqa: F401（二级窗口自适应，v3.2.4）
+
+
+# ---------------------------------------------------------------------------
+# 配置面板共用的常量（v3.2.4：从 ui/components/history_panel.py 移到共享层）
+#
+# 为什么搬：v3.1.1 把「历史记录」从主界面页签改成「工具 → 历史记录…」对话框后，
+# HistoryPanel 类被删，但这几个常量留在 history_panel.py；而 config_ui.py /
+# main_window.py 是 `from cr_lbj.runtime import *`，根本没导入那个模块 →
+# 打开配置对话框 / 构建配置菜单时 `NameError: CONFIG_PAGES is not defined`。
+# 放到 runtime（所有 UI 模块都会 star-import 的共享层）后就不会再漏。
+# ---------------------------------------------------------------------------
+#: 配置分页名（与 ConfigPanel 里的 page(...) 名字一一对应，顺序即菜单顺序）
+CONFIG_PAGES = ['数据源与射频', '到达估算', '地图与车次',
+                '解码与界面', '外观主题', '数据更新']
+
+#: 数据源类型下拉的 (显示名, 内部值)
+SOURCE_TYPE_LABELS = [
+    ('本机 USB (直连，推荐)', 'rtl_usb'),
+    ('本机 USB (经 rtl_tcp 中转)', 'rtl_usb_tcp'),
+    ('局域网 / 本地 RTL-TCP', 'rtl_tcp'),
+    ('OWRX (OpenWebRX)', 'owrx'),
+]
+
+#: 数据源类型在列表里的短标签
+SOURCE_TYPE_TAGS = {'rtl_usb': 'USB', 'rtl_usb_tcp': 'USB*',
+                    'rtl_tcp': 'TCP', 'owrx': 'OWRX'}
+
+
+def default_sources(cfg) -> List[Dict[str, Any]]:
+    """首次运行时给出的数据源预设（主机/端口都是**本机占位**，不含任何真实服务器）。"""
+    base = {'sampleRate': cfg.sampleRate, 'gainDb': cfg.gainDb,
+            'ppm': cfg.ppm}
+    return [
+        dict(base, name='本机 RTL-SDR (USB 直连)', type='rtl_usb',
+             host='127.0.0.1', port=1234, dcOffsetHz=50000.0),
+        dict(base, name='本机 RTL-SDR (rtl_tcp 中转)', type='rtl_usb_tcp',
+             host='127.0.0.1', port=1234, dcOffsetHz=50000.0),
+        dict(base, name='本地 rtl_tcp', type='rtl_tcp',
+             host='127.0.0.1', port=1234, dcOffsetHz=50000.0),
+        dict(base, name='OWRX 服务器', type='owrx',
+             host='127.0.0.1', port=8073, dcOffsetHz=0.0),
+    ]
 
 
 def themeColors() -> dict:

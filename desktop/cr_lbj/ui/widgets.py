@@ -20,7 +20,7 @@ from __future__ import annotations
 from . import theme as TH
 
 from PySide6.QtCore import Qt, QObject, QEvent, Signal
-from PySide6.QtGui import QFont, QColor, QPalette
+from PySide6.QtGui import QFont, QColor, QPalette, QCursor
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QSizePolicy, QPushButton as _QtButton, QComboBox as _QtCombo,
@@ -104,6 +104,77 @@ def spx(v: float) -> int:
 def fontPx(base: float) -> float:
     """正文/说明文字字号（保持浮点，QSS 里可写 12.5px）。"""
     return round(float(base) * _SCALE, 1)
+
+
+def fit_dialog_to_screen(dlg, design_w: float = 0, design_h: float = 0,
+                         design_min_w: float = 0, design_min_h: float = 0,
+                         margin: float = None) -> None:
+    """把二级窗口收进「它所在那块屏」的可用区并居中（v3.2.4）。
+
+    为什么需要：各对话框原先写死 `resize(spx(1040), spx(700))` 这类尺寸。
+    在 1366×768、或 1280×800@200%（逻辑可用区只有 640×400）的副屏上，
+    spx() 还会按 UI_SCALE 放大，窗口直接顶出屏幕、内容被裁、右/下边缘点不到。
+
+    规则：
+      * 取窗口所在屏（`windowHandle().screen()`）；窗口还没 show 时用
+        **鼠标所在屏**兜底（与主窗口 `_currentScreen` 同一思路）；
+      * 目标尺寸 = min(spx(design), 可用区 - 边距)；下限同理也不超过屏幕；
+      * 居中到该屏可用区。
+
+    调用时机：构造完 UI 后调用一次即可（`resize`/`move` 在 show 前也有效）。
+    任何异常都退回"按设计尺寸"，绝不让自适应本身把窗口搞崩。
+    """
+    try:
+        scr = None
+        try:
+            h = dlg.windowHandle()
+            if h is not None and h.screen() is not None:
+                scr = h.screen()
+        except Exception:
+            pass
+        if scr is None:
+            try:
+                scr = QApplication.screenAt(QCursor.pos())
+            except Exception:
+                scr = None
+        if scr is None:
+            scr = QApplication.primaryScreen()
+        avail = scr.availableGeometry() if scr is not None else None
+        if avail is None:
+            if design_w and design_h:
+                dlg.resize(spx(design_w), spx(design_h))
+            if design_min_w and design_min_h:
+                dlg.setMinimumSize(spx(design_min_w), spx(design_min_h))
+            return
+
+        # 边距：约为屏宽 2%，夹在 8~40 设计像素之间（再经 spx 缩放）
+        m = int(margin) if margin is not None else max(8, min(40, int(avail.width() * 0.02)))
+        mw, mh = spx(m), spx(m)
+        max_w = max(spx(320), avail.width() - mw * 2)
+        max_h = max(spx(240), avail.height() - mh * 2)
+
+        # 先收紧下限（下限也绝不能超过屏幕）
+        if design_min_w and design_min_h:
+            dlg.setMinimumSize(min(spx(design_min_w), max_w),
+                               min(spx(design_min_h), max_h))
+        else:
+            dlg.setMinimumSize(min(max(0, dlg.minimumWidth()), max_w),
+                               min(max(0, dlg.minimumHeight()), max_h))
+
+        w = min(spx(design_w), max_w) if design_w else min(max_w, max(1, dlg.width()))
+        h = min(spx(design_h), max_h) if design_h else min(max_h, max(1, dlg.height()))
+        w = max(int(w), dlg.minimumWidth())
+        h = max(int(h), dlg.minimumHeight())
+        dlg.resize(w, h)
+        # 居中到该屏可用区（可用区已扣掉任务栏/状态栏）
+        dlg.move(avail.x() + max(0, (avail.width() - w) // 2),
+                 avail.y() + max(0, (avail.height() - h) // 2))
+    except Exception:
+        try:
+            if design_w and design_h:
+                dlg.resize(spx(design_w), spx(design_h))
+        except Exception:
+            pass
 
 
 #: 底栏四档：小屏 / 笔记本 / 中屏 / 大屏（日志与状态提示的“大字”）

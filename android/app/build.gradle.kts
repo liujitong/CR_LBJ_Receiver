@@ -58,9 +58,9 @@ android {
         targetSdk = 35
         // 用户指定 NDK r27
         ndkVersion = "27.2.12479018"
-        // v3.2.3：Android USB 直连修复（libusb 禁枚举 / detach 内核驱动）；versionCode 323
-        versionCode = 323
-        versionName = "3.2.3"
+        // v3.2.4：桌面二级窗口自适应修复；versionCode 324
+        versionCode = 324
+        versionName = "3.2.4"
     }
 
     signingConfigs {

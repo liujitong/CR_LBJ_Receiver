@@ -26,6 +26,9 @@ HISTORY_COLUMNS = ['时间', '车次', '方向', '速度', '公里标', '线路'
 
 #: 线路列吃剩余宽度
 _HISTORY_STRETCH_COL = HISTORY_COLUMNS.index('线路')
+#: 唯一按内容自适应的关键列（v3.2.4）：其余列用 Interactive，窗口变窄时
+#: 优先压缩列宽而不是把窗口撑宽、逼出横向滚动条。
+_HISTORY_TIME_COL = HISTORY_COLUMNS.index('时间')
 
 
 class HistoryDialog(QDialog):
@@ -34,8 +37,7 @@ class HistoryDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('历史记录')
-        self.setMinimumSize(spx(760), spx(460))
-        self.resize(spx(1040), spx(700))
+        fit_dialog_to_screen(self, 1040, 700, 760, 460)   # v3.2.4：按所在屏收尺寸并居中
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         K.paintBackground(self)
 
@@ -73,8 +75,14 @@ class HistoryDialog(QDialog):
         self.table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        # v3.2.4：只让「时间」按内容自适应，其余 Interactive（可手动拖、可压缩），
+        # 「线路」吃余量。这样小窗口下是列变窄 + 省略，而不是整窗被撑大出横向滚动条。
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setSectionResizeMode(_HISTORY_TIME_COL, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(_HISTORY_STRETCH_COL, QHeaderView.Stretch)
+        header.setStretchLastSection(False)
+        self.table.setMinimumWidth(0)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         outer.addWidget(self.table, 1)
 
         btnRow = QHBoxLayout()

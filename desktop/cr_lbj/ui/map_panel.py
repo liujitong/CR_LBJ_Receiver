@@ -376,16 +376,6 @@ class MapPanel(QWidget):
         else:
             self.setRailStyle('off')
 
-    def setRailOpacity(self, value: float):
-        try:
-            v = max(0.2, min(1.0, float(value)))
-        except (TypeError, ValueError):
-            return
-        self.config.mapRailOpacity = v
-        if self.host.ready:
-            self.host.set_rail_opacity(v)
-        self._saveConfig()
-
     def _onRailCheck(self, checked: bool):
         self.setRailVisible(bool(checked))
 
