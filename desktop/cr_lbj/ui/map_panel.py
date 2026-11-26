@@ -575,11 +575,16 @@ class MapPanel(QWidget):
         if not isinstance(st, dict):
             return
         self._status = st
-        # ① 用户手动拖过地图 → 取消勾选「跟随」，让按钮状态和实际行为一致
-        if st.get('locked') and self.followBtn.isChecked():
-            self.followBtn.setChecked(False)
-            self.config.mapFollow = False
-            self.followChanged.emit(False)
+        # ① 用户手动拖过地图 → 跟随只是「暂停」，不再关闭跟随意图（v3.2.9）。
+        #    页面在**新车到达**时会自动恢复跟随并跳过去（见 railmap.html api.update）。
+        #    这里只更新按钮提示，绝不 setChecked(False)/写 mapFollow=False，
+        #    否则拖一下图就永久退出跟随，新车也不会再自动跟随。
+        locked = bool(st.get('locked'))
+        if self.followBtn.isChecked():
+            self.followBtn.setToolTip(
+                '跟随已暂停（你拖动过地图）；有新车到达会自动恢复跟随并跳转'
+                if locked else
+                '自动跟着最新列车走（拖动地图临时暂停，新车到达自动恢复）')
         # ② 夜间：以页面实际状态为准（页面没有自己的夜间按钮，正常不会不一致）
         night = bool(st.get('night'))
         if night != self.nightBtn.isChecked():

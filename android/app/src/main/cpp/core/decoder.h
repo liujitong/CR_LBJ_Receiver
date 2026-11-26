@@ -210,6 +210,25 @@ public:
     std::string lastTrain;
     double lastWarnTime = 0;
     std::vector<std::string> pendingWarnings; // 干扰告警（方向, 文本）
+    // v3.2.9：车次解析不出（----）的上/下行干扰计数（诊断用，不入库）
+    int interferenceUp = 0, interferenceDown = 0, interferenceUnknown = 0;
+
+    /// 记一次「解析不出车次」的干扰：按功能码分上/下行累加，限速 1 秒推一条告警，
+    /// 并**不产出 LbjResult**（因此不会进数据库）。与桌面 LbjDecoder._noteInterference 一致。
+    void noteInterference(int func, const char* reason = "车次字段无法解析") {
+        const char* d;
+        if (func == 1) { interferenceDown++; d = "下行"; }
+        else if (func == 3) { interferenceUp++; d = "上行"; }
+        else { interferenceUnknown++; d = "未知"; }
+        double now = nowSeconds();
+        if (now - lastWarnTime >= 1.0) {
+            lastWarnTime = now;
+            char buf[192];
+            snprintf(buf, sizeof(buf),
+                     "⚠ 探测到%s信号 干扰严重（%s，已计为干扰、不入库）", d, reason);
+            pendingWarnings.push_back(std::string(d) + "|" + buf);
+        }
+    }
 
     void initDecoder(double fs, double baudRate) {
         // 高斯 FIR（截止 1200Hz，('gaussian',7.0) 窗），归一化
@@ -446,6 +465,13 @@ public:
             size_t p = raw.find_first_not_of(' ');
             if (p != std::string::npos) raw = raw.substr(p);
             if (isAlnumBcd(raw)) baseTrain = raw; else baseTrain = "----";
+            // v3.2.9：车次解析不出来 → 判为上/下行干扰：只统计 + 记日志，
+            // 绝不建会话、绝不产出结果（因此不入库）。旧实现会把 "----" 当车次
+            // 建会话，最后往数据库里塞一堆「----」记录。
+            if (baseTrain == "----") {
+                noteInterference(func);
+                return;
+            }
             lastTrain = baseTrain;
             std::string direction = (func == 1) ? "下行" : (func == 3) ? "上行"
                                       : ("未知(" + std::to_string(func) + ")");
@@ -617,10 +643,23 @@ public:
 
         // === 汇总会话 ===
         std::string aid = isShort ? baseTrain : lastTrain;
+        // v3.2.9：最终车次仍为空/---- → 计干扰、只记日志，不产出结果（不入库）
+        if (aid.empty() || aid == "----") {
+            noteInterference(func);
+            return;
+        }
         if (!aid.empty() && sessions.count(aid)) {
             Session& s = sessions[aid];
             LbjResult r;
             r.timestamp = ct;
+            std::string fullTrain = s.prefix + s.baseTrain;
+            // replace(' ','').strip()
+            fullTrain.erase(std::remove(fullTrain.begin(), fullTrain.end(), ' '),
+                            fullTrain.end());
+            if (fullTrain.empty() || fullTrain == "----") {
+                noteInterference(func);
+                return;
+            }
             r.train = s.prefix + s.baseTrain;
             // replace(' ','').strip()
             r.train.erase(std::remove(r.train.begin(), r.train.end(), ' '), r.train.end());

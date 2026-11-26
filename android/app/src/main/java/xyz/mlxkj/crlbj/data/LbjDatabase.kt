@@ -114,7 +114,7 @@ interface RecordDao {
     suspend fun deleteByUids(uids: List<String>)
 }
 
-@Database(entities = [RecordEntity::class], version = 2, exportSchema = false)
+@Database(entities = [RecordEntity::class], version = 3, exportSchema = false)
 abstract class LbjDatabase : RoomDatabase() {
     abstract fun recordDao(): RecordDao
 
@@ -133,11 +133,24 @@ abstract class LbjDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v2 → v3（v3.2.9）：清理历史遗留的「解析不出车次」记录。
+         *
+         * 这类帧现在按上行/下行**干扰**统计、只记日志、不再入库
+         * （与桌面端 HistoryDb 启动清理同口径），旧库里已有的 ---- 记录一并清掉。
+         */
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "DELETE FROM records WHERE TRIM(COALESCE(train, '')) IN ('', '----', '未知')")
+            }
+        }
+
         fun get(context: Context): LbjDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext, LbjDatabase::class.java, "lbj_history.db"
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
     }
 }

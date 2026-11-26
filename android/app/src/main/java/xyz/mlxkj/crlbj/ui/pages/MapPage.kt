@@ -148,6 +148,8 @@ fun MapPage(vm: ReceiverViewModel) {
      * 所以只有确认一致后才接受页面回报。
      */
     val pageSynced = remember { mutableStateOf(false) }
+    // v3.2.9：页面是否处于「用户拖动过地图」的暂停跟随态（仅供跟随胶囊显示"暂停"）
+    val mapLocked = remember { mutableStateOf(false) }
 
     // 居中到本机位置（WGS-84）。centerLatLng 契约：居中 + 停止自动跟随 + 页面 toast；
     // 接口未就绪时静默跳过（返回 no-api），原生侧仍把 mapFollow 落盘为 false。
@@ -288,9 +290,10 @@ fun MapPage(vm: ReceiverViewModel) {
                         Log.i(TAG, "页面状态与设置不一致: page base=${st.base} rail=${st.rail} " +
                             "want base=${s.mapBase} rail=$wantRail（暂停接受回报）")
                     }
-                    if (st.locked && vm.settings.value.mapFollow) {
-                        vm.updateViewSettings(vm.settings.value.copy(mapFollow = false))
-                    }
+                    // v3.2.9：拖动地图只是「暂停」跟随，不再关掉 mapFollow。
+                    // 页面在**新车到达**时会自动恢复跟随并跳过去（railmap.html api.update）。
+                    // 之前这里把 mapFollow 置 false，导致拖一下图就永久退出跟随、新车不再自动跟。
+                    mapLocked.value = st.locked
                     // 底图瓦片「真的不可达」才提示换图源。注意：
                     //  · 页面 status() 的 tilesTotal/tilesFailed **只统计底图**，
                     //    铁路图层（ORM 需 Referer）失败不再污染判定；
@@ -456,12 +459,18 @@ fun MapPage(vm: ReceiverViewModel) {
             ) {
                 MapToolItem(
                     icon = Icons.Filled.GpsFixed,
-                    label = if (settings.mapFollow) "跟随中" else "跟随",
+                    // v3.2.9：拖动地图后显示「跟随·暂停」，但跟随意图仍在——新车到达会自动恢复
+                    label = when {
+                        settings.mapFollow && mapLocked.value -> "跟随·暂停"
+                        settings.mapFollow -> "跟随中"
+                        else -> "跟随"
+                    },
                     active = settings.mapFollow,
                 ) {
                     val next = !settings.mapFollow
                     vm.updateViewSettings(settings.copy(mapFollow = next))
                     web?.evaluateJavascript("window.LBJ&&window.LBJ.setFollow($next)", null)
+                    if (next) mapLocked.value = false
                 }
                 MapToolItem(icon = Icons.Filled.Layers, label = "图层", active = false) {
                     sheet = true

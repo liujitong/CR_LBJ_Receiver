@@ -61,6 +61,9 @@ class HistoryDb:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self.lastMigrated = 0
+        #: v3.2.9：本次启动清理掉的「解析不出车次」历史记录条数
+        self.lastCleaned = 0
         self._initDb()
 
     def _initDb(self):
@@ -80,6 +83,17 @@ class HistoryDb:
                 self._migrateV21(conn)
                 conn.execute(f'PRAGMA user_version = {self._SCHEMA_VERSION}')
                 conn.commit()
+            # v3.2.9：清理历史遗留的「解析不出车次」记录（train 为空/----）。
+            # 这类帧现在按上行/下行干扰统计、只记日志、不再入库，旧库里已有的也一并清掉。
+            try:
+                cur = conn.execute(
+                    "DELETE FROM records WHERE TRIM(COALESCE(train,'')) IN ('', '----', '未知')")
+                cleaned = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                if cleaned:
+                    self.lastCleaned = cleaned
+                conn.commit()
+            except Exception:
+                pass
 
     def _migrateV21(self, conn):
         """v2.1 迁移：为旧记录补 uid，并清理同一车次同一秒的重复行。

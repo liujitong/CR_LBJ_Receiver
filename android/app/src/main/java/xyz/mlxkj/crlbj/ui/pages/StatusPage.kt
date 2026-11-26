@@ -180,6 +180,11 @@ private fun metricGroups(f: StatusFrame): List<MetricGroup> = listOf(
                 if (f.bufferLevel > 0.85f) Tone.Err else Tone.Neutral),
             Tile("解码 CPU", "%.1f".format(Locale.US, f.decodeCpuPct), "%",
                 if (f.decodeCpuPct > 60f) Tone.Warn else Tone.Ok),
+            // v3.2.9：解析不出车次的帧按功能码判上/下行，计入干扰（只统计、不入库）
+            Tile("干扰 上行", bigCount(f.interferenceUp), "帧",
+                if (f.interferenceUp > 0) Tone.Warn else Tone.Neutral),
+            Tile("干扰 下行", bigCount(f.interferenceDown), "帧",
+                if (f.interferenceDown > 0) Tone.Warn else Tone.Neutral),
         ),
     ),
     MetricGroup(

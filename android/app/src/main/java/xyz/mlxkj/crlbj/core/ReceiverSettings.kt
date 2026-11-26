@@ -76,7 +76,9 @@ data class ReceiverSettings(
     val blockSize: Int = 65536,
     // RSSI 门控
     val rssiThresholdDb: Double = -55.0,
-    val rssiHystDb: Double = 3.0,
+    // v3.2.9：与桌面 DEFAULT_RSSI_HYST_DB = 4.0 对齐（原来 3.0，
+    // 门控释放偏快，尾部报文比 PC 更容易漏掉 —— 这是"安卓解不全"的真实原因之一）
+    val rssiHystDb: Double = 4.0,
     val rssiHoldMs: Double = 700.0,
     // AFC
     val afcEnable: Boolean = true,

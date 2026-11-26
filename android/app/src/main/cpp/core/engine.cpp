@@ -278,6 +278,13 @@ void LbjEngine::dspLoop() {
                 r.afcScore = chain_.afc.lastScore;
                 emitResult(r);
             }
+            // v3.2.9：排空干扰告警（原本只 push 从不消费，安卓端永远看不到告警）
+            for (const auto& w : parser_.pendingWarnings) {
+                size_t bar = w.find('|');
+                std::string text = (bar == std::string::npos) ? w : w.substr(bar + 1);
+                log("[告警] " + text);
+            }
+            parser_.pendingWarnings.clear();
         } else if (gate_.justDeactivated) {
             parser_.resetReceiverState();
             if (!keepAfcAfterPacket_ && chain_.afc.enabled) {
@@ -315,6 +322,13 @@ void LbjEngine::dspLoop() {
             status_.setInt(16, running_ ? 1 : 0);
             status_.setInt(17, mode_);
             status_.setInt(18, streamBroken_ ? 1 : 0);
+            // v3.2.9：word[19] 原为保留位，现打包「解析不出车次」的干扰计数：
+            // 低 16 位 = 上行，高 16 位 = 下行（单位：帧；只统计不入库的帧）
+            {
+                int up = parser_.interferenceUp & 0xFFFF;
+                int down = parser_.interferenceDown & 0xFFFF;
+                status_.setInt(19, (down << 16) | up);
+            }
             status_.setFloats(20, spectrum_.smoothed, kSpectrumBins);
             status_.publish();
             lastStatTime = nowSeconds();

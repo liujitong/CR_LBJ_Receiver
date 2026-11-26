@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.8')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.9')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -1380,6 +1380,14 @@ class MainWindow(QMainWindow):
         kv('占用槽位', '%d / %d' % (slots, getattr(dd, 'maxSlots', 0) or 0))
         kv('当前列表', '%d 行' % self.currentPanel.table.rowCount())
         kv('历史记录', '%d 条' % self.historyDb.count())
+        # v3.2.9：解析不出车次的帧按功能码判上/下行，计入干扰（只统计、不入库）
+        iUp = int(st.get('interferenceUp', 0) or 0)
+        iDown = int(st.get('interferenceDown', 0) or 0)
+        iUnk = int(st.get('interferenceUnknown', 0) or 0)
+        kv('干扰 上行', '%d 帧' % iUp, 'warn' if iUp else '')
+        kv('干扰 下行', '%d 帧' % iDown, 'warn' if iDown else '')
+        if iUnk:
+            kv('干扰 方向未知', '%d 帧' % iUnk, 'warn')
         kv('地图列车', '%d 辆' % len(getattr(self.mapPanel, '_trains', {}) or {}),
            'ok' if getattr(self.mapPanel, '_trains', None) else '')
 
@@ -1414,7 +1422,7 @@ class MainWindow(QMainWindow):
            if data_update.auto_enabled(self.config) else '关')
 
         group('界面')
-        kv('版本', 'v3.2.8')
+        kv('版本', 'v3.2.9')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(

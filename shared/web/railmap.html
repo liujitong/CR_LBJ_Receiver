@@ -689,7 +689,8 @@
     var id = String(d.id || d.train || '----');
     var st = state[id];
     var pos = toMap(Number(d.lat), Number(d.lon));
-    if (!isFinite(pos[0]) || !isFinite(pos[1])) return;
+    if (!isFinite(pos[0]) || !isFinite(pos[1])) return false;
+    var isNew = !st;
     if (!st) {
       var mk = L.marker(pos, {
         pane: 'markerPane',
@@ -747,6 +748,7 @@
         st.line.setLatLngs(pts);
       }
     }
+    return isNew;
   }
 
   function trailSpan(trail) {
@@ -915,11 +917,11 @@
       if (typeof payload.follow === 'boolean') follow = payload.follow;
       if (typeof payload.showTrail === 'boolean') CONFIG.showTrail = payload.showTrail;
       var trains = payload.trains || [];
-      var newest = null, newestTs = -1;
+      var newest = null, newestTs = -1, sawNew = false;
       for (var i = 0; i < trains.length; i++) {
         var d = trains[i];
         if (d == null || d.lat == null || d.lon == null) continue;
-        upsertTrain(d);
+        if (upsertTrain(d)) sawNew = true;
         var ts = Number(d.ts) || 0;
         if (ts > newestTs) { newestTs = ts; newest = d; }
       }
@@ -930,8 +932,17 @@
         lastAuto = null;
         map.setView(st.marker.getLatLng(), Math.max(map.getZoom(), 10), { animate: false });
       } else if (newest && follow) {
-        if (lastFocusId == null) lastFocusId = String(newest.id || newest.train);
-        if (String(newest.id || newest.train) === String(lastFocusId)) {
+        var newestId = String(newest.id || newest.train);
+        // v3.2.9 修复：拖动地图只是「暂停」跟随（userTouched），并非关闭跟随意图。
+        // 当出现**新车**（此前没跟过的 id）且跟随仍开启时，自动恢复跟随并跳到新车——
+        // 即用户要的「拖过地图后，新来个车也能直接转过去」。
+        if (sawNew && newestId !== lastFocusId) {
+          userTouched = false;
+          lastAuto = null;
+          lastFocusId = newestId;
+        }
+        if (lastFocusId == null) lastFocusId = newestId;
+        if (newestId === String(lastFocusId)) {
           var s2 = state[String(lastFocusId)];
           if (s2) autoCenter(lastFocusId, s2.marker.getLatLng());
         }

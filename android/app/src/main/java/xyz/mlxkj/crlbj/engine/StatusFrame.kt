@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
  *  [6]tunerTypeId [7]appliedGainCentiDb [8]actualSampleRate [9]hwFreqHz
  *  [10]blocksPerSec [11]totalBlocks [12]droppedBlocks [13]reconnectCount
  *  [14]decodeCpuPct [15]bufferLevel [16]running [17]linkMode [18]errorState
+ *  [19]interference(低16=上行, 高16=下行；v3.2.9 解析不出车次的干扰帧数)
  *  [20..51]spectrum[32]
  */
 data class StatusFrame(
@@ -40,9 +41,18 @@ data class StatusFrame(
     val running: Int = 0,
     val linkMode: Int = 1,        // 0=usb 1=pipe
     val errorState: Int = 0,      // 0=ok 1=streamBroken
+    /** v3.2.9：word[19] 打包的干扰计数（低16=上行帧数，高16=下行帧数；
+     *  口径 = 解析不出车次、被判为干扰且**不入库**的帧） */
+    val interferenceRaw: Int = 0,
     val spectrum: FloatArray = FloatArray(32),
 ) {
     val signalOn: Boolean get() = gateState >= 2 // ON / HOLD
+
+    /** 上行干扰帧数（解析不出车次、不入库） */
+    val interferenceUp: Int get() = interferenceRaw and 0xFFFF
+
+    /** 下行干扰帧数（解析不出车次、不入库） */
+    val interferenceDown: Int get() = (interferenceRaw ushr 16) and 0xFFFF
 
     companion object {
         const val WORDS = 52
@@ -72,6 +82,7 @@ data class StatusFrame(
                 running = bb.getInt(64),
                 linkMode = bb.getInt(68),
                 errorState = bb.getInt(72),
+                interferenceRaw = bb.getInt(76),
                 spectrum = spec,
             )
         }

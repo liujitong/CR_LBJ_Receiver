@@ -1792,6 +1792,10 @@ class LbjDecoder:
         self.lastTrain: Optional[str] = None
         self.currentMsgHasError = False
         self.lastWarnTime = 0.0  # 上次干扰告警时间
+        # v3.2.9：车次解析不出（----）的上/下行干扰计数（诊断用，不入库）
+        self.interferenceUp = 0
+        self.interferenceDown = 0
+        self.interferenceUnknown = 0
         # 回调
         self.onDecode: Optional[Callable[[DecodeResult], None]] = None
         self.onInterference: Optional[Callable[[str, str], None]] = None  # (方向, 告警文本)
@@ -1816,6 +1820,29 @@ class LbjDecoder:
         self.framePos = 0
         self.inMessage = False
         self.huntTimeout = 0
+
+    def _noteInterference(self, func: int, reason: str = '车次无法解析'):
+        """记一次「解析不出车次」的干扰（v3.2.9）。
+
+        * 按功能码判上/下行并累加计数（状态栏/诊断可见）；
+        * 限速 1 秒输出一条日志提示（避免刷屏）；
+        * **不产出 DecodeResult**，所以这类帧不会进数据库。
+        """
+        if func == 1:
+            self.interferenceDown += 1
+            d = '下行'
+        elif func == 3:
+            self.interferenceUp += 1
+            d = '上行'
+        else:
+            self.interferenceUnknown += 1
+            d = '未知'
+        now = time.time()
+        if now - self.lastWarnTime >= 1.0:
+            self.lastWarnTime = now
+            warnText = '⚠ 探测到%s信号 干扰严重（%s，已计为干扰、不入库）' % (d, reason)
+            if self.onInterference:
+                self.onInterference(d, warnText)
 
     @staticmethod
     def bcdToHexChar(c: str) -> str:
@@ -1961,6 +1988,12 @@ class LbjDecoder:
         if isShort:
             raw = bcd[0:6].strip()
             baseTrain = raw if re.match(r'^[A-Za-z0-9]+$', raw) else '----'
+            # v3.2.9：车次解析不出来（BCD 前 6 位不是字母数字）→ 判为上/下行干扰，
+            # 只统计 + 记日志，**绝不建会话、绝不产出 DecodeResult**（因此不入库）。
+            # 旧实现会把 '----' 当车次建会话，最后存进数据库一堆「----」记录。
+            if baseTrain == '----':
+                self._noteInterference(func, '车次字段无法解析')
+                return
             self.lastTrain = baseTrain
             direction = '下行' if func == 1 else '上行' if func == 3 else f'未知({func})'
             rs = bcd[6:9].replace(' ', '0').replace('U', '0').replace('*', '0')
@@ -2059,9 +2092,16 @@ class LbjDecoder:
 
         # === 汇总会话并生成解码结果 ===
         aid = baseTrain if isShort else self.lastTrain
+        # v3.2.9：最终车次仍为空/---- → 计干扰、只记日志，不产出结果（不入库）
+        if not aid or str(aid).strip() in ('', '----', '未知'):
+            self._noteInterference(func)
+            return
         if aid and aid in self.sessions:
             s = self.sessions[aid]
             fullTrain = f"{s['prefix']}{s['baseTrain']}".replace(' ', '').strip()
+            if not fullTrain or fullTrain in ('----', '未知'):
+                self._noteInterference(func)
+                return
             category = classifyTrainCategory(
                 fullTrain, s['isDetailed'], speed=s.get('speed'))
             # ETA 估算
@@ -2486,6 +2526,10 @@ class LbjCore:
             'dedupeWindow': self.dedupeWindow,
             'dupDropped': self._dedupe.dropped if hasattr(self, '_dedupe') else 0,
             'dupUpgraded': self._dedupe.upgraded if hasattr(self, '_dedupe') else 0,
+            # v3.2.9：解析不出车次的干扰计数（上/下行分开；这些帧不入库）
+            'interferenceUp': getattr(self.decoder, 'interferenceUp', 0),
+            'interferenceDown': getattr(self.decoder, 'interferenceDown', 0),
+            'interferenceUnknown': getattr(self.decoder, 'interferenceUnknown', 0),
         }
 
     def getNetworkDiagnostics(self) -> Dict[str, Any]:
