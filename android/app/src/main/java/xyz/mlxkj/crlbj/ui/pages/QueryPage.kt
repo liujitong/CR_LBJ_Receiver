@@ -8,16 +8,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,7 +47,6 @@ import xyz.mlxkj.crlbj.ui.components.Chip
 import xyz.mlxkj.crlbj.ui.components.Divider
 import xyz.mlxkj.crlbj.ui.components.InfoRow
 import xyz.mlxkj.crlbj.ui.components.LbjTextField
-import xyz.mlxkj.crlbj.ui.components.PageHeader
 import xyz.mlxkj.crlbj.ui.components.SectionCard
 import xyz.mlxkj.crlbj.ui.components.Tone
 import xyz.mlxkj.crlbj.ui.theme.Dim
@@ -61,7 +57,7 @@ import java.util.Locale
 private enum class QueryMode(val label: String) { Train("车次查询"), Loco("机车配属") }
 
 /**
- * 查询页（v3.0 新增）：车次查询 + 机车配属/参数查询。
+ * 车次·配属查询（原「查询」页，v3.1 起并入设置页「查询·数据」分组，不再占 Dock 页签）。
  *
  * 数据来源全部走 `shared/`（与桌面端逐字一致）与公开接口：
  *  · 车次：TrainInfoClient（RailGo 优先，失败自动退 12306；可在设置里锁源）
@@ -69,10 +65,11 @@ private enum class QueryMode(val label: String) { Train("车次查询"), Loco("�
  *  · 参数：loco_specs.json
  *
  * 所有网络/磁盘动作都在 Dispatchers.IO，失败只出文案不抛异常。
+ * 本 composable 不带自己的滚动容器，由设置页的分组滚动承载。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QueryPage(vm: ReceiverViewModel) {
+fun QuerySection(vm: ReceiverViewModel) {
     val p = pal()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -157,46 +154,49 @@ fun QueryPage(vm: ReceiverViewModel) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
-        PageHeader(
-            title = "查询",
-            subtitle = when (mode) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "车次·配属查询",
+                color = p.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                QueryMode.entries.forEach { m ->
+                    ModePill(m.label, mode == m) { mode = m }
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            when (mode) {
                 QueryMode.Train -> "车次时刻 / 担当 / 配属（数据源：${sourceWord(settings.trainQuerySource)}）"
                 QueryMode.Loco -> "机车配属号段 / 车型参数（内含 ${roster.stats().rows} 行号段表）"
             },
-            trailing = {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    QueryMode.entries.forEach { m ->
-                        ModePill(m.label, mode == m) { mode = m }
-                    }
-                }
-            },
+            color = p.textTertiary, fontSize = 11.sp,
         )
-
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            when (mode) {
-                QueryMode.Train -> TrainPanel(
-                    input = trainInput,
-                    onInput = { trainInput = it },
-                    loading = trainLoading,
-                    result = trainResult,
-                    onQuery = { runTrainQuery() },
-                    onShowStops = { showStops = true },
-                )
-                QueryMode.Loco -> LocoPanel(
-                    roster = roster,
-                    model = locoModel,
-                    number = locoNumber,
-                    loading = locoLoading,
-                    result = locoResult,
-                    spec = locoSpec,
-                    onModel = { locoModel = it },
-                    onNumber = { locoNumber = it },
-                    onQuery = { runLocoQuery() },
-                    onPickModel = { modelPicker = true },
-                )
-            }
-            Spacer(Modifier.height(Dim.dockSpace))
+        Spacer(Modifier.height(8.dp))
+        when (mode) {
+            QueryMode.Train -> TrainPanel(
+                input = trainInput,
+                onInput = { trainInput = it },
+                loading = trainLoading,
+                result = trainResult,
+                onQuery = { runTrainQuery() },
+                onShowStops = { showStops = true },
+            )
+            QueryMode.Loco -> LocoPanel(
+                roster = roster,
+                model = locoModel,
+                number = locoNumber,
+                loading = locoLoading,
+                result = locoResult,
+                spec = locoSpec,
+                onModel = { locoModel = it },
+                onNumber = { locoNumber = it },
+                onQuery = { runLocoQuery() },
+                onPickModel = { modelPicker = true },
+            )
         }
     }
 

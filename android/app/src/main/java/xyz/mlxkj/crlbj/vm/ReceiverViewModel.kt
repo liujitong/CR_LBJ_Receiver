@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import xyz.mlxkj.crlbj.core.ReceiverSettings
+import xyz.mlxkj.crlbj.core.TileCache
 import xyz.mlxkj.crlbj.data.AndroidSharedAssets
 import xyz.mlxkj.crlbj.data.CsvExporter
 import xyz.mlxkj.crlbj.data.DataUpdater
@@ -24,6 +24,7 @@ import xyz.mlxkj.crlbj.data.LocoRosterHolder
 import xyz.mlxkj.crlbj.data.Place
 import xyz.mlxkj.crlbj.data.RecordEntity
 import xyz.mlxkj.crlbj.data.SharedAssets
+import xyz.mlxkj.crlbj.data.TrainInfoClient
 import xyz.mlxkj.crlbj.data.parsePlaces
 import xyz.mlxkj.crlbj.engine.ArrivalEstimator
 import xyz.mlxkj.crlbj.engine.DecodeEvent
@@ -31,10 +32,11 @@ import xyz.mlxkj.crlbj.engine.DecoderEngine
 import xyz.mlxkj.crlbj.engine.EngineState
 import xyz.mlxkj.crlbj.engine.RouteUtils
 import xyz.mlxkj.crlbj.service.ReceiveForegroundService
+import java.util.Locale
 
 /**
  * 全局收发枢纽：解码事件流 / StatusFrame / 日志 / 设置 / 查询数据 / 第三方数据更新。
- * 六个页面全部只从这里取数据（页面之间不互相持有状态）。
+ * 五个页面全部只从这里取数据（页面之间不互相持有状态）。
  */
 class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -101,11 +103,12 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         syncBusinessParams(_settings.value)
-        // 解码事件 → uid 去重入库（窗口内被更优记录替换时同 uid 更新）
+        // 解码事件 → uid 去重入库（窗口内被更优记录替换时同 uid 更新）+ 自动查询车次/配属
         viewModelScope.launch(Dispatchers.IO) {
             engine.events.collect { list ->
                 list.firstOrNull()?.let { ev ->
                     runCatching { db.recordDao().upsert(RecordEntity.fromEvent(ev)) }
+                    autoQuery(ev)
                 }
             }
         }
@@ -145,9 +148,8 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 把设置中的业务参数同步到引擎（车次规则/去重窗口/ETA） */
+    /** 把设置中的业务参数同步到引擎（去重窗口/ETA） */
     private fun syncBusinessParams(s: ReceiverSettings) {
-        engine.trainScheme = s.trainScheme
         engine.dedupeWindow = s.dedupeWindow
         engine.estimator = ArrivalEstimator(
             userKm = RouteUtils.parseKm(s.userKm),
@@ -177,6 +179,17 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
         if (s == _settings.value) return
         _settings.value = s
         ReceiverSettings.save(getApplication(), s)
+    }
+
+    /**
+     * 业务类设置（去重窗口/ETA/公里标/查询源/数据更新开关）：
+     * 落盘 + 热更新业务参数，不重建 DSP 链路。
+     */
+    fun updateBusinessSettings(s: ReceiverSettings) {
+        if (s == _settings.value) return
+        _settings.value = s
+        ReceiverSettings.save(getApplication(), s)
+        syncBusinessParams(s)
     }
 
     fun toggleStartStop() {
@@ -335,37 +348,66 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
     /** 查询页需要的最新配属索引（数据更新后自动换新实例） */
     fun currentRoster(): LocoRoster = LocoRosterHolder.current() ?: roster
 
-    // ------------------------------------------------------------ IQ 录制
-    private val _recording = MutableStateFlow(false)
-    val recording: StateFlow<Boolean> = _recording
+    // ---------------------------------------------------- 地图瓦片缓存
+    /** (张数, 字节数)，设置页地图子页展示 */
+    private val _tileCacheStats = MutableStateFlow(0L to 0L)
+    val tileCacheStats: StateFlow<Pair<Long, Long>> = _tileCacheStats
 
-    /** 开始/停止 IQ 原始录制（仅网络源可用；USB 模式 native 直读 fd 不支持） */
-    fun toggleIqRecord(uri: Uri?) {
+    fun refreshTileCacheStats() {
         viewModelScope.launch(Dispatchers.IO) {
-            val src = engine.sourceIfTcp()
-            if (src == null) {
-                engine.log("[录制] 当前为 USB 模式或未在接收，暂不支持 IQ 录制")
-                return@launch
+            _tileCacheStats.value = TileCache.get(getApplication()).stats()
+        }
+    }
+
+    fun clearTileCache() {
+        android.util.Log.i("TileCache", "clearTileCache called")
+        viewModelScope.launch(Dispatchers.IO) {
+            val cache = TileCache.get(getApplication())
+            cache.clear()
+            _tileCacheStats.value = cache.stats()
+            android.util.Log.i("TileCache", "cleared, stats=${_tileCacheStats.value}")
+        }
+    }
+
+    // ------------------------------------------------- 解码自动查询（车次/配属）
+    /** 车次查询结果缓存：规整车次号 → TrainInfo（只存成功结果，失败静默降级） */
+    private val _trainInfos = MutableStateFlow<Map<String, TrainInfoClient.TrainInfo>>(emptyMap())
+    val trainInfos: StateFlow<Map<String, TrainInfoClient.TrainInfo>> = _trainInfos
+
+    /** 机车配属缓存：locoKey(loco, locoCode) → Lookup */
+    private val _locoInfos = MutableStateFlow<Map<String, LocoRoster.Lookup>>(emptyMap())
+    val locoInfos: StateFlow<Map<String, LocoRoster.Lookup>> = _locoInfos
+
+    // 去重集合只被 events 收集器这一个 IO 协程读写，无需加锁
+    private val queriedTrains = HashSet<String>()
+    private val queriedLocos = HashSet<String>()
+
+    /** 新解码 → 自动查车次与机车配属（同一车次/机车不重复请求；全部 IO，失败静默） */
+    private fun autoQuery(ev: DecodeEvent) {
+        val t = TrainInfoClient.normalizeTrain(ev.train)
+        if (t.isNotEmpty() && queriedTrains.add(t)) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val r = runCatching {
+                    TrainInfoClient.query(t, prefer = _settings.value.trainQuerySource)
+                }.getOrNull()
+                if (r != null && r.ok) _trainInfos.value = _trainInfos.value + (t to r)
             }
-            val cur = src.recordOut
-            if (cur != null) {
-                src.recordOut = null
-                try { cur.close() } catch (_: Throwable) { }
-                _recording.value = false
-                engine.log("[录制] IQ 录制已停止")
-            } else if (uri != null) {
-                try {
-                    val out = withContext(Dispatchers.IO) {
-                        getApplication<Application>().contentResolver.openOutputStream(uri)
-                    }
-                    src.recordOut = out
-                    _recording.value = true
-                    engine.log("[录制] IQ 录制开始（uint8 交错 IQ，采样率 ${_settings.value.sampleRate}）")
-                } catch (t: Throwable) {
-                    engine.log("[录制] 打开录制文件失败: ${t.message}")
+        }
+        if (ev.loco.isNotBlank() || ev.locoCode.isNotBlank()) {
+            val key = locoKey(ev.loco, ev.locoCode)
+            if (queriedLocos.add(key)) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val r = runCatching { roster.lookupLoco(ev.loco, ev.locoCode) }.getOrNull()
+                    if (r != null && r.ok) _locoInfos.value = _locoInfos.value + (key to r)
                 }
             }
         }
+    }
+
+    companion object {
+        /** 机车缓存键（解码页取结果时用同一算法） */
+        fun locoKey(loco: String, locoCode: String): String =
+            loco.trim().uppercase(Locale.US) + "|" + locoCode.trim()
     }
 
     override fun onCleared() {

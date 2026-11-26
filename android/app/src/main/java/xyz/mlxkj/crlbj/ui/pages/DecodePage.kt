@@ -1,7 +1,5 @@
 package xyz.mlxkj.crlbj.ui.pages
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,7 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import xyz.mlxkj.crlbj.data.LocoRoster
+import xyz.mlxkj.crlbj.data.TrainInfoClient
 import xyz.mlxkj.crlbj.engine.DecodeEvent
 import xyz.mlxkj.crlbj.ui.components.Chip
 import xyz.mlxkj.crlbj.ui.components.Divider
@@ -57,8 +59,8 @@ import java.util.Locale
 /**
  * 解码页：一键开始 + 信号强度（真实 RSSI 历史 + 门限线）+ 当前解码大卡 + 最近列表。
  *
- * v3.0 视觉：状态胶囊 / 分组卡片 / 方向方块 / 等宽数字；点卡片看详情（底部弹层），
- * 点「车次」「机车」直接跳到查询页并预填。
+ * v3.0 视觉：状态胶囊 / 分组卡片 / 方向方块 / 等宽数字；点卡片看详情（底部弹层）。
+ * 新解码自动后台查询车次/配属并内联展示；点「车次」「机车」跳设置页查询分组并预填。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,13 +73,10 @@ fun DecodePage(
     val logs by vm.logs.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val events by vm.events.collectAsStateWithLifecycle()
-    val recording by vm.recording.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val trainInfos by vm.trainInfos.collectAsStateWithLifecycle()
+    val locoInfos by vm.locoInfos.collectAsStateWithLifecycle()
     val p = pal()
-
-    val recordLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri -> uri?.let { vm.toggleIqRecord(it) } }
 
     // RSSI 历史环形缓冲（轮询帧驱动，最多 240 点 ≈ 36s）
     // 用不可变快照驱动重组：ArrayDeque 本身不是 snapshot 状态，改它不会触发重绘。
@@ -116,39 +115,21 @@ fun DecodePage(
             },
         )
 
-        // ---- 一键开始 / 录制 ----
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(
-                onClick = { vm.toggleStartStop() },
-                modifier = Modifier.weight(1f).height(50.dp),
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (running) p.surfaceAlt else p.accent,
-                    contentColor = if (running) p.text else p.onAccent,
-                ),
-            ) {
-                Text(
-                    if (running) "■  停止接收" else "▶  一键开始",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Spacer(Modifier.width(Dim.gap))
-            Button(
-                onClick = {
-                    if (recording) vm.toggleIqRecord(null)
-                    else if (running) recordLauncher.launch(
-                        "iq_${System.currentTimeMillis() / 1000}.iq")
-                },
-                modifier = Modifier.height(50.dp),
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (recording) p.err.copy(alpha = 0.18f) else p.surfaceAlt,
-                    contentColor = if (recording) p.err else p.textSecondary,
-                ),
-            ) {
-                Text(if (recording) "● 录制中" else "录 IQ", fontSize = 13.sp)
-            }
+        // ---- 一键开始 / 停止 ----
+        Button(
+            onClick = { vm.toggleStartStop() },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(50),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (running) p.surfaceAlt else p.accent,
+                contentColor = if (running) p.text else p.onAccent,
+            ),
+        ) {
+            Text(
+                if (running) "■  停止接收" else "▶  一键开始",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
 
         Spacer(Modifier.height(Dim.gap))
@@ -235,6 +216,8 @@ fun DecodePage(
             } else {
                 CurrentCard(
                     ev = latest,
+                    trainInfo = trainInfos[TrainInfoClient.normalizeTrain(latest.train)],
+                    locoInfo = locoInfos[ReceiverViewModel.locoKey(latest.loco, latest.locoCode)],
                     onDetail = { detail = latest },
                     onQueryTrain = onQueryTrain,
                     onQueryLoco = onQueryLoco,
@@ -282,10 +265,12 @@ fun DecodePage(
     }
 }
 
-/** 当前解码大卡：车次大号 + 方向方块 + 速度/公里标/线路/机车/时间 */
+/** 当前解码大卡：车次大号 + 方向方块 + 速度/公里标/线路/机车/时间 + 自动查询的车次/配属信息 */
 @Composable
 private fun CurrentCard(
     ev: DecodeEvent,
+    trainInfo: TrainInfoClient.TrainInfo?,
+    locoInfo: LocoRoster.Lookup?,
     onDetail: () -> Unit,
     onQueryTrain: (String) -> Unit,
     onQueryLoco: (String, String) -> Unit,
@@ -298,6 +283,7 @@ private fun CurrentCard(
             .background(p.surface)
             .border(1.dp, p.border, RoundedCornerShape(Dim.cardCorner))
             .clickable(onClick = onDetail)
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -351,6 +337,19 @@ private fun CurrentCard(
                     }
                 },
             )
+        }
+        // ---- 自动查询内联结果（收到新解码后台查好即显示；失败静默不显示） ----
+        trainInfo?.let { ti ->
+            val bits = listOf(ti.category, ti.bureau, ti.carOwner, ti.car)
+                .filter { it.isNotBlank() }
+            if (bits.isNotEmpty()) InfoRow("车次", bits.joinToString(" · "))
+        }
+        locoInfo?.let { li ->
+            if (li.ok) {
+                val bits = listOf(li.depot.ifEmpty { "配属未知" }, li.maker)
+                    .filter { it.isNotBlank() }
+                if (bits.isNotEmpty()) InfoRow("配属", bits.joinToString(" · "))
+            }
         }
         ev.latitude?.let {
             InfoRow(

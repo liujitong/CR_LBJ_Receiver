@@ -58,9 +58,9 @@ android {
         targetSdk = 35
         // 用户指定 NDK r27
         ndkVersion = "27.2.12479018"
-        // v3.0.0：桌面端与安卓端本版都有改动，两端同版本号；versionCode 从 v3 起算 300
-        versionCode = 300
-        versionName = "3.0.0"
+        // v3.1.0：两端同版本号；versionCode 延续 v3 起算规则（300 → 310）
+        versionCode = 310
+        versionName = "3.1.0"
     }
 
     signingConfigs {
@@ -180,6 +180,9 @@ dependencies {    // Compose BOM（与 cw2 同版本）
 
     // JSON（配置文件与桌面版 lbj_config.json 互导）
     implementation(libs.org.json)
+
+    // 地图瓦片离线缓存（v3.1：cacheDir/tile_cache，300MB LRU）
+    implementation("com.jakewharton:disklrucache:2.0.2")
 
     // Room 历史库
     implementation(libs.androidx.room.runtime)

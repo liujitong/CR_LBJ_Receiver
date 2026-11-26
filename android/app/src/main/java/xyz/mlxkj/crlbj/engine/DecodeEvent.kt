@@ -4,13 +4,15 @@ import org.json.JSONObject
 import java.util.Locale
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * 解码事件业务层（M2）：native JSON → 业务加工 → UI/存储。
  *
  * 组成（全部 1:1 移植桌面版 cr_lbj/core/decoder.py 规则）：
  *  - DecodeEvent：解码结果模型（native 解码层字段 + 业务层字段）
- *  - TrainClassifier：车次分类（2026 新版 / 2014 旧版 / auto 自动兼容）
+ *  - TrainClassifier：车次分类（纯自动日期驱动：2027-01-01 起全量新版，之前过渡期兼容）
  *  - RecordDeduplicator：同车次 2.5s 窗口去重（质量分替换、uid 沿用）
  *  - ArrivalEstimator：ETA 到达估算（本站公里标 + 线路映射）
  */
@@ -94,12 +96,17 @@ data class DecodeEvent(
 
 // ===========================================================================
 // 车次分类（移植 classifyTrainCategory / _category2026 / _categoryLegacy /
-// _categoryNumeric / _speedValue，规则与桌面版逐条一致）
+// _categoryNumeric / _speedValue，规则与桌面版逐条一致；纯自动、无手动方案）
 // ===========================================================================
 object TrainClassifier {
 
-    /** 2026 版动车组车次正式启用时间（第二批，12 月下旬） */
-    private const val TRAIN_2026_EMU_BEFORE: Long = 1798156800000L // 2026-12-25 00:00 UTC
+    /**
+     * 新车次编排方案全量启用时刻（对应桌面 TRAIN_NEW_SCHEME_DATE = datetime(2027,1,1)）：
+     * 设备本地时区 2027-01-01 00:00 的 epoch 毫秒，类加载时求值一次。
+     * 与桌面「本地午夜」语义在任何时区严格一致（修正旧版 UTC 午夜常量近似）。
+     */
+    private val TRAIN_NEW_SCHEME_BEFORE: Long =
+        LocalDate.of(2027, 1, 1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private val numeric2026 = arrayOf(
         intArrayOf(10001, 19998, 0), intArrayOf(20001, 29998, 1), intArrayOf(30001, 39998, 2),
@@ -112,25 +119,13 @@ object TrainClassifier {
         intArrayOf(87001, 87998, 21), intArrayOf(88001, 88998, 22), intArrayOf(90001, 91998, 23),
         intArrayOf(93001, 94998, 24),
     )
-    private val numericLegacy = arrayOf(
-        intArrayOf(10001, 19998, 0), intArrayOf(20001, 29998, 1), intArrayOf(30001, 39998, 2),
-        intArrayOf(40001, 44998, 3), intArrayOf(45001, 49998, 4), intArrayOf(50001, 50998, 5),
-        intArrayOf(51001, 51998, 6), intArrayOf(52001, 52998, 7), intArrayOf(53001, 54998, 8),
-        intArrayOf(55001, 55998, 9), intArrayOf(56001, 56998, 10), intArrayOf(57001, 57998, 11),
-        intArrayOf(58101, 58998, 12), intArrayOf(60001, 69998, 13), intArrayOf(70001, 70998, 14),
-        intArrayOf(71001, 72998, 25), intArrayOf(73001, 74998, 26), intArrayOf(75001, 75998, 27),
-        intArrayOf(80001, 81748, 16), intArrayOf(81751, 81998, 17), intArrayOf(82001, 84998, 18),
-        intArrayOf(85001, 85998, 19), intArrayOf(86001, 86998, 20), intArrayOf(87001, 87998, 21),
-        intArrayOf(88001, 88998, 22), intArrayOf(90001, 91998, 23), intArrayOf(93001, 94998, 24),
-    )
-    // 数值段类别名（索引对应上表第三列；25/26/27 为旧版独有）
+    // 数值段类别名（索引对应上表第三列）
     private val numericNames = arrayOf(
         "技术直达货运列车", "直通货运列车", "区段货运列车", "摘挂列车", "小运转列车",
         "客车单机", "货车单机", "小运转单机", "补机", "试运行列车",
         "轨道车、小型工程车", "路用列车", "救援列车", "工厂自备车", "超限货运列车",
         "重载货物列车", "直达货运/五定班列", "快运货运列车", "煤炭直达列车", "石油直达列车",
         "始发直达列车", "空车直达列车", "汽运专列", "军用列车(满载)", "军用列车(空车)",
-        "万吨货物列车", "冷藏列车", "集装箱专列",
     )
 
     /** 把速度字段转成数值；无效返回 null（移植 _speedValue） */
@@ -177,7 +172,7 @@ object TrainClassifier {
         }
     }
 
-    /** 按 2014 版旧规则分类（移植 _categoryLegacy） */
+    /** 按 2014 版旧规则分类（移植 _categoryLegacy；仅过渡期 T/K/X 内部复用） */
     private fun categoryLegacy(prefix: String): String = when (prefix) {
         "K" -> "快速旅客列车"; "Z" -> "直达特快列车"; "T" -> "特快旅客列车"
         "G" -> "高速动车组"; "D" -> "动车组列车"; "C" -> "城际动车组"
@@ -185,8 +180,8 @@ object TrainClassifier {
         else -> ""
     }
 
-    /** 纯数字车次（货物/路用/回送等）分类（移植 _categoryNumeric） */
-    private fun categoryNumeric(numText: String, tn: String, isDetailed: Boolean, newScheme: Boolean): String {
+    /** 纯数字车次（货物/路用/回送等）分类，按新版区段表（移植 _categoryNumeric） */
+    private fun categoryNumeric(numText: String, tn: String, isDetailed: Boolean): String {
         // 00 开头 → 回送列车（新旧规则一致）
         if (tn.startsWith("00")) {
             val d = tn.filter { it.isDigit() }
@@ -202,8 +197,7 @@ object TrainClassifier {
         val d = (if (numText.isNotEmpty()) numText else tn).filter { it.isDigit() }
         if (d.isEmpty()) return "未知类别"
         val n = d.toIntOrNull() ?: return "未知类别"
-        val ranges = if (newScheme) numeric2026 else numericLegacy
-        for (r in ranges) {
+        for (r in numeric2026) {
             if (n >= r[0] && n <= r[1]) return numericNames[r[2]]
         }
         if (n in 1..9998 && !tn.startsWith("00")) {
@@ -212,24 +206,27 @@ object TrainClassifier {
         return "未知类别"
     }
 
-    /** 车次分类（移植 classifyTrainCategory；scheme: auto/2026/legacy） */
-    fun classify(trainNo: String, isDetailed: Boolean, speed: String? = null, scheme: String = "auto"): String {
+    /**
+     * 车次分类（移植 classifyTrainCategory；纯自动、纯日期驱动，无手动方案）。
+     * nowMs >= TRAIN_NEW_SCHEME_BEFORE：所有车次（高铁+普速）一律新版，不看速度；
+     * nowMs <  TRAIN_NEW_SCHEME_BEFORE：过渡期——稳定前缀已新版，T/K/X 按速度判定，
+     * 速度缺失/无效一律旧版兜底。nowMs 可注入便于测试拨钟，默认当前时间。
+     */
+    fun classify(trainNo: String, isDetailed: Boolean, speed: String? = null,
+                 nowMs: Long = System.currentTimeMillis()): String {
         if (trainNo.isEmpty() || trainNo == "等待信号..." || trainNo == "----") return "等待信号..."
         val tn = trainNo.replace(" ", "").trim().uppercase(Locale.US)
         // ^([A-Z]+)(\d*)：字母前缀 + 数字
         val m = Regex("^([A-Z]+)(\\d*)").find(tn)
         val prefix = m?.groupValues?.get(1) ?: ""
         val numText = m?.groupValues?.get(2) ?: ""
-        when (scheme.lowercase(Locale.US)) {
-            "2026" -> return category2026(prefix, numText)
-                ?: categoryNumeric(numText, tn, isDetailed, newScheme = true)
-            "legacy" -> {
-                val cat = categoryLegacy(prefix)
-                if (cat.isNotEmpty()) return cat
-                return categoryNumeric(numText, tn, isDetailed, newScheme = false)
-            }
+        // ---------- 2027-01-01 起：全量新版（高铁+普速，不看速度） ----------
+        if (nowMs >= TRAIN_NEW_SCHEME_BEFORE) {
+            return category2026(prefix, numText)
+                ?: categoryNumeric(numText, tn, isDetailed)
         }
-        // ---------- 自动兼容 ----------
+        // ---------- 过渡期（2027-01-01 前） ----------
+        // Z/N/V/B/DH/DJ/Y 以及 G/D/C/S 含义稳定，直接按新版
         if (prefix in setOf("Z", "N", "V", "B", "DH", "DJ", "Y", "G", "D", "C", "S")) {
             category2026(prefix, numText)?.let { return it }
         }
@@ -243,14 +240,10 @@ object TrainClassifier {
                     categoryLegacy(prefix).ifEmpty { "未知类别" }
                 }
             }
-            // 速度缺失：按过渡期日期判断（2026-12-25 前动车组仍用旧车次）
-            return if (System.currentTimeMillis() < TRAIN_2026_EMU_BEFORE) {
-                categoryLegacy(prefix).ifEmpty { "未知类别" }
-            } else {
-                category2026(prefix, numText) ?: "未知类别"
-            }
+            // 速度缺失/无效：过渡期内一律按旧版兜底（此分支 nowMs < 阈值恒成立）
+            return categoryLegacy(prefix).ifEmpty { "未知类别" }
         }
-        return categoryNumeric(numText, tn, isDetailed, newScheme = true)
+        return categoryNumeric(numText, tn, isDetailed)
     }
 }
 

@@ -56,9 +56,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import xyz.mlxkj.crlbj.core.ReceiverSettings
+import xyz.mlxkj.crlbj.core.TileCache
 import xyz.mlxkj.crlbj.engine.DecodeEvent
 import xyz.mlxkj.crlbj.ui.components.FloatPill
 import xyz.mlxkj.crlbj.ui.components.SectionCard
@@ -75,14 +78,14 @@ import kotlin.math.sqrt
 /**
  * 地图页（v3.0 重写）。
  *
- * 图源改为桌面/安卓共用的 `shared/web/railmap.html`（Leaflet + OpenRailwayMap 铁路图层，
- * 底图可切换），彻底去掉高德 JS API 与 amapKey 门槛：
+ * 图源为桌面/安卓共用的 `shared/web/railmap.html`（底图可切换 + 铁路图层）：
  *
  *  · 页面内 `window.LBJ` 是唯一接口：`applyConfig` 一次性下发底图/铁路/夜间/中心，
- *    `update` 批量推列车（**WGS-84 原值**，纠偏由页面按底图基准自己做）；
+ *    `update` 批量推列车（**WGS-84 原值**，不做任何坐标转换）；
  *  · 页面通过 `window.LBJHost.onLayers(json)` 回报图层变化（用户在地图里改底图时），
- *    这里落盘到设置，保证「设置页 ↔ 地图内操作」双向一致；
+ *    这里落盘到设置，保证「设置页 ↔ 地图内操作」双向一致（同一份 ReceiverSettings）；
  *  · 右上角「跟随」胶囊与页面 `LBJ.locked()` 联动：用户一拖地图就自动取消跟随；
+ *  · 「转到自己位置」：复用定位权限流程，取系统最后已知位置后调 `LBJ.centerLatLng`；
  *  · 有坐标才推；没坐标时显示半透明空态卡，不遮成大白块。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +96,10 @@ fun MapPage(vm: ReceiverViewModel) {
     val running by vm.running.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val p = pal()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var cacheAreaJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    /** 原生侧缓存进度（done,total）；页面 #panel 被隐藏，进度改由本页浮层显示 */
+    var cacheProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     // 带坐标的最新一条（按车次去重，最多 24 列，地图上不挤）
     val trains = remember(events) { collectTrains(events) }
@@ -104,15 +111,52 @@ fun MapPage(vm: ReceiverViewModel) {
     var layers by remember { mutableStateOf<List<LayerOption>>(emptyList()) }
     var sheet by remember { mutableStateOf(false) }
     var gps by remember { mutableStateOf<DoubleArray?>(null) }
+    /** 「转到自己位置」的临时提示（无权限/无定位），4s 自动消失 */
+    var locMsg by remember { mutableStateOf<String?>(null) }
+    /** 已发起定位权限申请、等待回调后居中 */
+    var pendingCenter by remember { mutableStateOf(false) }
     /** 底图瓦片连续失败（多半是网络到不了该图源）→ 底部横幅提示换底图 */
     var tileFail by remember { mutableStateOf(false) }
+
+    // 居中到本机位置（WGS-84）。centerLatLng 契约：居中 + 停止自动跟随 + 页面 toast；
+    // 接口未就绪时静默跳过（返回 no-api），原生侧仍把 mapFollow 落盘为 false。
+    val centerToGps: (DoubleArray) -> Unit = { g ->
+        web?.evaluateJavascript(
+            "(function(){if(window.LBJ&&window.LBJ.centerLatLng){window.LBJ.centerLatLng(" +
+                "${g[0]},${g[1]});return 'ok'}return 'no-api'})()",
+        ) { r -> Log.i(TAG, "centerLatLng: $r") }
+        vm.updateViewSettings(vm.settings.value.copy(mapFollow = false))
+    }
 
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
-        if (grants.values.any { it }) gps = readLastGps(ctx)
+        val granted = grants.values.any { it }
+        if (granted) gps = readLastGps(ctx)
+        if (pendingCenter) {
+            pendingCenter = false
+            val g = if (granted) gps else null
+            when {
+                !granted -> locMsg = "未授予定位权限，无法转到自己位置"
+                g != null -> centerToGps(g)
+                else -> locMsg = "暂无可用定位：请开启系统定位（GPS）后重试"
+            }
+        }
     }
     LaunchedEffect(Unit) { gps = readLastGps(ctx) }
+    LaunchedEffect(cacheProgress) {
+        val cp = cacheProgress
+        if (cp != null && cp.first >= cp.second) {
+            kotlinx.coroutines.delay(3000)
+            cacheProgress = null
+        }
+    }
+    LaunchedEffect(locMsg) {
+        if (locMsg != null) {
+            kotlinx.coroutines.delay(4000)
+            locMsg = null
+        }
+    }
 
     // ---- 就绪探测：不依赖 onPageFinished（模拟器上偶发不回调），并且**持续**探测。
     //      WebView 因任何原因重载时，ready 会先回落再置真，配置随之自动重下，
@@ -168,7 +212,7 @@ fun MapPage(vm: ReceiverViewModel) {
         web?.evaluateJavascript(applyConfigJs(settings), null)
     }
 
-    // ---- 列车坐标变化 → 推给页面（WGS-84 原值，不做 GCJ 转换）----
+    // ---- 列车坐标变化 → 推给页面（WGS-84 原值，不做任何坐标转换）----
     LaunchedEffect(ready, trains, settings.mapFollow, settings.mapNight) {
         if (!ready) return@LaunchedEffect
         val w = web ?: return@LaunchedEffect
@@ -217,9 +261,22 @@ fun MapPage(vm: ReceiverViewModel) {
                     ready = false
                 }.also { w ->
                     w.addJavascriptInterface(
-                        HostBridge { json ->
-                            w.post { persistLayers(vm, json) }
-                        },
+                        HostBridge(
+                            onLayersJson = { json -> w.post { persistLayers(vm, json) } },
+                            onCacheArea = { json ->
+                                cacheAreaJob?.cancel()
+                                cacheAreaJob = scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    runCacheArea(ctx, w, json, vm) { d, t ->
+                                        w.post { cacheProgress = d to t }
+                                    }
+                                }
+                            },
+                            onCacheStats = {
+                                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    pushCacheStats(ctx, w)
+                                }
+                            },
+                        ),
                         "LBJHost",
                     )
                     val client = object : WebViewClient() {
@@ -240,6 +297,36 @@ fun MapPage(vm: ReceiverViewModel) {
                             ready = true
                             loadError = null
                             Log.i(TAG, "railmap.html 加载完成: $url")
+                        }
+
+                        /**
+                         * 瓦片原生代拉 + 离线缓存（v3.1）：
+                         * 天地图/百度/高德/OSM/ORM 主机先查 DiskLruCache，命中直接返回；
+                         * 未命中用 HttpURLConnection 代拉（浏览器 UA；天地图按 tdtReferer
+                         * 附加 Referer，百度固定 map.baidu.com），成功落盘并返回；
+                         * 非 2xx/失败返回 null 走 WebView 原路。本回调在后台线程。
+                         */
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest,
+                        ): android.webkit.WebResourceResponse? {
+                            val url = request.url
+                            if (url.scheme != "http" && url.scheme != "https") return null
+                            val host = url.host ?: return null
+                            if (!TileCache.isTileHost(host)) return null
+                            val u = url.toString()
+                            val cache = TileCache.get(ctx)
+                            cache.get(u)?.let { bytes ->
+                                return android.webkit.WebResourceResponse(
+                                    TileCache.sniffMime(bytes), null,
+                                    java.io.ByteArrayInputStream(bytes),
+                                )
+                            }
+                            val f = TileCache.fetch(u, vm.settings.value.tdtReferer) ?: return null
+                            cache.put(u, f.bytes)
+                            return android.webkit.WebResourceResponse(
+                                f.mime, null, java.io.ByteArrayInputStream(f.bytes),
+                            )
                         }
 
                         override fun onReceivedError(
@@ -312,6 +399,38 @@ fun MapPage(vm: ReceiverViewModel) {
                     vm.updateViewSettings(settings.copy(mapFollow = false))
                 },
             )
+            FloatPill(
+                text = "转到自己位置",
+                active = false,
+                onClick = {
+                    val g = gps ?: readLastGps(ctx).also { gps = it }
+                    when {
+                        g != null -> centerToGps(g)
+                        hasLocPermission(ctx) ->
+                            locMsg = "暂无可用定位：请开启系统定位（GPS）后重试"
+                        else -> {
+                            pendingCenter = true
+                            permLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                                )
+                            )
+                        }
+                    }
+                },
+            )
+            FloatPill(
+                text = "缓存本区域",
+                active = cacheProgress != null,
+                onClick = {
+                    // 页面「缓存本区域」按钮在被隐藏的 #panel 里，用 JS 代点触发同一逻辑
+                    web?.evaluateJavascript(
+                        "(function(){var b=document.getElementById('btnCache');" +
+                            "if(b){b.click();return 'ok'}return 'no-btn'})()",
+                    ) { r -> Log.i(TAG, "cacheArea: $r") }
+                },
+            )
         }
 
         // ---- 空态 / 载入失败（半透明卡片，居中，不遮成全白）----
@@ -362,6 +481,28 @@ fun MapPage(vm: ReceiverViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            cacheProgress?.let { (d, t) ->
+                Text(
+                    if (d >= t) "瓦片缓存完成：$t 张" else "缓存瓦片 $d/$t…",
+                    color = if (d >= t) p.ok else p.accent, fontSize = 11.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(p.surface.copy(alpha = 0.94f))
+                        .border(1.dp, p.border, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                )
+            }
+            locMsg?.let { msg ->
+                Text(
+                    msg,
+                    color = p.warn, fontSize = 11.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(p.surface.copy(alpha = 0.94f))
+                        .border(1.dp, p.warn.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                )
+            }
             if (tileFail) {
                 Row(
                     Modifier
@@ -518,18 +659,15 @@ private fun parseStatus(raw: String?): MapStatus? {
     }.getOrNull()
 }
 
-/** 页面未就绪时的兜底清单（id 与 railmap.html 的 BASE_SOURCES / RAIL_SOURCES 对齐） */private val FALLBACK_LAYERS = listOf(
+/** 页面未就绪时的兜底清单（id/名称与 railmap.html 的 BASE_SOURCES / RAIL_SOURCES 逐字一致） */
+private val FALLBACK_LAYERS = listOf(
+    LayerOption("amap", "高德 街道（免 Key）", "gcj", "base"),
+    LayerOption("amap_img", "高德 卫星（免 Key）", "gcj", "base"),
+    LayerOption("baidu", "百度 街道（免 Key）", "bd", "base"),
+    LayerOption("baidu_sat", "百度 卫星（免 Key）", "bd", "base"),
     LayerOption("osm", "OSM 标准", "wgs", "base"),
-    LayerOption("carto_light", "Carto 浅色", "wgs", "base"),
-    LayerOption("carto_dark", "Carto 深色", "wgs", "base"),
-    LayerOption("carto_voyager", "Carto 路由", "wgs", "base"),
-    LayerOption("esri_img", "Esri 卫星", "wgs", "base"),
-    LayerOption("esri_street", "Esri 街道", "wgs", "base"),
-    LayerOption("opentopo", "OpenTopoMap 地形", "wgs", "base"),
     LayerOption("tdt_vec", "天地图 矢量（CGCS2000）", "wgs", "base"),
     LayerOption("tdt_img", "天地图 影像（CGCS2000）", "wgs", "base"),
-    LayerOption("amap", "高德 街道（GCJ-02）", "gcj", "base"),
-    LayerOption("amap_img", "高德 卫星（GCJ-02）", "gcj", "base"),
     LayerOption("off", "不显示", "wgs", "rail"),
     LayerOption("orm_standard", "ORM 标准（线路+信号）", "wgs", "rail"),
     LayerOption("orm_maxspeed", "ORM 限速", "wgs", "rail"),
@@ -590,8 +728,8 @@ private fun LayerSheet(
         Text("地图图层", color = p.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
         Text(
-            "铁路图源 OpenRailwayMap（WGS-84）；选高德底图（GCJ-02）会自动关掉铁路图层，" +
-                "否则线路会整体错位几百米。",
+            "铁路图源 OpenRailwayMap（WGS-84）；高德/百度底图下页面自动纠偏标记并隐藏铁路图层，" +
+                "天地图/OSM 与铁路零偏移叠加。",
             color = p.textTertiary, fontSize = 11.sp,
         )
         Spacer(Modifier.height(12.dp))
@@ -691,13 +829,77 @@ private fun buildWebView(ctx: Context, onCreated: (WebView) -> Unit): WebView =
         onCreated(this)
     }
 
-/** JS 桥：页面回报图层变化（在 JS 线程回调，调用方负责切回主线程） */
-private class HostBridge(private val onLayersJson: (String) -> Unit) {
+/** JS 桥：页面回报图层变化 / 请求缓存瓦片 / 查询缓存统计（JS 线程回调，调用方切线程） */
+private class HostBridge(
+    private val onLayersJson: (String) -> Unit,
+    private val onCacheArea: (String) -> Unit,
+    private val onCacheStats: () -> Unit,
+) {
     @JavascriptInterface
     fun onLayers(json: String) = onLayersJson(json)
 
+    /** 页面「缓存当前视野」：urlsJson 为瓦片 URL 的 JSON 数组 */
+    @JavascriptInterface
+    fun cacheArea(urlsJson: String) = onCacheArea(urlsJson)
+
+    /** 页面查询缓存占用：宿主经 LBJ.cacheStats(json) 回传 {count,bytes} */
+    @JavascriptInterface
+    fun cacheStats() = onCacheStats()
+
     @JavascriptInterface
     fun ping(): String = "ok"
+}
+
+/**
+ * 缓存一批瓦片：限并发 4 下载落盘（已缓存的跳过），
+ * 进度经 `LBJ.onCacheProgress(done,total)` 回传（每 8 张或完成时，避免刷屏）。
+ */
+private suspend fun runCacheArea(
+    ctx: Context,
+    w: WebView,
+    urlsJson: String,
+    vm: ReceiverViewModel,
+    onProgress: (Int, Int) -> Unit,
+) {
+    val arr = runCatching { JSONArray(urlsJson) }.getOrNull() ?: return
+    val total = arr.length()
+    if (total == 0) return
+    val cache = TileCache.get(ctx)
+    val referer = vm.settings.value.tdtReferer
+    val sem = kotlinx.coroutines.sync.Semaphore(4)
+    val done = java.util.concurrent.atomic.AtomicInteger(0)
+    kotlinx.coroutines.coroutineScope {
+        for (i in 0 until total) {
+            val u = arr.optString(i)
+            launch(kotlinx.coroutines.Dispatchers.IO) {
+                if (u.isNotEmpty()) {
+                    sem.withPermit {
+                        if (cache.get(u) == null) {
+                            TileCache.fetch(u, referer)?.let { cache.put(u, it.bytes) }
+                        }
+                    }
+                }
+                val d = done.incrementAndGet()
+                if (d % 8 == 0 || d == total) {
+                    onProgress(d, total)
+                    w.post {
+                        w.evaluateJavascript(
+                            "window.LBJ&&window.LBJ.onCacheProgress($d,$total)", null)
+                    }
+                }
+            }
+        }
+    }
+    pushCacheStats(ctx, w)
+}
+
+/** 缓存统计回传页面：LBJ.cacheStats({count,bytes}) */
+private fun pushCacheStats(ctx: Context, w: WebView) {
+    val (count, bytes) = TileCache.get(ctx).stats()
+    w.post {
+        w.evaluateJavascript(
+            "window.LBJ&&window.LBJ.cacheStats({\"count\":$count,\"bytes\":$bytes})", null)
+    }
 }
 
 /** 数据源显示名（胶囊文案） */
@@ -823,6 +1025,15 @@ private fun collectTrains(events: List<DecodeEvent>): List<TrainPoint> {
 }
 
 // ----------------------------------------------------------------- 定位工具
+
+/** 是否已有任一档定位权限 */
+private fun hasLocPermission(ctx: Context): Boolean =
+    androidx.core.content.ContextCompat.checkSelfPermission(
+        ctx, Manifest.permission.ACCESS_FINE_LOCATION,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+    androidx.core.content.ContextCompat.checkSelfPermission(
+        ctx, Manifest.permission.ACCESS_COARSE_LOCATION,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
 /** 读系统最后一次已知定位（不主动开启 GPS，零功耗） */
 private fun readLastGps(ctx: Context): DoubleArray? = try {

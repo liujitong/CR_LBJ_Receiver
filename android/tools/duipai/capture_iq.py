@@ -7,7 +7,7 @@
 共用的 params.json（与 Android nativeInit 同名字段）。
 
 用法:
-    python capture_iq.py --host nc.example.com --port 5678 --seconds 300 \
+    python capture_iq.py --host 127.0.0.1 --port 5678 --seconds 300 \
         --out capture.iq
 """
 import argparse
@@ -27,7 +27,7 @@ CMD_SET_AGC = 8
 
 def main():
     ap = argparse.ArgumentParser(description='rtl_tcp IQ 抓流器')
-    ap.add_argument('--host', default='nc.example.com')
+    ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--port', type=int, default=5678)
     ap.add_argument('--freq-mhz', type=float, default=821.2375)
     ap.add_argument('--sr', type=int, default=960000, help='采样率 Hz（OWRX 960k / USB 240k）')
@@ -106,7 +106,6 @@ def main():
         'afcGain': 0.45,
         'keepAfcAfterPacket': False,
         'baudRate': 1200.0,
-        'trainScheme': 'auto',
     }
     params_path = a.out.rsplit('.', 1)[0] + '.params.json'
     with open(params_path, 'w', encoding='utf-8') as f:

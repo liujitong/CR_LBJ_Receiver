@@ -22,10 +22,6 @@ class RtlTcpSource(
     private val ppm: Double,
 ) : Source {
 
-    /** IQ 录制目标（可中途设置/清除；泵线程逐块写入，null = 不录制） */
-    @Volatile
-    var recordOut: java.io.OutputStream? = null
-
     private var socket: Socket? = null
     private var input: java.io.InputStream? = null
     private var pump: Thread? = null
@@ -85,13 +81,6 @@ class RtlTcpSource(
                     if (n < 0) { lastError = "上游断开（EOF）"; break }
                     out.write(buf, 0, n) // 管道满时阻塞，形成背压
                     out.flush()
-                    // IQ 录制：tee 一份原始字节到录制文件（失败不中断接收）
-                    recordOut?.let { rec ->
-                        try { rec.write(buf, 0, n) } catch (_: IOException) {
-                            try { rec.close() } catch (_: IOException) { }
-                            recordOut = null
-                        }
-                    }
                 }
             } catch (_: IOException) {
                 // socket 关闭 / 管道关闭：正常退出路径
@@ -108,8 +97,6 @@ class RtlTcpSource(
         input?.read(buffer) ?: -1
 
     override fun close() {
-        recordOut?.let { try { it.close() } catch (_: IOException) { } }
-        recordOut = null
         pump?.interrupt()
         pump = null
         try { socket?.close() } catch (_: IOException) { }

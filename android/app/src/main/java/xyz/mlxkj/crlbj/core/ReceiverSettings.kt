@@ -13,7 +13,7 @@ import org.json.JSONObject
 data class ReceiverSettings(
     // 数据源：usb | rtl_tcp | owrx
     val sourceType: String = "owrx",
-    val host: String = "nc.example.com",
+    val host: String = "127.0.0.1",
     val port: Int = 5678,
     // 射频
     val freqMhz: Double = 821.2375,
@@ -33,25 +33,24 @@ data class ReceiverSettings(
     val afcGain: Double = 0.45,
     val keepAfcAfterPacket: Boolean = false,
     // 业务层
-    val trainScheme: String = "auto",      // 车次规则: auto / 2026 / legacy
     val dedupeWindow: Double = 2.5,        // 同车次重复报文合并窗口(秒)
     val etaMaxMin: Double = 360.0,         // ETA 最大估算分钟数 (6h)
     val userKm: String = "",               // 本站公里标 (km)，空=未设置
     val routeKmText: String = "",          // 线路公里标: "线路=km,线路=km"
     // 地图（v3.0 起用 shared/web/railmap.html：OpenRailwayMap 铁路图层 + 可选底图）
-    // 旧版高德 JS API 的 amapKey/amapSecurity 已彻底移除（底图全部免 Key），
-    // 老配置文件里的这两个键读取时被忽略。
     val mapZoom: Int = 11,
     val mapFollow: Boolean = true,          // 自动跟随最新列车
     val mapNight: Boolean = true,           // 深色底图
-    /** 底图 id，与 railmap.html 的 BASE_SOURCES 对齐（osm/carto_light/carto_dark/…） */
-    val mapBase: String = "osm",
+    /** 底图 id，与 railmap.html 的 BASE_SOURCES 对齐（amap/amap_img/baidu/baidu_sat/osm/tdt_vec/tdt_img） */
+    val mapBase: String = "amap",
     /** 铁路图层 id：off / orm_standard / orm_maxspeed / orm_signals / orm_electrified / orm_gauge */
     val mapRail: String = "orm_standard",
     /** 铁路图层不透明度 0.2~1.0 */
     val mapRailOpacity: Double = 0.85,
     /** 天地图 tk（「浏览器端」类型）；空 = 天地图底图只提示不加载 */
     val mapTdtKey: String = "",
+    /** 天地图 Referer 白名单域名（申请浏览器端 tk 时登记）；空 = 代拉瓦片时不附加 Referer */
+    val tdtReferer: String = "",
     /** 默认中心：预设城市名（仅显示用，来自 shared/data/places.csv） */
     val mapCenterName: String = "南昌",
     val mapCenterLat: Double = 28.68,
@@ -87,6 +86,9 @@ data class ReceiverSettings(
         put("baudRate", 1200.0)
     }.toString()
     companion object {
+        /** 现行底图 id 全集（与 railmap.html BASE_SOURCES 一致）；旧配置里的废弃 id 读取时回退默认 */
+        val KNOWN_BASES = setOf("amap", "amap_img", "baidu", "baidu_sat", "osm", "tdt_vec", "tdt_img")
+
         /** USB 直连推荐参数（桌面版 rtl_usb 档位） */
         val USB_DEFAULTS = ReceiverSettings(
             sourceType = "usb", sampleRate = 240000, gainDb = 19.7,
@@ -115,7 +117,6 @@ data class ReceiverSettings(
                 afcMaxHz = Double.fromBits(sp.getLong("afcMaxHz", d.afcMaxHz.toRawBits())),
                 afcGain = Double.fromBits(sp.getLong("afcGain", d.afcGain.toRawBits())),
                 keepAfcAfterPacket = sp.getBoolean("keepAfcAfterPacket", d.keepAfcAfterPacket),
-                trainScheme = sp.getString("trainScheme", d.trainScheme) ?: d.trainScheme,
                 dedupeWindow = Double.fromBits(sp.getLong("dedupeWindow", d.dedupeWindow.toRawBits())),
                 etaMaxMin = Double.fromBits(sp.getLong("etaMaxMin", d.etaMaxMin.toRawBits())),
                 userKm = sp.getString("userKm", d.userKm) ?: d.userKm,
@@ -123,11 +124,13 @@ data class ReceiverSettings(
                 mapZoom = sp.getInt("mapZoom", d.mapZoom),
                 mapFollow = sp.getBoolean("mapFollow", d.mapFollow),
                 mapNight = sp.getBoolean("mapNight", d.mapNight),
-                mapBase = sp.getString("mapBase", d.mapBase) ?: d.mapBase,
+                mapBase = (sp.getString("mapBase", d.mapBase) ?: d.mapBase)
+                    .let { if (it in KNOWN_BASES) it else d.mapBase },
                 mapRail = sp.getString("mapRail", d.mapRail) ?: d.mapRail,
                 mapRailOpacity = Double.fromBits(
                     sp.getLong("mapRailOpacity", d.mapRailOpacity.toRawBits())),
                 mapTdtKey = sp.getString("mapTdtKey", d.mapTdtKey) ?: d.mapTdtKey,
+                tdtReferer = sp.getString("tdtReferer", d.tdtReferer) ?: d.tdtReferer,
                 mapCenterName = sp.getString("mapCenterName", d.mapCenterName) ?: d.mapCenterName,
                 mapCenterLat = Double.fromBits(
                     sp.getLong("mapCenterLat", d.mapCenterLat.toRawBits())),
@@ -158,7 +161,6 @@ data class ReceiverSettings(
             e.putLong("afcMaxHz", s.afcMaxHz.toRawBits())
             e.putLong("afcGain", s.afcGain.toRawBits())
             e.putBoolean("keepAfcAfterPacket", s.keepAfcAfterPacket)
-            e.putString("trainScheme", s.trainScheme)
             e.putLong("dedupeWindow", s.dedupeWindow.toRawBits())
             e.putLong("etaMaxMin", s.etaMaxMin.toRawBits())
             e.putString("userKm", s.userKm)
@@ -170,6 +172,7 @@ data class ReceiverSettings(
             e.putString("mapRail", s.mapRail)
             e.putLong("mapRailOpacity", s.mapRailOpacity.toRawBits())
             e.putString("mapTdtKey", s.mapTdtKey)
+            e.putString("tdtReferer", s.tdtReferer)
             e.putString("mapCenterName", s.mapCenterName)
             e.putLong("mapCenterLat", s.mapCenterLat.toRawBits())
             e.putLong("mapCenterLng", s.mapCenterLng.toRawBits())

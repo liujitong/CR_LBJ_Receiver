@@ -8,7 +8,7 @@ C++ lbj_cli 的输出逐字段比对（compare.py）。
 
 用法:
     python offline_decode.py capture.iq capture.params.json --out py.jsonl \
-        --src E:/预警器/RTL_SDR_YUJING/CR_LBJ_Receiver
+        --src E:/预警器/CR_LBJ_Receiver
 """
 import argparse
 import json
@@ -26,7 +26,7 @@ def main():
     ap.add_argument('--src', required=True, help='桌面版 CR_LBJ_Receiver 仓库根目录')
     a = ap.parse_args()
 
-    sys.path.insert(0, a.src)
+    sys.path.insert(0, os.path.join(a.src, 'desktop'))   # cr_lbj 包在 desktop/ 下
     from cr_lbj.core.decoder import (ArrivalEstimator, FrontendChain, LbjDecoder,
                                      RssiGate, BAUD_RATE)
 
@@ -40,8 +40,7 @@ def main():
         afcGain=p.get('afcGain', 0.45))
     estimator = ArrivalEstimator(userKm=None, maxSeconds=360.0 * 60.0, routeKmMap={})
     decoder = LbjDecoder(frontend.actualOut, BAUD_RATE,
-                         arrivalEstimator=estimator,
-                         trainScheme=p.get('trainScheme', 'auto'))
+                         arrivalEstimator=estimator)
     gate = RssiGate(onDb=p.get('rssiThresholdDb', -55.0),
                     hysteresisDb=p.get('rssiHystDb', 3.0),
                     holdMs=p.get('rssiHoldMs', 700.0), enabled=True)

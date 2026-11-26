@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,7 +26,6 @@ import xyz.mlxkj.crlbj.ui.components.LbjDock
 import xyz.mlxkj.crlbj.ui.pages.DecodePage
 import xyz.mlxkj.crlbj.ui.pages.HistoryPage
 import xyz.mlxkj.crlbj.ui.pages.MapPage
-import xyz.mlxkj.crlbj.ui.pages.QueryPage
 import xyz.mlxkj.crlbj.ui.pages.SettingsPage
 import xyz.mlxkj.crlbj.ui.pages.StatusPage
 import xyz.mlxkj.crlbj.ui.theme.pal
@@ -38,7 +36,6 @@ private val tabs = listOf(
     DockTab("解码", Icons.Filled.GraphicEq),
     DockTab("历史", Icons.Filled.History),
     DockTab("状态", Icons.Filled.Analytics),
-    DockTab("查询", Icons.Filled.Search),
     DockTab("设置", Icons.Filled.Settings),
 )
 
@@ -47,15 +44,15 @@ private const val TAB_MAP = 0
 private const val TAB_DECODE = 1
 private const val TAB_HISTORY = 2
 private const val TAB_STATUS = 3
-private const val TAB_QUERY = 4
-private const val TAB_SETTINGS = 5
+private const val TAB_SETTINGS = 4
 
 /**
- * 六页 + 悬浮玻璃胶囊 Dock（v3.0 视觉重做）。
+ * 五页 + 悬浮玻璃胶囊 Dock。
  *
  * 没有 Material NavigationBar / 没有重顶栏：每页自己的「大标题 + 状态胶囊」就是顶栏；
  * 地图页是全屏 WebView，胶囊与浮动按钮直接浮在图上。
  * 默认落在解码页：「一键开始」第一屏可见。
+ * 手动查询并入设置页「查询·数据」分组：解码卡点「车次/机车」→ 预填请求 + 跳设置页。
  */
 @Composable
 fun LbjApp() {
@@ -74,16 +71,15 @@ fun LbjApp() {
                         vm = vm,
                         onQueryTrain = { train ->
                             vm.requestTrainQuery(train)
-                            current = TAB_QUERY
+                            current = TAB_SETTINGS
                         },
                         onQueryLoco = { model, number ->
                             vm.requestLocoQuery(model, number)
-                            current = TAB_QUERY
+                            current = TAB_SETTINGS
                         },
                     )
                     TAB_HISTORY -> HistoryPage(vm)
                     TAB_STATUS -> StatusPage(vm)
-                    TAB_QUERY -> QueryPage(vm)
                     TAB_SETTINGS -> SettingsPage(vm)
                     else -> HistoryPage(vm)
                 }

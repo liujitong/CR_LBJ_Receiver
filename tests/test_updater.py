@@ -13,8 +13,9 @@ import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+DESKTOP = os.path.join(ROOT, 'desktop')   # 桌面端包 cr_lbj 在 desktop/ 下
+if DESKTOP not in sys.path:
+    sys.path.insert(0, DESKTOP)
 
 from cr_lbj.data import loco_roster as R  # noqa: E402
 from cr_lbj.data import paths as P  # noqa: E402
@@ -113,7 +114,11 @@ class UpdateFlowTest(unittest.TestCase):
         self.assertIn('已是最新', res['message'])
 
     def test_interval_skip_without_force(self):
-        res = U.check_and_update(force=False, interval_days=7)
+        # 先用合成数据强制更新一次种下 manifest（本文件约定全程不联网；
+        # 原先这里直接真联网，上游限流 HTTP 429 时用例必挂）
+        big = make_csv()
+        U.fetch_remote = lambda timeout=20.0: (big, 'sha-interval')
+        self.assertTrue(U.check_and_update(force=True)['updated'])
         # 刚写过的 manifest 会让非强制检查直接跳过
         U.fetch_remote = lambda timeout=20.0: (_ for _ in ()).throw(AssertionError('不该联网'))
         res2 = U.check_and_update(force=False, interval_days=7)

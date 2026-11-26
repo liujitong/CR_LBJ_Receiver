@@ -1,11 +1,11 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """gen_shared_data.py — 生成桌面端 / 安卓端共用的数据文件。
 
 共享数据目录 `shared/data/` 是两端唯一的数据来源：
 
     loco_types.csv    机车代号 → 短型号 / 中文名（来自解码器 LOCO_TABLE + LBJ_Console）
-    loco_specs.json   机车型号 → 技术参数（来自 cr_lbj/data/loco_info.py）
+    loco_specs.json   机车型号 → 技术参数（来自 desktop/cr_lbj/data/loco_info.py）
     loco_roster.csv   机车号段 → 配属局段（外部数据，本脚本只校验不生成）
     places.csv        预设中心点（手工维护，本脚本只校验）
 
@@ -32,7 +32,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SHARED = os.path.join(ROOT, 'shared', 'data')
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, 'desktop'))   # cr_lbj 包在 desktop/ 下
 
 # LBJ_Console 的「机车代号 → 短型号」原始表（GPL-3.0，见 shared/NOTICE.md）
 # 这里内联成一张精简表，避免生成时依赖外部下载；新增代号时同步补这里。

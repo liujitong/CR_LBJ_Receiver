@@ -12,8 +12,9 @@ import sys
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+DESKTOP = os.path.join(ROOT, 'desktop')   # 桌面端包 cr_lbj 在 desktop/ 下
+if DESKTOP not in sys.path:
+    sys.path.insert(0, DESKTOP)
 
 from cr_lbj.data import train_info as T  # noqa: E402
 

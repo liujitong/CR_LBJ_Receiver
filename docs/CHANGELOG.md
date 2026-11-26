@@ -6,8 +6,95 @@
 - **小版本**：`v3.x`——功能更新，**桌面与安卓同时升**。
 - **最小版本**：`v3.x.y`——只改了一个端才编最小版本号，改哪个端就编哪个端的号。
 
-桌面端与安卓端**共用同一个版本号**（本版两端都是 `v3.0.0`），因为 v3 的目标就是
+桌面端与安卓端**共用同一个版本号**（本版两端都是 `v3.1.0`），因为 v3 的目标就是
 "一次发布、两端同步"。
+
+---
+
+## v3.1.0 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.1.0`，安卓 `versionName = 3.1.0` / `versionCode = 310`。
+> 主题：**桌面工程分目录、车次编排纯自动、地图方案定型（Leaflet + 7 底图 + 百度 BD-09 +
+> 离线缓存 + QtWebEngine 修复）、安卓设置页菜单化与界面收敛、敏感地址清理。**
+
+### 一、桌面
+
+- **工程分目录**：`main.py`、`build.py`、`SDR_LBJ.spec`、`cr_lbj/`、`国铁.ico`、`lbj_config.json`
+  全部移入 `desktop/`，与 `android/` 平级；运行/打包命令改为
+  `python desktop/main.py`、`python desktop/build.py`（仓库根执行），
+  `tests/`、`tools/` 与 `build.py` 的路径引用同步更新。
+- **车次编排纯自动**：删除 `trainScheme` 配置与界面上的「车次规则」选择器，
+  分类逻辑只按日期驱动——过渡期（2027-01-01 前）按字头 + 速度判定，**2027-01-01 起**
+  高铁/普速全量按 2026 新方案，速度不再参与判定；旧配置里的 `trainScheme` 键加载时忽略。
+- **地图（与安卓共用页面）**：
+  - 渲染引擎**回退 Leaflet 1.9.4**（本地化 `shared/web/vendor/leaflet/`，离线可用、零构建），
+    删除上一轮实验性的 WebGL 地图引擎与 `vendor/maplibre-gl/`。
+  - 底图收敛为 **7 张**：**新增 4 张免 Key 底图**——高德街道/卫星（GCJ-02）、
+    百度街道/卫星（BD-09）；保留 OSM 标准与天地图矢量/影像（CGCS2000，需 tk）；
+    **删除** Esri、CARTO、OpenTopoMap 等 6 张国外底图。默认底图改为 `amap` 高德街道
+    （2026-11-26 实测最快最稳：HTTP 200、63~279 ms，且免 Key）。
+  - **百度 BD-09 自定义坐标系**：页面纯 JS 实现百度墨卡托 CRS（`L_BAIDU_CRS` +
+    `ll2mc`/`mc2ll`）与百度瓦片编号换算（`BaiduTileLayer`）；切百度时重建地图实例，
+    标记/轨迹自动加偏；高德/百度这类偏移坐标系底图与 WGS-84 铁路图层不能混叠，
+    页面自动关闭铁路图层并提示，换回 OSM/天地图自动恢复。
+  - **离线瓦片缓存**：页面图层面板「缓存本区域」（当前 zoom~zoom+3），进度经
+    `LBJ.onCacheProgress` 回传、占用经 `LBJ.cacheStats` 回传；宿主实现
+    `LBJHost.cacheArea` 则交给宿主落盘（安卓），否则页面降级为图片预取（桌面）。
+  - **修复 QtWebEngine 远程内容拦截**：`map_host.py` 显式打开
+    `WebAttribute.LocalContentCanAccessRemoteUrls`（及 `…FileUrls`）——
+    QtWebEngine 默认禁止 `file://` 页面访问远程 URL，是 v3.0 桌面地图瓦片不显示的真实原因。
+  - 新增两端统一的 `tdtReferer` 机制：天地图请求按白名单域名附加 `Referer`，
+    百度请求固定附加 `Referer: https://map.baidu.com/`（无 Referer 会 403）；
+    天地图 tk 仍为空则选中只提示、不加载。
+  - 配置页/工具栏/页面下拉三处图层清单保持逐字一致（7 底图）；
+    `docs/地图与图源.md` 整篇重写（图源清单、可达性实测、tk 申请、坐标系、缓存、契约、排错）。
+- 删除旧版高德 Key 配置（`amapKey` / `amapSecurity`）的全部残余引用。
+
+### 二、安卓
+
+- **设置页菜单化**：从长表单改为「图标 + 标题 + 副标题 + 箭头」的菜单式链接列表，
+  点击进入子页；取消底部保存按钮——开关/单选改完**即时保存并下发**，
+  文本输入在失焦/回车/离开页面时自动保存（带防抖）；连接类参数变更自动重建 DSP 链路。
+- **解码页**：收到报文后**自动查询**车次与机车配属并内联展示；手动查询并入设置页
+  「查询·数据」分组，**删除底部 Dock 的「查询」页签**（Dock 收敛为五页）。
+- **日志**：日志卡片改为**折叠 + 只显示最新一条**，按级别着色。
+- **图标**：用桌面 `国铁.ico` 生成 launcher 图标（全密度 mipmap）。
+- **删除 IQ 录制**：界面入口、录制线程、文件写出与相关权限/设置项全部移除（附对拍工具保留）。
+- **地图对齐 v3.1 方案**：
+  - `MAP_BASES` / `FALLBACK_LAYERS` 改为 7 张底图（高德街道/卫星、百度街道/卫星、OSM、
+    天地图矢量/影像），删除 Esri/CARTO/OpenTopo 与高德旧 JS 方案残留；
+  - WebView 拦截器扩展：天地图按 `tdtReferer` 加 `Referer`，百度固定
+    `Referer: https://map.baidu.com/`，统一浏览器 UA；
+  - **原生瓦片代拉 + 离线缓存**：`core/TileCache.kt`（DiskLruCache，`cacheDir/tile_cache`，
+    上限 300 MB、LRU 淘汰），命中直接返回、未命中 `HttpURLConnection` 代拉并落盘；
+    页面 `LBJHost.cacheArea` 桥接 + `LBJ.onCacheProgress` 回传；设置页显示
+    「地图瓦片缓存：N 张 / X MB」并可**清除地图缓存**；
+  - 地图「**转到自己位置**」：定位权限流程取最后已知位置后调 `LBJ.centerLatLng`（WGS-84）；
+  - 图层状态与设置页**单一数据源**（`onLayers` 双向一致）；状态页链路指标溢出修复。
+
+### 三、共享
+
+- `shared/web/railmap.html` 随任务整体迁移：Leaflet 1.9.4 + `vendor/leaflet/`（本地化），
+  删除 `vendor/maplibre-gl/`；`BASE_SOURCES` 7 项、`RAIL_SOURCES` 5 种 ORM 样式。
+- 页面新增：三类坐标系处理（wgs/gcj/bd）、百度自定义 CRS 与瓦片编号、
+  `LBJ.centerLatLng`、离线缓存（`LBJHost.cacheArea` / `LBJ.onCacheProgress` / `LBJ.cacheStats`）、
+  `{key}` 天地图 tk 占位（页面不硬编码）。
+- `tests/test_shared_web.py` 重写：Leaflet 本地化、7 底图 id/中文名与
+  `config_ext.BASE_LAYERS` 逐字一致、百度 CRS/坐标函数、缓存与 `LBJHost` 契约、
+  `tdtReferer` 机制、无旧图源残留、`node --check` 语法、文档版本 v3.1。
+- `docs/`：`地图与图源.md` 整篇重写；`README.md`、`技术参考.md`、`用户手册.md`、
+  `架构说明.md` 的地图章节与版本号同步到 v3.1。
+
+### 四、安全
+
+- **OWRX 服务器真实地址清理**：默认配置、`ReceiverSettings.kt` 默认值、`lbj_config.json`、
+  对拍工具脚本、解码器 docstring 与安卓文档中的真实域名统一替换为占位
+  （`127.0.0.1` / `owrx.example.com` / 「地址已略」），避免公开仓库泄露第三方服务地址。
+- 仓库历史中的同一地址属于**发布前待办**（用 `git filter-repo`/`filter-branch` 重写历史并
+  force push，删除仓库外含旧历史的 bundle）；**GitHub 可能短期缓存旧对象**，建议该 OWRX
+  服务轮换访问凭据或限制来源。本条目只说明工作区清理已完成，历史重写以发布记录为准。
+- 底图全部改为免 Key 直连（天地图 tk 由用户自备并只存本地配置），不再有内置 Key/
+  签名等敏感凭据。
 
 ---
 

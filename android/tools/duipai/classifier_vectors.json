@@ -1,0 +1,1024 @@
+[
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "0",
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "0",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "140",
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "140",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "199",
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "199",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "200",
+  "nowMs": 1795665600000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "200",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "250",
+  "nowMs": 1795665600000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "250",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "300",
+  "nowMs": 1795665600000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "300",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "350",
+  "nowMs": 1795665600000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "350",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "500",
+  "nowMs": 1795665600000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "500",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "501",
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "501",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "---",
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "---",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "80km/h",
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": "80km/h",
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "T398",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798257600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "0",
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "0",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "140",
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "140",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "199",
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "199",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "200",
+  "nowMs": 1795665600000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "200",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "250",
+  "nowMs": 1795665600000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "250",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "300",
+  "nowMs": 1795665600000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "300",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "350",
+  "nowMs": 1795665600000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "350",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "500",
+  "nowMs": 1795665600000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "500",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "501",
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "501",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "---",
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "---",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "80km/h",
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": "80km/h",
+  "nowMs": 1798862400000,
+  "expected": "快速动车组 (200~250km/h)"
+ },
+ {
+  "train": "K19533",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798257600000,
+  "expected": "快速旅客列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "0",
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "0",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "140",
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "140",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "199",
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "199",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "200",
+  "nowMs": 1795665600000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "200",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "250",
+  "nowMs": 1795665600000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "250",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "300",
+  "nowMs": 1795665600000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "300",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "350",
+  "nowMs": 1795665600000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "350",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "500",
+  "nowMs": 1795665600000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "500",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "501",
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "501",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "---",
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "---",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "80km/h",
+  "nowMs": 1795665600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": "80km/h",
+  "nowMs": 1798862400000,
+  "expected": "新时速动车组 (350km/h+)"
+ },
+ {
+  "train": "X101",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798257600000,
+  "expected": "行包货物列车"
+ },
+ {
+  "train": "G1234",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "高速动车组 (350km/h)"
+ },
+ {
+  "train": "G1234",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "高速动车组 (350km/h)"
+ },
+ {
+  "train": "D123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "动力集中动车组 (≤200km/h)"
+ },
+ {
+  "train": "D123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "动力集中动车组 (≤200km/h)"
+ },
+ {
+  "train": "C12",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "城际动车组 (≤200km/h)"
+ },
+ {
+  "train": "C12",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "城际动车组 (≤200km/h)"
+ },
+ {
+  "train": "S1",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "市郊(域)列车 (≤160km/h)"
+ },
+ {
+  "train": "S1",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "市郊(域)列车 (≤160km/h)"
+ },
+ {
+  "train": "Z123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车 (160km/h)"
+ },
+ {
+  "train": "Z123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "快速旅客列车 (160km/h)"
+ },
+ {
+  "train": "N123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车 (140km/h)"
+ },
+ {
+  "train": "N123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "快速旅客列车 (140km/h)"
+ },
+ {
+  "train": "G1234",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1795665600000,
+  "expected": "高速动车组 (350km/h)"
+ },
+ {
+  "train": "G1234",
+  "detailed": false,
+  "speed": "80",
+  "nowMs": 1798862400000,
+  "expected": "高速动车组 (350km/h)"
+ },
+ {
+  "train": "V6001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "普通旅客快车 (120km/h)"
+ },
+ {
+  "train": "V6001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "普通旅客快车 (120km/h)"
+ },
+ {
+  "train": "V7001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "普通旅客慢车 (120km/h)"
+ },
+ {
+  "train": "V7001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "普通旅客慢车 (120km/h)"
+ },
+ {
+  "train": "V3000",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "快速旅客列车 (120km/h)"
+ },
+ {
+  "train": "V3000",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "快速旅客列车 (120km/h)"
+ },
+ {
+  "train": "Y500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "普速旅游专线列车"
+ },
+ {
+  "train": "Y500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "普速旅游专线列车"
+ },
+ {
+  "train": "Y1500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "普速旅游专列"
+ },
+ {
+  "train": "Y1500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "普速旅游专列"
+ },
+ {
+  "train": "B100",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "特快城际班列 (160km/h)"
+ },
+ {
+  "train": "B100",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "特快城际班列 (160km/h)"
+ },
+ {
+  "train": "B2001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "快速中欧班列 (120km/h)"
+ },
+ {
+  "train": "B2001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "快速中欧班列 (120km/h)"
+ },
+ {
+  "train": "B9001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "普快中亚班列 (90km/h)"
+ },
+ {
+  "train": "B9001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "普快中亚班列 (90km/h)"
+ },
+ {
+  "train": "B5000",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "普快多式联运班列 (90km/h)"
+ },
+ {
+  "train": "B5000",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "普快多式联运班列 (90km/h)"
+ },
+ {
+  "train": "DH500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "动车组快运 (250km/h+)"
+ },
+ {
+  "train": "DH500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "动车组快运 (250km/h+)"
+ },
+ {
+  "train": "DH1500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "动车组快运 (≤250km/h)"
+ },
+ {
+  "train": "DH1500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "动车组快运 (≤250km/h)"
+ },
+ {
+  "train": "DJ1",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "动车组检测/确认列车"
+ },
+ {
+  "train": "DJ1",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "动车组检测/确认列车"
+ },
+ {
+  "train": "50001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "客车单机"
+ },
+ {
+  "train": "50001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "客车单机"
+ },
+ {
+  "train": "71001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "重载货物列车"
+ },
+ {
+  "train": "71001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "重载货物列车"
+ },
+ {
+  "train": "73001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "重载货物列车"
+ },
+ {
+  "train": "73001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "重载货物列车"
+ },
+ {
+  "train": "75001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "重载货物列车"
+ },
+ {
+  "train": "75001",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "重载货物列车"
+ },
+ {
+  "train": "00123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "动车组无火跨局回送"
+ },
+ {
+  "train": "00123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "动车组无火跨局回送"
+ },
+ {
+  "train": "00050",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "动车组有火回送"
+ },
+ {
+  "train": "00050",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "动车组有火回送"
+ },
+ {
+  "train": "00500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "未知类别"
+ },
+ {
+  "train": "00500",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "未知类别"
+ },
+ {
+  "train": "1234",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "等待详细报文确认..."
+ },
+ {
+  "train": "1234",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "等待详细报文确认..."
+ },
+ {
+  "train": "1234",
+  "detailed": true,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "普通旅客列车"
+ },
+ {
+  "train": "1234",
+  "detailed": true,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "普通旅客列车"
+ },
+ {
+  "train": "Q123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "等待详细报文确认..."
+ },
+ {
+  "train": "Q123",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "等待详细报文确认..."
+ },
+ {
+  "train": "g7",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "高速动车组 (350km/h)"
+ },
+ {
+  "train": "g7",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "高速动车组 (350km/h)"
+ },
+ {
+  "train": " T 398 ",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "特快旅客列车"
+ },
+ {
+  "train": " T 398 ",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1798862400000,
+  "expected": "特快动车组 (300km/h)"
+ },
+ {
+  "train": "",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "等待信号..."
+ },
+ {
+  "train": "----",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "等待信号..."
+ },
+ {
+  "train": "等待信号...",
+  "detailed": false,
+  "speed": null,
+  "nowMs": 1795665600000,
+  "expected": "等待信号..."
+ }
+]

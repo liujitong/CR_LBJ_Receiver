@@ -43,7 +43,6 @@ class DecoderEngine(private val context: Context) {
     private var poller: StatusFramePoller? = null
 
     // 业务参数（VM 从设置页同步进来）
-    var trainScheme: String = "auto"
     var dedupeWindow: Double = 2.5
     var estimator: ArrivalEstimator = ArrivalEstimator()
 
@@ -58,7 +57,7 @@ class DecoderEngine(private val context: Context) {
             val now = System.currentTimeMillis() / 1000.0
             val base = DecodeEvent.fromNativeJson(json, now)
             val category = TrainClassifier.classify(
-                base.train, base.isDetailed, base.speed, trainScheme)
+                base.train, base.isDetailed, base.speed)
             val eta = estimator.estimateEta(
                 base.train, base.direction, base.speed, base.position,
                 base.route, goodData = !base.msgTypeError, now = now)
@@ -139,10 +138,6 @@ class DecoderEngine(private val context: Context) {
 
     /** 当前数据源是否存活（监护用） */
     fun isSourceOpen(): Boolean = source?.isOpen == true
-
-    /** 当前数据源若是 rtl_tcp/OWRX 管道源则返回（IQ 录制用） */
-    fun sourceIfTcp(): xyz.mlxkj.crlbj.core.RtlTcpSource? =
-        source as? xyz.mlxkj.crlbj.core.RtlTcpSource
 
     fun stop() {
         if (_state.value != EngineState.RUNNING && source == null) return

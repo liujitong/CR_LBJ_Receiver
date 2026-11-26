@@ -54,7 +54,7 @@
 - [x] SettingsPage 最小可编辑（数据源/射频/门控/AFC/业务五组，保存即重建链路）
 - [x] LbjApp 传参核对（MapPage/HistoryPage M3 前保持占位）
 - [x] ./gradlew :app:assembleDebug 构建通过
-- [ ] 模拟器（Resizable_Experimental）安装 + OWRX nc.example.com:5678 实测解码
+- [ ] 模拟器（Resizable_Experimental）安装 + OWRX（地址已略） 实测解码
 - [ ] git 提交 M2c
 
 ### 构建错误记录（已修复）
@@ -140,4 +140,4 @@ git 提交：见下方 git log。
 - adb 推送路径 MSYS 转义：`//data/local/tmp/...` 双斜杠；推送后 chmod 755
 - CLI 对拍：lbj_cli（x86_64 模拟器 adb 直跑），需 --hash-style=both +
   -Wl,-z,max-page-size=16384
-- OWRX 测试源：nc.example.com:5678（960kS/s、增益 15.7dB、dcOffset 0）
+- OWRX 测试源（地址已略）（960kS/s、增益 15.7dB、dcOffset 0）

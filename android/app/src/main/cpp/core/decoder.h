@@ -209,7 +209,6 @@ public:
     std::map<std::string, Session> sessions;
     std::string lastTrain;
     double lastWarnTime = 0;
-    std::string trainScheme = "auto";
     std::vector<std::string> pendingWarnings; // 干扰告警（方向, 文本）
 
     void initDecoder(double fs, double baudRate) {
