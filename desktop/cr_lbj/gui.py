@@ -22,6 +22,7 @@ from cr_lbj.ui.components.info_panels import *  # noqa: F401,F403
 from cr_lbj.data.history import *  # noqa: F401,F403
 from cr_lbj.ui.dialogs.detail_dialogs import *  # noqa: F401,F403
 from cr_lbj.ui.components.history_panel import *  # noqa: F401,F403
+from cr_lbj.ui.dialogs.history_dialog import *  # noqa: F401,F403  （v3.1.1 历史记录对话框）
 from cr_lbj.ui.dialogs.config_ui import *  # noqa: F401,F403
 from cr_lbj.ui.dialogs.log_ui import *  # noqa: F401,F403
 from cr_lbj.ui.dialogs.help_dialogs import *  # noqa: F401,F403
@@ -39,6 +40,7 @@ _PART_MODULES = [
     'cr_lbj.data.history',
     'cr_lbj.ui.dialogs.detail_dialogs',
     'cr_lbj.ui.components.history_panel',
+    'cr_lbj.ui.dialogs.history_dialog',
     'cr_lbj.ui.dialogs.config_ui',
     'cr_lbj.ui.dialogs.log_ui',
     'cr_lbj.ui.dialogs.help_dialogs',

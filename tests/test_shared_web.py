@@ -364,37 +364,56 @@ class DesktopHostContractTest(unittest.TestCase):
                       '安卓代拉 ORM 瓦片必须带 Referer')
 
     def test_train_info_display_contract(self):
-        """v3.2：车次/机车信息展示（等级/担当局/担当段/配属段/车型/配属/制造厂）。"""
+        """v3.1.1：地图页**不再**标注线路/机车/类别/车次信息/车底/配属。
+
+        这些信息改在宿主面板展示（桌面「车次信息 / 机车信息」卡片、安卓解码卡）；
+        页面的 setTrainInfo 仅保留为宿主推送通道，不渲染。
+        """
         html = read_html()
-        self.assertIn('setTrainInfo', html, '页面应提供 LBJ.setTrainInfo')
-        for field in ('grade', 'bureau', 'section', 'owner', 'model',
-                      'locoDepot', 'locoMaker', 'from', 'to'):
-            self.assertIn(field, html, 'info 字段契约缺 %s' % field)
-        self.assertIn('车次信息', html)
-        self.assertIn('机车配属', html)
-        # 桌面：查询服务 + 面板两行 + 地图补推
+        self.assertIn('setTrainInfo', html, '兼容接口应保留（宿主仍会推送）')
+        # 弹窗只保留核心行车字段
+        self.assertIn('轨迹里程', html)
+        # 页面上不应再有信息渲染器与那几行弹窗字段
+        self.assertNotIn('infoRows', html, '地图弹窗不应再渲染 info 行')
+        self.assertNotIn("['线路'", html, '地图弹窗不应显示线路')
+        self.assertNotIn("['机车'", html, '地图弹窗不应显示机车')
+        self.assertNotIn("['类别'", html, '地图弹窗不应显示类别')
+        # 标记副标题只剩速度/公里标
+        self.assertNotIn('info.grade', html, '标记副标题不应再显示车次等级')
+        # 桌面：查询服务与信息卡片仍要在（这些信息改在这两处展示）
         lookup = read_ui('info_lookup.py')
         self.assertIn('class TrainInfoService', lookup)
         self.assertIn('train_info', lookup)
         self.assertIn('loco_roster', lookup)
         self.assertIn("'section'", lookup, 'runner → section 映射')
-        panel = read_text(os.path.join(ROOT, 'desktop', 'cr_lbj', 'ui',
-                                       'components', 'info_panels.py'))
-        self.assertIn('trainInfo', panel)
-        self.assertIn('locoDepot', panel)
-        self.assertIn('def setInfo', panel)
-        mp = read_ui('map_panel.py')
-        self.assertIn('def setTrainInfo', mp)
-        host = read_ui('map_host.py')
-        self.assertIn('def set_train_info', host)
-        # 安卓：payload 带 info + 解码页展示担当段
+        # 安卓：payload 仍带 info（供宿主面板），解码页展示担当段
         base = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'java',
                             'xyz', 'mlxkj', 'crlbj')
         mappage = read_text(os.path.join(base, 'ui', 'pages', 'MapPage.kt'))
         self.assertIn('trainInfoMap', mappage)
-        self.assertIn('locoDepot', mappage)
         decode = read_text(os.path.join(base, 'ui', 'pages', 'DecodePage.kt'))
         self.assertIn('ti.runner', decode, '安卓解码页应展示担当段')
+
+    def test_marker_footnote_readability(self):
+        """v3.1.1：地图标记下的速度/公里标小字要能看清（字号/底色/描边）。"""
+        html = read_html()
+        self.assertIn('.lbj-marker .sub', html)
+        sub_css = html.split('.lbj-marker .sub', 1)[1].split('}', 1)[0]
+        self.assertIn('font-size: 11px', sub_css, '脚注字号应 ≥11px')
+        self.assertIn('font-weight: 600', sub_css)
+        self.assertIn('text-shadow', sub_css, '脚注需要描边/阴影保证可读')
+
+    def test_config_applied_gate(self):
+        """v3.1.1 底图回退 bug：页面在宿主 applyConfig 之前不得上报图层。
+
+        安卓端 file:// 加载时页面先按默认底座(amap)起来；若此时 notifyHost 上报，
+        宿主会把它落盘成配置，冲掉用户选的底图。
+        """
+        html = read_html()
+        self.assertIn('configApplied', html)
+        self.assertIn('if (!configApplied) return;', html,
+                      'notifyHost 必须在 applyConfig 前静默')
+        self.assertIn('configApplied = true;', html)
 
     def test_android_tile_cache_host(self):
         # 安卓侧：原生代拉 + DiskLruCache + LBJHost 桥（v3.1）
@@ -452,22 +471,23 @@ class MapPageSyntaxTest(unittest.TestCase):
 
 
 class DocsVersionTest(unittest.TestCase):
-    """v3.2 发版时文档版本号必须同步（避免文档还停在 v3.1）。"""
+    """发版时文档版本号必须同步（避免文档还停在旧版）。"""
 
     def test_readme_version(self):
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.0', readme, 'README 版本号应为 v3.2.0')
+        self.assertIn('v3.1.1', readme, 'README 版本号应为 v3.1.1')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
-        self.assertIn('v3.2.0', readme.split('## 更新记录', 1)[-1],
-                      'README 更新记录表应有 v3.2.0 行')
+        self.assertNotIn('**版本** v3.2.0', readme)
+        self.assertIn('v3.1.1', readme.split('## 更新记录', 1)[-1],
+                      'README 更新记录表应有 v3.1.1 行')
 
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2', text, '%s 文首版本号应为 v3.2' % name)
+            self.assertIn('v3.1.1', text, '%s 文首版本号应为 v3.1.1' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.0', changelog, 'CHANGELOG 顶部应有 v3.2.0 条目')
+        self.assertIn('## v3.1.1', changelog, 'CHANGELOG 顶部应有 v3.1.1 条目')
 
 
 if __name__ == '__main__':

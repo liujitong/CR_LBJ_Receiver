@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.0')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.1.1')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -427,6 +427,13 @@ class MainWindow(QMainWindow):
         toolsMenu.addAction(self.actLocoQuery)
         toolsMenu.addSeparator()
 
+        # v3.1.1：历史记录不再占主界面页签，改到这里按需打开对话框
+        self.actHistory = QAction('历史记录...', self, shortcut='Ctrl+H')
+        self.actHistory.setToolTip('查看 / 删除历史解码记录，可看单条详情 (Ctrl+H)')
+        self.actHistory.triggered.connect(self.openHistoryDialog)
+        toolsMenu.addAction(self.actHistory)
+        toolsMenu.addSeparator()
+
         self.actDataUpdate = QAction('检查数据更新（机车配属表）', self)
         self.actDataUpdate.setToolTip('从上游拉取配属号段表增量（校验通过才替换）')
         self.actDataUpdate.triggered.connect(lambda: self.checkDataUpdate(True))
@@ -557,6 +564,16 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
         return dlg
 
+    # ---- v3.1.1：历史记录对话框（工具菜单） ----
+    def openHistoryDialog(self):
+        """打开历史记录对话框：列表 / 详情 / 删除选中 / 删除全部 / 导出。
+
+        历史数据层仍用 `cr_lbj.data.history.HistoryDb`；对话框关闭后主窗口
+        无需刷新（主界面已不再常驻历史表，仪表板的计数实时读库）。
+        """
+        dlg = HistoryDialog(self)
+        dlg.exec()
+
     def _openQueryForRecord(self, record: Optional[dict], tab: str = 'train'):
         """从表格右键菜单查车次/配属。"""
         record = record or {}
@@ -646,10 +663,10 @@ class MainWindow(QMainWindow):
         # 这里不再单独排一行，窗口纵向省出约一行高度。
 
         # ---------------- 全景三段式（v2.3） ----------------
-        #   ① 上段：地图（约六成） | 当前解码/历史记录 + 列车信息
+        #   ① 上段：地图（约六成） | 当前解码 + 列车信息
         #   ② 中段：接收频谱 | 车次信息 | 机车信息
         #   ③ 底栏：输出 1（日志尾部） | 输出 2（接收状态分块），各占一半
-        #   页签取消后所有内容一屏可见，互不遮挡。
+        #   所有内容一屏可见，互不遮挡；历史记录在「工具」菜单里按需打开。
         mainSplit = QSplitter(Qt.Vertical)
         mainSplit.setChildrenCollapsible(False)
         mainSplit.setHandleWidth(spx(8))
@@ -666,19 +683,15 @@ class MainWindow(QMainWindow):
         self.mapPanel.consoleMessage.connect(self._onMapConsoleLine)
         band1.addWidget(self.mapPanel)
 
-        # v3.2：车次/机车信息查询服务（异步，结果同时进地图标记与「车次信息」面板）
+        # v3.2：车次/机车信息查询服务（异步，结果同时进地图标记）
         self.infoService = TrainInfoService(self)
         self.infoService.infoReady.connect(self._onTrainInfoReady)
 
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.setUsesScrollButtons(True)
-        self.currentPanel = CurrentPanel()
-        self.historyPanel = HistoryPanel()
-        self.tabs.addTab(self.currentPanel, '当前解码')
-        self.tabs.addTab(self.historyPanel, '历史记录')
-        self.tabs.currentChanged.connect(self._onTabChanged)
+        # v3.1.1：主界面只留「当前解码」；历史记录改到「工具 → 历史记录…」，
+        # 这里只保留数据库句柄用于写入（界面不再常驻历史表）。
+        self.historyDb = HistoryDb(DB_PATH)
 
+        self.currentPanel = CurrentPanel()
         self.trainPanel = TrainInfoPanel()
         self.trainQueryPanel = TrainQueryPanel()
         self.locoPanel = LocoInfoPanel()
@@ -688,8 +701,7 @@ class MainWindow(QMainWindow):
         rightCol = QSplitter(Qt.Vertical)
         rightCol.setChildrenCollapsible(False)
         rightCol.setHandleWidth(spx(8))
-        # 页签自己写着「当前解码 / 历史记录」，卡片不再挂一行大字标题
-        self.decodeCard = CardBox('', self.tabs)
+        self.decodeCard = CardBox('当前解码', self.currentPanel)
         self.trainCard = CardBox('列车信息', self.trainPanel)
         rightCol.addWidget(self.decodeCard)
         rightCol.addWidget(self.trainCard)
@@ -783,39 +795,32 @@ class MainWindow(QMainWindow):
 
     # ---- v3.0：表格右键菜单（查车次 / 查配属） ----
     def _installQueryMenus(self):
-        """给「当前解码」「历史记录」两张表挂右键菜单。
+        """给「当前解码」表挂右键菜单。
 
         双击行已经是「记录详情」，不再抢它；查询走右键，两条路互不影响。
+        历史记录表的快捷入口在「工具 → 历史记录…」对话框里（双击即详情）。
         """
         try:
-            for panel in (getattr(self, 'currentPanel', None),
-                          getattr(self, 'historyPanel', None)):
-                table = getattr(panel, 'table', None)
-                if table is None:
-                    continue
+            table = getattr(getattr(self, 'currentPanel', None), 'table', None)
+            if table is not None:
                 table.setContextMenuPolicy(Qt.CustomContextMenu)
                 table.customContextMenuRequested.connect(
-                    lambda pos, t=table, p=panel: self._showRecordMenu(t, p, pos))
+                    lambda pos, t=table: self._showRecordMenu(
+                        t, self.currentPanel, pos))
         except Exception:
             pass
 
     def _recordAtRow(self, panel, row: int) -> Optional[dict]:
-        """表格行 → 记录字典（两个面板的存储方式不同，各自取）。"""
-        if row < 0:
+        """「当前解码」表格行 → 记录字典。"""
+        if row < 0 or panel is None:
             return None
         try:
-            if panel is getattr(self, 'currentPanel', None):
-                # CurrentPanel.records 是正序 [(ts, d)]，表格倒序显示
-                records = list(getattr(panel, 'records', []) or [])
-                idx = len(records) - 1 - row
-                return records[idx][1] if 0 <= idx < len(records) else None
-            if panel is getattr(self, 'historyPanel', None):
-                ids = list(getattr(panel, '_rowIds', []) or [])
-                if 0 <= row < len(ids):
-                    return panel.db.queryById(ids[row])
+            # CurrentPanel.records 是正序 [(ts, d)]，表格倒序显示
+            records = list(getattr(panel, 'records', []) or [])
+            idx = len(records) - 1 - row
+            return records[idx][1] if 0 <= idx < len(records) else None
         except Exception:
             return None
-        return None
 
     def _showRecordMenu(self, table, panel, pos):
         try:
@@ -1178,31 +1183,32 @@ class MainWindow(QMainWindow):
             self.mapPanel.updateTrain(d, info)
         except Exception:
             pass
-        # 车次信息走后台查询，回来后补进地图标记与信息面板
+        # 车次信息走后台查询，回来后补进地图标记（车次卡自己也会异步查）
         try:
             train = str(d.get('train') or '')
             if d.get('isDetailed') and train and train != '----':
-                prefer = str(getattr(self.config, 'trainQuerySource', 'auto') or 'auto')
-                self.infoService.lookup(train, prefer)
+                self.infoService.lookup(train, self._trainPrefer())
         except Exception:
             pass
-        if info:
-            try:
-                self.trainPanel.setInfo(info, str(d.get('train') or ''))
-            except Exception:
-                pass
         # 无车次信息的报文: 不存入历史数据库
         isInvalid = (d.get('train', '----') in ('----', '', '未知')
                      and d.get('baseTrain', '----') in ('----', ''))
         if not isInvalid:
-            self.historyPanel.addRecord(d)
-        # 触发 12306 联网查询
-        self.trainQueryPanel.onTrainDecoded(d)
+            try:
+                self.historyDb.insert(d)
+            except Exception:
+                pass
+        # 触发车次信息查询（RailGo 优先；「查看时刻表」沿用同一份结果）
+        self.trainQueryPanel.onTrainDecoded(d, prefer=self._trainPrefer())
         # 机车信息卡片
         try:
             self.locoPanel.updateLoco(d)
         except Exception:
             pass
+
+    def _trainPrefer(self) -> str:
+        """车次查询数据源偏好（配置 → 地图与车次）。"""
+        return str(getattr(self.config, 'trainQuerySource', 'auto') or 'auto')
 
     def _decode_info(self, d: dict) -> dict:
         """解码结果 → 地图/面板用的车次·机车信息（v3.2）。
@@ -1222,13 +1228,9 @@ class MainWindow(QMainWindow):
         return merge_info(loco, train)
 
     def _onTrainInfoReady(self, train: str, info: dict):
-        """车次后台查询返回：补进地图标记与「车次信息」面板。"""
+        """车次后台查询返回：补进地图标记（列车信息面板已不再重复展示）。"""
         try:
             self.mapPanel.setTrainInfo(train, info)
-        except Exception:
-            pass
-        try:
-            self.trainPanel.setInfo(merge_info(info), train)
         except Exception:
             pass
 
@@ -1246,11 +1248,6 @@ class MainWindow(QMainWindow):
     def _openTimetable(self):
         """打开 12306 时刻表对话框。"""
         self.trainQueryPanel._openTimetable()
-
-    def _onTabChanged(self, index: int):
-        """切换标签页时，切换到历史记录自动刷新。"""
-        if self.tabs.tabText(index) == '历史记录':
-            self.historyPanel.loadFromDb()
 
     def _onConnection(self, connected: bool):
         self.statusBar().showMessage('已连接' if connected else '未连接')
@@ -1372,7 +1369,7 @@ class MainWindow(QMainWindow):
         kv('择优升级', str(getattr(dd, 'upgraded', 0) if dd is not None else 0))
         kv('占用槽位', '%d / %d' % (slots, getattr(dd, 'maxSlots', 0) or 0))
         kv('当前列表', '%d 行' % self.currentPanel.table.rowCount())
-        kv('历史显示', '%d 行' % self.historyPanel.table.rowCount())
+        kv('历史记录', '%d 条' % self.historyDb.count())
         kv('地图列车', '%d 辆' % len(getattr(self.mapPanel, '_trains', {}) or {}),
            'ok' if getattr(self.mapPanel, '_trains', None) else '')
 
@@ -1407,7 +1404,7 @@ class MainWindow(QMainWindow):
            if data_update.auto_enabled(self.config) else '关')
 
         group('界面')
-        kv('版本', 'v3.2.0')
+        kv('版本', 'v3.1.1')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(

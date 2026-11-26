@@ -73,7 +73,7 @@ fun PageHeader(
 ) {
     val p = pal()
     Row(
-        Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp),
+        Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -100,6 +100,11 @@ fun StatusCapsule(
     lastEventTs: Double?,
     onToggle: () -> Unit,
     onClear: (() -> Unit)? = null,
+    /**
+     * 非空时：点胶囊直接执行该动作（解码页用它打开「信号瀑布」小弹层），
+     * 不再弹下拉菜单；为空时保持原行为（弹出开始/停止菜单）。
+     */
+    onOpen: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val p = pal()
@@ -125,7 +130,7 @@ fun StatusCapsule(
                 .clip(RoundedCornerShape(50))
                 .background(p.surfaceAlt)
                 .border(1.dp, p.border, RoundedCornerShape(50))
-                .clickable { open = true }
+                .clickable { if (onOpen != null) onOpen() else open = true }
                 .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -232,7 +237,7 @@ fun InfoRow(
     }
 }
 
-/** 指标块（状态页网格用）：小标签 + 大数字 + 单位 */
+/** 指标块（状态页网格用）：小标签 + 大数字 + 单位；large=true 用于第一层级的主指标 */
 @Composable
 fun MetricTile(
     label: String,
@@ -240,6 +245,7 @@ fun MetricTile(
     unit: String = "",
     tone: Tone = Tone.Neutral,
     modifier: Modifier = Modifier,
+    large: Boolean = false,
 ) {
     val p = pal()
     val color = when (tone) {
@@ -252,29 +258,35 @@ fun MetricTile(
         modifier
             .clip(RoundedCornerShape(Dim.cardCorner))
             .background(p.surfaceAlt)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
+            .padding(horizontal = if (large) 12.dp else 10.dp,
+                vertical = if (large) 9.dp else 7.dp),
     ) {
-        Text(label, color = p.textTertiary, fontSize = 11.sp, maxLines = 1)
-        Spacer(Modifier.height(2.dp))
+        Text(label, color = p.textTertiary, fontSize = if (large) 12.sp else 11.sp, maxLines = 1)
+        Spacer(Modifier.height(if (large) 3.dp else 2.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 value,
                 color = color,
-                fontSize = 19.sp,
+                fontSize = if (large) 24.sp else 19.sp,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                // 权重 + Ellipsis：长数字（如调谐 821.2375 MHz）只截断数字，
+                // 绝不会把单位挤成 0 宽而把整块撑高（v3.1.1 状态页修复）
+                modifier = Modifier.weight(1f, fill = false),
             )
             if (unit.isNotEmpty()) {
                 Spacer(Modifier.width(2.dp))
-                Text(unit, color = p.textTertiary, fontSize = 10.sp,
+                Text(unit, color = p.textTertiary, fontSize = if (large) 11.sp else 10.sp,
+                    maxLines = 1, softWrap = false,
                     modifier = Modifier.padding(bottom = 2.dp))
             }
         }
     }
 }
 
-/** 空态：一句主文案 + 一句提示，居中（不要大白块） */
+/** 空态：一句主文案 + 一句提示，居中（不要大白块）；文案克制，别用大字压屏 */
 @Composable
 fun EmptyState(
     title: String,
@@ -288,10 +300,10 @@ fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(title, color = p.textSecondary, fontSize = 15.sp, textAlign = TextAlign.Center)
+        Text(title, color = p.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
         if (!hint.isNullOrEmpty()) {
-            Spacer(Modifier.height(6.dp))
-            Text(hint, color = p.textTertiary, fontSize = 12.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(5.dp))
+            Text(hint, color = p.textTertiary, fontSize = 11.sp, textAlign = TextAlign.Center)
         }
         if (action != null) {
             Spacer(Modifier.height(12.dp))

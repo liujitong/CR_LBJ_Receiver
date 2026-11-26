@@ -239,19 +239,15 @@ class ConfigPanel(QWidget):
         srcGrid.addWidget(self.rtlPathEdit, 2, 1, 1, 4)
         srcGrid.addWidget(pathBtn, 2, 5)
         srcGrid.setColumnStretch(1, 1)
-        page('数据源配置').addWidget(srcGroup)
+        page('数据源与射频').addWidget(srcGroup)
 
-        # ---- 顶部：连接设置 + 射频设置 (2 列) ----
-        topGrid = QGridLayout()
-        topGrid.setSpacing(6)
-        topGrid.setColumnStretch(0, 1)
-        topGrid.setColumnStretch(1, 1)
-
-        # 连接设置
-        connGroup = QGroupBox('连接设置')
-        connForm = QFormLayout(connGroup)
-        connForm.setSpacing(4)
-        connForm.setContentsMargins(8, 16, 8, 4)
+        # ---- 连接与射频（v3.1.1：数据源 + 射频合并为一页，字段按「源 → 采样 → 射频」排） ----
+        # 顺序：源类型（在上面的数据源组）/ 主机 / 端口 → 采样率 → 中心频率 /
+        #       硬件增益 / PPM / 信道带宽 / DC 偏移 → 块大小。
+        rfGroup = QGroupBox('连接与射频')
+        rfForm = QFormLayout(rfGroup)
+        rfForm.setSpacing(4)
+        rfForm.setContentsMargins(8, 16, 8, 4)
 
         self.hostEdit = QLineEdit(config.host)
         self.portSpin = QSpinBox()
@@ -267,40 +263,6 @@ class ConfigPanel(QWidget):
         else:
             self.srCombo.addItem(f'{config.sampleRate // 1000} kS/s', config.sampleRate)
             self.srCombo.setCurrentIndex(self.srCombo.count() - 1)
-
-        self.blockSpin = QSpinBox()
-        self.blockSpin.setRange(1024, 262144)
-        self.blockSpin.setSingleStep(1024)
-        self.blockSpin.setValue(config.blockSize)
-
-        self.dcSpin = QDoubleSpinBox()
-        self.dcSpin.setRange(-500000, 500000)
-        self.dcSpin.setDecimals(0)
-        self.dcSpin.setSuffix(' Hz')
-        self.dcSpin.setValue(config.dcOffsetHz)
-
-        self.usbHint = QLabel(
-            'USB 直连：程序自动查找本机 RTL-SDR，无需主机与端口。'
-            '插上棒子后点上方「检测设备」确认 tuner 并应用推荐参数；'
-            '多支棒子用「设备序号」区分。')
-        self.usbHint.setWordWrap(True)
-        self.usbHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
-
-        connForm.addRow(self.usbHint)
-        connForm.addRow('主机:', self.hostEdit)
-        connForm.addRow('端口:', self.portSpin)
-        connForm.addRow('采样率:', self.srCombo)
-        connForm.addRow('块大小:', self.blockSpin)
-        connForm.addRow('DC 偏移:', self.dcSpin)
-        self._connForm = connForm
-
-        page('数据源配置').addWidget(connGroup)
-
-        # 射频设置
-        rfGroup = QGroupBox('射频设置')
-        rfForm = QFormLayout(rfGroup)
-        rfForm.setSpacing(4)
-        rfForm.setContentsMargins(8, 16, 8, 4)
 
         self.freqSpin = QDoubleSpinBox()
         self.freqSpin.setRange(0.1, 3000.0)
@@ -325,14 +287,39 @@ class ConfigPanel(QWidget):
         self.bwSpin.setSuffix(' kHz')
         self.bwSpin.setValue(config.bwKhz)
 
+        self.dcSpin = QDoubleSpinBox()
+        self.dcSpin.setRange(-500000, 500000)
+        self.dcSpin.setDecimals(0)
+        self.dcSpin.setSuffix(' Hz')
+        self.dcSpin.setValue(config.dcOffsetHz)
+
+        self.blockSpin = QSpinBox()
+        self.blockSpin.setRange(1024, 262144)
+        self.blockSpin.setSingleStep(1024)
+        self.blockSpin.setValue(config.blockSize)
+
+        self.usbHint = QLabel(
+            'USB 直连：程序自动查找本机 RTL-SDR，无需主机与端口。'
+            '插上棒子后点上方「检测设备」确认 tuner 并应用推荐参数；'
+            '多支棒子用「设备序号」区分。')
+        self.usbHint.setWordWrap(True)
+        self.usbHint.setStyleSheet(f'color: {CLR("dim")}; font-size: 11px;')
+
+        rfForm.addRow(self.usbHint)
+        rfForm.addRow('主机:', self.hostEdit)
+        rfForm.addRow('端口:', self.portSpin)
+        rfForm.addRow('采样率:', self.srCombo)
         rfForm.addRow('中心频率:', self.freqSpin)
         rfForm.addRow('硬件增益:', self.gainSpin)
         rfForm.addRow('PPM 校正:', self.ppmSpin)
         rfForm.addRow('信道带宽:', self.bwSpin)
+        rfForm.addRow('DC 偏移:', self.dcSpin)
+        rfForm.addRow('块大小:', self.blockSpin)
+        self._connForm = rfForm
 
-        page('射频设置').addWidget(rfGroup)
+        page('数据源与射频').addWidget(rfGroup)
 
-        # ---- 中部：RSSI 门控 + AFC 设置 (2 列) ----
+        # ---- 中部：RSSI 门控 + AFC 设置（同属「数据源与射频」页，两列并排） ----
         midGrid = QGridLayout()
         midGrid.setSpacing(6)
         midGrid.setColumnStretch(0, 1)
@@ -366,7 +353,7 @@ class ConfigPanel(QWidget):
         rssiForm.addRow('释放迟滞:', self.hystSpin)
         rssiForm.addRow('保持时间:', self.holdSpin)
 
-        page('射频设置').addWidget(rssiGroup)
+        midGrid.addWidget(rssiGroup, 0, 0)
 
         # AFC 设置
         afcGroup = QGroupBox('AFC 设置')
@@ -396,7 +383,8 @@ class ConfigPanel(QWidget):
         afcForm.addRow('环路增益:', self.afcGainSpin)
         afcForm.addRow('', self.keepAfcCheck)
 
-        page('射频设置').addWidget(afcGroup)
+        midGrid.addWidget(afcGroup, 0, 1)
+        page('数据源与射频').addLayout(midGrid)
 
         # ---- 底部：到达估算设置 (全宽) ----
         etaGroup = QGroupBox('到达估算设置')

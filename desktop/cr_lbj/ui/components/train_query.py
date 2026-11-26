@@ -9,88 +9,11 @@ from __future__ import annotations
 
 from cr_lbj.runtime import *  # noqa: F401,F403
 
+from cr_lbj.data import depot_names
 from cr_lbj.data import loco_roster   # v3.0：机车配属号段表（型号 + 号 → 局段）
+from cr_lbj.ui.info_lookup import (
+    TrainFullQueryWorker, source_name, timetable_data, train_display)
 from cr_lbj.ui.ui_threads import keep_thread as _keepWorker
-
-class TrainQueryWorker(QThread):
-    """异步查询 12306 车次时刻表。"""
-    resultReady = Signal(dict)
-    queryFailed = Signal(str)
-
-    def __init__(self, trainCode: str, dateStr: str):
-        super().__init__()
-        self.trainCode = trainCode
-        self.dateStr = dateStr  # YYYYMMDD
-
-    def _httpGet(self, url: str, timeout: int = 10) -> dict:
-        req = urllib.request.Request(url, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                          'AppleWebKit/537.36 (KHTML, like Gecko) '
-                          'Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-        })
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode('utf-8')
-        return json.loads(raw)
-
-    def run(self):
-        try:
-            # Step 1: 搜索车次
-            keyword = urllib.parse.quote(self.trainCode)
-            searchUrl = (f'https://search.12306.cn/search/v1/train/search?'
-                         f'keyword={keyword}&date={self.dateStr}')
-            searchData = self._httpGet(searchUrl)
-            if not searchData.get('status') or not searchData.get('data'):
-                self.queryFailed.emit(f'未找到车次 {self.trainCode}')
-                return
-            first = searchData['data'][0]
-            trainNo = first['train_no']
-            trainCode = first.get('station_train_code', self.trainCode)
-
-            # Step 2: 查询详细时刻表
-            detailDate = f'{self.dateStr[:4]}-{self.dateStr[4:6]}-{self.dateStr[6:8]}'
-            detailUrl = (f'https://kyfw.12306.cn/otn/queryTrainInfo/query?'
-                         f'leftTicketDTO.train_no={trainNo}&'
-                         f'leftTicketDTO.train_date={detailDate}&rand_code=')
-            detailData = self._httpGet(detailUrl)
-            if not detailData.get('status') or not detailData.get('data', {}).get('data'):
-                self.queryFailed.emit(f'无法获取时刻表')
-                return
-
-            stations = []
-            for s in detailData['data']['data']:
-                stations.append({
-                    'no': int(s.get('station_no', 0)),
-                    'name': s.get('station_name', ''),
-                    'arriveTime': s.get('arrive_time', '----'),
-                    'departTime': s.get('start_time', '----'),
-                    'runningTime': s.get('running_time', ''),
-                    'isStart': s.get('is_start') == 'Y',
-                    'className': s.get('train_class_name', ''),
-                    'dayDiff': int(s.get('arrive_day_diff', 0)),
-                })
-
-            # 起点 / 终点
-            startSt = stations[0] if stations else {}
-            endSt = stations[-1] if stations else {}
-
-            result = {
-                'trainCode': trainCode,
-                'trainNo': trainNo,
-                'startStation': startSt.get('name', ''),
-                'endStation': endSt.get('name', ''),
-                'startTime': startSt.get('departTime', ''),
-                'endTime': endSt.get('arriveTime', ''),
-                'className': startSt.get('className', ''),
-                'stations': stations,
-                'queryDate': self.dateStr,
-            }
-            self.resultReady.emit(result)
-
-        except urllib.error.URLError as e:
-            self.queryFailed.emit(f'网络连接失败: {e.reason}')
-        except Exception as e:
-            self.queryFailed.emit(f'查询失败: {e}')
 
 
 class TimetableDialog(QDialog):
@@ -176,111 +99,107 @@ class TimetableDialog(QDialog):
 
 
 class TrainQueryPanel(QWidget):
-    """车次信息卡片：显示 12306 查询到的起终点与时刻。
+    """车次信息卡片（v3.1.1）：RailGo 车次信息 + 时刻表入口。
 
-    v2.2 修复两处体验问题：
-    1. 车次类别现在带速度后缀（如「快速旅客列车 (160km/h)」），
-       旧代码拿整串去比对白名单，导致普速列车被误判成「不查询 12306」；
-       现在先剥掉括号里的速度段再判断，并改成关键字匹配。
-    2. 「查看时刻表」按钮只在真正有数据时才可点，避免点了弹「还没有可查询的车次」。
+    数据源按 `train_info.query(train, prefer)` 走——默认先 RailGo（字段全），
+    失败自动退 12306；结果异步取回，不阻塞解码。展示内容：
+
+        ① 始发 → 终到（带车次）
+        ② 等级 · 担当局+担当段（全称直接拼接，如「南昌局南昌客运段」）
+        ③ 配属段 / 车辆段 · 车型
+        ④ 来源（RailGo / 12306）与时刻表提示
+
+    「查看时刻表」按钮在拿到 stops 后可用；时刻表同样来自这份查询结果
+    （RailGo 的 timetable 或 12306 兜底），不再单独发第二次请求。
     """
 
     doubleClicked = Signal()
-    openRequested = Signal()
-
-    #: 可查 12306 的（客运列车）。'旅客' 覆盖「旅客列车 / 旅客快车 / 旅客慢车」等写法，
-    #: '特快' 用于「直达特快列车」（Z 字头，不带“旅客”二字）
-    QUERY_KEYWORDS = ('旅客', '动车组', '城际', '市郊', '旅游', '普速', '特快')
-    #: 明确不查的（货运、路用、回送、单机、动检、动货等）
-    NOT_QUERY = ('快运', '货运', '货物', '检测', '确认', '回送', '单机', '补机',
-                 '小运转', '摘挂', '超限', '军用', '轨道车', '路用', '救援',
-                 '试运行', '自备', '班列')
-    #: 「直达」两类都有：直达特快列车是客运（可查），始发/煤炭/石油/空车/技术直达都是货运
-    DIRECT_RE = ('特快',)
 
     def __init__(self):
         super().__init__()
-        self._cache: Dict[str, dict] = {}  # {trainCode: result}
-        self._worker: Optional[TrainQueryWorker] = None
+        self._cache: Dict[str, dict] = {}  # {train: train_info.query 结果}
+        self._worker: Optional[TrainFullQueryWorker] = None
         self._lastQueryCode = ''
         self._currentData: Optional[dict] = None
-        self._online = True
 
-        # 横向排：左边一行结论 + 一行说明，右边按钮——整行宽度都用得上
+        # 横向排：左边结论 + 说明，右边按钮——整行宽度都用得上
         outer = QHBoxLayout(self)
         outer.setContentsMargins(spx(10), spx(8), spx(10), spx(6))
         outer.setSpacing(spx(10))
 
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(spx(3))
-
+        col.setSpacing(spx(2))
         col.addStretch(1)
+
         self.titleLabel = QLabel('等待详细报文...')
         self.titleLabel.setWordWrap(True)
         self.titleLabel.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.titleLabel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
-        col.addWidget(self.titleLabel, 0, Qt.AlignLeft)
+        self.titleLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        col.addWidget(self.titleLabel)
+
+        self.dutyLabel = QLabel('')
+        self.dutyLabel.setWordWrap(True)
+        self.dutyLabel.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        col.addWidget(self.dutyLabel)
+
+        self.ownerLabel = QLabel('')
+        self.ownerLabel.setWordWrap(True)
+        self.ownerLabel.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        col.addWidget(self.ownerLabel)
 
         self.hintLabel = QLabel('')
         self.hintLabel.setWordWrap(True)
-        self.hintLabel.setStyleSheet(f'color: {CLR("faint")}; font-size: {spx(10)}px;')
         self.hintLabel.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         col.addWidget(self.hintLabel)
         col.addStretch(1)
         outer.addLayout(col, 1)
 
         self.openBtn = QPushButton('查看时刻表')
-        self.openBtn.setToolTip('双击卡片也可打开')
+        self.openBtn.setToolTip('双击卡片也可打开（RailGo 时刻表 / 12306 兜底）')
         self.openBtn.setEnabled(False)
         self.openBtn.setMinimumWidth(spx(96))
         self.openBtn.clicked.connect(self._openTimetable)
         outer.addWidget(self.openBtn, 0, Qt.AlignVCenter)
-        self._setState('等待详细报文...', 'idle')
+        self._reset()
 
     # ------------------------------------------------------------------
     # 状态样式
     # ------------------------------------------------------------------
-    def _setState(self, text: str, kind: str = 'idle', hint: str = '',
-                  canOpen: bool = False):
-        """统一更新卡片文字/配色/按钮可用性。"""
+    def _setLabels(self, title: str, duty: str = '', owner: str = '',
+                   hint: str = '', kind: str = 'idle'):
+        """统一更新卡片文字/配色/按钮可用性（kind: idle/info/ok/warn/err）。"""
         colors = {
-            'idle': (CLR('faint'), CLR('panel2')),
-            'info': (CLR('dim'), CLR('panel2')),
-            'ok': (CLR('ok'), CLR('panel2')),
-            'warn': (CLR('warn'), CLR('panel2')),
-            'err': (CLR('err'), CLR('panel2')),
+            'idle': CLR('faint'), 'info': CLR('dim'), 'ok': CLR('ok'),
+            'warn': CLR('warn'), 'err': CLR('err'),
         }
-        fg, bg = colors.get(kind, colors['idle'])
-        weight = 'bold' if kind in ('ok', 'err') else 'normal'
-        self.titleLabel.setText(text)
+        fg = colors.get(kind, colors['idle'])
+        weight = 'bold' if kind in ('ok', 'err', 'info') else 'normal'
+        self.titleLabel.setText(title)
         self.titleLabel.setStyleSheet(
-            f'color: {fg}; font-size: {spx(12)}px; font-weight: {weight};'
-            f'padding: {spx(4)}px; background-color: {bg}; border-radius: 3px;')
+            f'color: {fg}; font-size: {spx(13)}px; font-weight: {weight};'
+            ' background: transparent;')
+        self.dutyLabel.setText(duty)
+        self.dutyLabel.setStyleSheet(
+            f'color: {CLR("text")}; font-size: {spx(11)}px;'
+            ' background: transparent;')
+        self.dutyLabel.setVisible(bool(duty))
+        self.ownerLabel.setText(owner)
+        self.ownerLabel.setStyleSheet(
+            f'color: {CLR("dim")}; font-size: {spx(10)}px;'
+            ' background: transparent;')
+        self.ownerLabel.setVisible(bool(owner))
         self.hintLabel.setText(hint)
-        self.openBtn.setEnabled(bool(canOpen))
-        self.openBtn.setText('查看时刻表' if canOpen else '暂无可查时刻表')
+        self.hintLabel.setStyleSheet(
+            f'color: {CLR("faint")}; font-size: {spx(10)}px;'
+            ' background: transparent;')
 
-    # ------------------------------------------------------------------
-    # 类别判断
-    # ------------------------------------------------------------------
-    @staticmethod
-    def baseCategory(category: str) -> str:
-        """去掉类别后面的速度/备注括号，如「快速旅客列车 (160km/h)」→「快速旅客列车」。"""
-        import re as _re
-        return _re.sub(r'\s*[（(][^）)]*[）)]\s*$', '', str(category or '')).strip()
-
-    def isQueryable(self, category: str) -> bool:
-        """该类别是否可能出现在 12306（客运列车）。"""
-        base = self.baseCategory(category)
-        if not base or base in ('未知', '----'):
-            return False
-        if any(k in base for k in self.NOT_QUERY):
-            return False
-        # 「直达」需再看一眼：直达特快列车可查，其余（始发/煤炭/石油/空车/技术直达）为货运
-        if '直达' in base and not any(k in base for k in self.DIRECT_RE):
-            return False
-        return any(k in base for k in self.QUERY_KEYWORDS)
+    def _reset(self, title: str = '等待详细报文...',
+               hint: str = '收到长报文后自动查询车次信息'):
+        self._currentData = None
+        self._setLabels(title, hint=hint)
+        self.openBtn.setEnabled(False)
+        self.openBtn.setText('暂无可查时刻表')
 
     # ------------------------------------------------------------------
     # 交互
@@ -290,95 +209,103 @@ class TrainQueryPanel(QWidget):
             self.doubleClicked.emit()
 
     def _openTimetable(self):
-        if self._currentData:
-            dlg = TimetableDialog(self._currentData, self)
+        if self._currentData and self._currentData.get('stops'):
+            dlg = TimetableDialog(timetable_data(self._currentData), self)
             dlg.exec()
-        elif not self._online:
-            QMessageBox.information(self, '提示', '时刻表查询需要连接互联网。')
         else:
             QMessageBox.information(
                 self, '提示', '还没有可查询的时刻表。\n\n'
-                '只有客运列车（旅客列车、动车组、城际、市郊等）才会到 12306 查询；'
-                '货运、路用、回送等类别不提供时刻表。')
+                '收到长报文后会自动查询车次（RailGo 优先，失败退 12306）；'
+                '货运、路用、回送等未收录车次没有时刻表数据。')
 
     # ------------------------------------------------------------------
     # 数据入口
     # ------------------------------------------------------------------
-    def onTrainDecoded(self, d: dict):
-        """当解码到详细车次信息时触发 12306 查询。"""
+    def onTrainDecoded(self, d: dict, prefer: str = 'auto'):
+        """当解码到详细车次信息时触发异步查询（RailGo 优先，12306 兜底）。"""
         if not d.get('isDetailed'):
-            self._currentData = None
-            self._setState('等待详细报文...', 'idle',
-                           '收到长报文后可查时刻表')
+            self._reset()
             return
 
         train = str(d.get('train', '') or '')
-        category = str(d.get('category', '') or '')
-        if not train or train == '----':
-            self._setState('等待车次号...', 'idle')
+        if not train or train in ('----', '未知'):
+            self._reset('等待车次号...', '收到详细报文后自动查询')
             return
 
-        base_cat = self.baseCategory(category)
-
-        # 非客运类别：说明原因，按钮置灰（不再点了才弹提示）
-        if not self.isQueryable(category):
-            self._currentData = None
-            self._setState(f'{base_cat or category}\n不提供 12306 时刻表', 'warn',
-                           '货运 / 路用 / 回送等类别不在 12306 售票范围')
-            return
-
+        # 已有结果（成功或失败都缓存）：直接显示，避免每帧重复请求
         if train in self._cache:
-            self._currentData = self._cache[train]
-            self._displayResult(self._currentData)
+            self._displayResult(self._cache[train])
             return
-
         if self._lastQueryCode == train and self._worker and self._worker.isRunning():
             return
 
         self._lastQueryCode = train
-        self._setState(f'查询中: {train} ...', 'info', '正在请求 12306')
+        self._currentData = None
+        self._setLabels(f'查询中: {train} …',
+                        hint='正在请求车次数据（RailGo 优先，失败退 12306）',
+                        kind='info')
+        self.openBtn.setEnabled(False)
+        self.openBtn.setText('暂无可查时刻表')
 
-        dateStr = datetime.now().strftime('%Y%m%d')
-        self._worker = TrainQueryWorker(train, dateStr)
+        self._worker = TrainFullQueryWorker(train, prefer or 'auto')
         _keepWorker(self._worker)      # 防止旧线程在运行中被回收
-        self._worker.resultReady.connect(self._onQueryResult)
-        self._worker.queryFailed.connect(self._onQueryFailed)
+        self._worker.ready.connect(lambda res, t=train: self._onQueryResult(t, res))
         self._worker.start()
 
-    def _onQueryResult(self, data: dict):
-        code = data.get('trainCode', '')
-        self._cache[code] = data
-        if len(self._cache) > 20:
+    def _onQueryResult(self, train: str, res: dict):
+        # 失败也缓存（负缓存）：同一车次不反复打网络，换个车次再查
+        self._cache[train] = res or {}
+        while len(self._cache) > 20:
             oldest = next(iter(self._cache))
             del self._cache[oldest]
-        self._currentData = data
-        self._displayResult(data)
+        self._displayResult(self._cache[train])
 
-    def _onQueryFailed(self, err: str):
-        self._online = not ('网络' in err or 'URLError' in err)
-        if not self._online:
-            self._setState('⚠ 此功能需连接互联网使用', 'err', '联网后重新收到详细报文即会重查')
-        else:
-            self._setState(f'⚠ {err}', 'err', '12306 接口暂不可用，可稍后重试')
+    def _displayResult(self, res: dict):
+        res = res or {}
+        disp = train_display(res)
+        self._currentData = res if res.get('stops') else None
+        canOpen = bool(res.get('stops'))
+        self.openBtn.setEnabled(canOpen)
+        self.openBtn.setText('查看时刻表' if canOpen else '暂无可查时刻表')
 
-    def _displayResult(self, data: dict):
-        startSt = data.get('startStation', '')
-        endSt = data.get('endStation', '')
-        startTime = data.get('startTime', '')
-        endTime = data.get('endTime', '')
-        code = data.get('trainCode', '')
+        if not disp['ok']:
+            err = disp['error'] or 'RailGo / 12306 均未返回数据'
+            self._setLabels(f'未查询到 {disp["train"] or "该车次"} 的车次信息',
+                            hint=f'{err} · 不影响解码与地图定位', kind='warn')
+            return
 
-        self._setState(f'{startSt}({startTime})\n→ {code} →\n{endSt}({endTime})',
-                       'ok', '双击查看详细时刻表', canOpen=True)
+        title = disp['range_text'] or disp['train'] or '车次信息'
+        if disp['range_text'] and disp['train']:
+            title = f'{disp["train"]}  {disp["range_text"]}'
+        if disp['start_time'] or disp['end_time']:
+            title += '  (%s / %s)' % (disp['start_time'] or '--:--',
+                                      disp['end_time'] or '--:--')
+        duty_bits = []
+        if disp['grade']:
+            duty_bits.append(disp['grade'])
+        if disp['duty']:
+            duty_bits.append('担当 ' + disp['duty'])
+        owner_bits = []
+        if disp['owner']:
+            owner_bits.append('配属 ' + disp['owner'])
+        if disp['model']:
+            owner_bits.append('车型 ' + disp['model'])
+        hint = '来源 %s' % source_name(disp['source'])
+        hint += ' · 双击查看详细时刻表' if canOpen else ' · 未返回时刻表数据'
+        self._setLabels(title, duty=' · '.join(duty_bits),
+                        owner=' · '.join(owner_bits), hint=hint, kind='ok')
 
 
 class LocoInfoPanel(QWidget):
-    """机车信息卡片（v3.0）：车型 + **配属局段** + 参数摘要，入口进配属查询。
+    """机车信息卡片：车型 + **配属单位全称** + 制造厂全称 + 参数摘要。
 
     数据来自两处，各有分工：
         cr_lbj/data/loco_info.py     报文「机车代号」→ 车型名/类型/轴式/简介
         cr_lbj/data/loco_roster.py   型号 + 机车号 → 配属局段（号段表命中）
-    后者是 v3.0 新增的「车次/机车配属查询」的数据基础，同一套 CSV 也给安卓端用。
+
+    v3.1.1：号段表里的配属是简称（`上局沪段`），卡片按用户要求显示全称
+    （`上海局上海机务段`），制造厂同理（`中车株洲电力机车有限公司`）；
+    配属与制造厂各占一行、自动换行，不再截断拼接。
     """
 
     detailRequested = Signal(dict)
@@ -470,17 +397,27 @@ class LocoInfoPanel(QWidget):
             f'color: {CLR("ok") if (info or hit) else CLR("warn")};'
             f' font-size: {spx(12)}px; font-weight: bold;')
 
-        # ---- 配属（v3.0）：命中号段 → 局段 + 区间；否则说明原因 ----
+        # ---- 配属（v3.1.1）：命中号段 → 全称局段 + 号段 + 全称制造厂（分两行） ----
+        specs = {}
+        try:
+            specs = loco_roster.specs_for(roster.get('model') or model_name) or {}
+        except Exception:
+            specs = {}
+        maker_raw = (str(roster.get('maker') or '').strip()
+                     or str((info or {}).get('maker') or '').strip()
+                     or str(specs.get('maker') or '').strip())
         if hit:
-            depot = str(roster.get('depot') or '').strip() or '（原表未标注配属）'
-            note = ('号段 %s' % roster.get('range')) if roster.get('range') else ''
-            maker = str(roster.get('maker') or '').strip()
-            bits = [depot]
-            if note:
-                bits.append(note)
+            depot = depot_names.full_depot(str(roster.get('depot') or '').strip())
+            depot = depot or '（原表未标注配属）'
+            range_txt = str(roster.get('range') or '').strip()
+            head = '配属：' + depot
+            if range_txt:
+                head += '（号段 %s）' % range_txt
+            maker = depot_names.full_maker(maker_raw)
+            lines = [head]
             if maker:
-                bits.append(maker)
-            self.depotLabel.setText('配属：' + ' · '.join(bits))
+                lines.append('制造厂：' + maker)
+            self.depotLabel.setText('\n'.join(lines))
             self.depotLabel.setStyleSheet(
                 f'color: {CLR("ok")}; font-size: {spx(10)}px; font-weight: bold;')
         elif roster.get('ok'):
@@ -495,17 +432,14 @@ class LocoInfoPanel(QWidget):
                 f'color: {CLR("faint")}; font-size: {spx(10)}px;')
 
         # ---- 参数摘要：编码器给的简介优先，其次号段表的 specs ----
-        specs = {}
-        try:
-            specs = loco_roster.specs_for(roster.get('model') or model_name) or {}
-        except Exception:
-            specs = {}
+        maker_full = depot_names.full_maker(maker_raw)
         if info:
             self.detailLabel.setText(
-                f"{info.get('type', '')} | {info.get('maker', '')} | {info.get('axle', '')}")
+                f"{info.get('type', '')} | {maker_full or info.get('maker', '')}"
+                f" | {info.get('axle', '')}")
         elif specs:
             self.detailLabel.setText(' | '.join(x for x in (
-                str(specs.get('type') or ''), str(specs.get('maker') or ''),
+                str(specs.get('type') or ''), maker_full,
                 str(specs.get('axle') or '')) if x))
         else:
             self.detailLabel.setText(f'代号: {loco_code}' if loco_code else '')

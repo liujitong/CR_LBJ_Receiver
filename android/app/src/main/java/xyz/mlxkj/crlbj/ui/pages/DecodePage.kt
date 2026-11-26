@@ -35,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import xyz.mlxkj.crlbj.data.LocoRoster
 import xyz.mlxkj.crlbj.data.TrainInfoClient
 import xyz.mlxkj.crlbj.engine.DecodeEvent
+import xyz.mlxkj.crlbj.engine.StatusFrame
 import xyz.mlxkj.crlbj.ui.components.Chip
 import xyz.mlxkj.crlbj.ui.components.Divider
 import xyz.mlxkj.crlbj.ui.components.EmptyState
@@ -78,10 +81,13 @@ fun DecodePage(
     val locoInfos by vm.locoInfos.collectAsStateWithLifecycle()
     val p = pal()
 
-    // RSSI 历史环形缓冲（轮询帧驱动，最多 240 点 ≈ 36s）
+    // 信号历史环形缓冲（轮询帧驱动，最多 240 点 ≈ 36s）
     // 用不可变快照驱动重组：ArrayDeque 本身不是 snapshot 状态，改它不会触发重绘。
     val rssi = remember { ArrayDeque<Float>(240) }
     var rssiSnapshot by remember { mutableStateOf(FloatArray(0)) }
+    // 频谱瀑布数据：每帧 32 个 bin 存一行（最多 80 行 ≈ 12s），弹层关掉时只留内存不渲染
+    val spectrumRows = remember { ArrayDeque<FloatArray>(80) }
+    var spectrumSnapshot by remember { mutableStateOf<List<FloatArray>>(emptyList()) }
     LaunchedEffect(Unit) {
         var lastSeq = -1
         while (true) {
@@ -91,10 +97,17 @@ fun DecodePage(
                 rssi.addLast(f.rssiDb)
                 while (rssi.size > 240) rssi.removeFirst()
                 rssiSnapshot = rssi.toFloatArray()
+                if (f.spectrum.isNotEmpty()) {
+                    spectrumRows.addLast(f.spectrum.copyOf())
+                    while (spectrumRows.size > 80) spectrumRows.removeFirst()
+                    spectrumSnapshot = spectrumRows.toList()
+                }
             }
             kotlinx.coroutines.delay(150)
         }
     }
+    /** 信号瀑布弹层开关：关掉后不占位（页面里不再有常驻图形） */
+    var signalSheet by remember { mutableStateOf(false) }
 
     var detail by remember { mutableStateOf<DecodeEvent?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -111,6 +124,8 @@ fun DecodePage(
                     running = running,
                     lastEventTs = latest?.timestamp,
                     onToggle = { vm.toggleStartStop() },
+                    // v3.1.1：点胶囊打开「信号瀑布」小弹层（替代原先常驻的频谱图）
+                    onOpen = { signalSheet = true },
                 )
             },
         )
@@ -134,72 +149,11 @@ fun DecodePage(
 
         Spacer(Modifier.height(Dim.gap))
 
-        // ---- 信号强度卡 ----
-        SectionCard(
-            title = "信号",
-            trailing = {
-                val f = status
-                if (f != null) {
-                    val tone = when {
-                        f.gateState >= 2 -> Tone.Ok
-                        f.gateState == 1 -> Tone.Warn
-                        else -> Tone.Neutral
-                    }
-                    Chip(
-                        when (f.gateState) {
-                            0 -> "门控关闭"; 1 -> "待命"; 2 -> "有信号"
-                            3 -> "保持"; 4 -> "旁路"; else -> "未知"
-                        },
-                        tone,
-                    )
-                }
-            },
-        ) {
-            Box(Modifier.fillMaxWidth().height(64.dp)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val gateDb = -55f
-                    fun dbToY(db: Float): Float =
-                        size.height * (1f - ((db + 140f) / 90f).coerceIn(0f, 1f))
-
-                    // 门限线
-                    drawLine(
-                        p.warn.copy(alpha = 0.75f),
-                        Offset(0f, dbToY(gateDb)),
-                        Offset(size.width, dbToY(gateDb)),
-                        1.5f,
-                    )
-                    val n = rssiSnapshot.size
-                    if (n == 0) {
-                        drawLine(
-                            p.textTertiary.copy(alpha = 0.5f),
-                            Offset(0f, dbToY(-140f)),
-                            Offset(size.width, dbToY(-140f)),
-                            2f,
-                        )
-                    } else {
-                        val step = if (n > 1) size.width / (n - 1) else size.width
-                        rssiSnapshot.forEachIndexed { i, db ->
-                            val x = size.width - (n - 1 - i) * step
-                            val on = db >= gateDb
-                            drawLine(
-                                if (on) p.accent else p.spectrum.copy(alpha = 0.55f),
-                                Offset(x, dbToY(db)),
-                                Offset(x, size.height),
-                                if (n > 1) 2f else 4f,
-                            )
-                        }
-                    }
-                }
-                status?.let {
-                    Text(
-                        "%.1f dB".format(Locale.US, it.rssiDb),
-                        color = p.textSecondary, fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.align(Alignment.TopStart),
-                    )
-                }
-            }
-        }
+        // ---- 信号摘要条（v3.1.1：不再常驻画图；点它或点顶部胶囊看「信号瀑布」）----
+        SignalStrip(
+            status = status,
+            onClick = { signalSheet = true },
+        )
 
         Spacer(Modifier.height(Dim.gap))
 
@@ -263,6 +217,253 @@ fun DecodePage(
             )
         }
     }
+
+    // ---- 信号瀑布小弹层（尺寸小、不挡主要内容；关掉即恢复原布局）----
+    if (signalSheet) {
+        SignalWaterfallSheet(
+            rssi = rssiSnapshot,
+            spectrum = spectrumSnapshot,
+            status = status,
+            running = running,
+            thresholdDb = settings.rssiThresholdDb,
+            sourceLabel = sourceLabelOf(settings.sourceType),
+            onToggle = { vm.toggleStartStop() },
+            onDismiss = { signalSheet = false },
+        )
+    }
+}
+
+/**
+ * 信号摘要条：一行显示 RSSI + 门控 + 入口提示（替代 v3.0 的常驻频谱画布）。
+ * 点整条或点顶部状态胶囊都会打开 [SignalWaterfallSheet]。
+ */
+@Composable
+private fun SignalStrip(
+    status: StatusFrame?,
+    onClick: () -> Unit,
+) {
+    val p = pal()
+    val f = status
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(p.surfaceAlt.copy(alpha = 0.55f))
+            .border(1.dp, p.border, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("信号", color = p.textTertiary, fontSize = 11.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            f?.let { "%.1f dB".format(Locale.US, it.rssiDb) } ?: "— dB",
+            color = p.textSecondary, fontSize = 14.sp,
+            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.width(8.dp))
+        f?.let {
+            val tone = when {
+                it.gateState >= 2 -> Tone.Ok
+                it.gateState == 1 -> Tone.Warn
+                else -> Tone.Neutral
+            }
+            Chip(gateLabel(it.gateState), tone)
+        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            "瀑布 ›", color = p.accent, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+/**
+ * 信号瀑布弹层（ModalBottomSheet，高度约 320dp，只挡下半屏）：
+ *  · 优先画窄带频谱瀑布（32 bin × 最近若干帧，颜色越亮能量越强）；
+ *  · 频谱还没起伏（或驱动没给频谱）时退回 RSSI 历史色条 + 门限虚线；
+ *  · 底部保留「开始/停止接收」，不削弱原胶囊的快捷操作。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SignalWaterfallSheet(
+    rssi: FloatArray,
+    spectrum: List<FloatArray>,
+    status: StatusFrame?,
+    running: Boolean,
+    thresholdDb: Double,
+    sourceLabel: String,
+    onToggle: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val p = pal()
+    val gateDb = thresholdDb.toFloat()
+    // 频谱是否真的有起伏：全平坦（驱动没填/无信号）就用 RSSI 色条
+    val spectrumRange = remember(spectrum) {
+        if (spectrum.size < 2) 0f
+        else {
+            val mn = spectrum.minOf { row -> row.min() }
+            val mx = spectrum.maxOf { row -> row.max() }
+            mx - mn
+        }
+    }
+    val useSpectrum = spectrumRange > 2f
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = p.surface,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Dim.pagePad)
+                .padding(bottom = 20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("信号瀑布", color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                status?.let {
+                    val tone = when {
+                        it.gateState >= 2 -> Tone.Ok
+                        it.gateState == 1 -> Tone.Warn
+                        else -> Tone.Neutral
+                    }
+                    Chip(gateLabel(it.gateState), tone)
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    status?.let { "%.1f dB".format(Locale.US, it.rssiDb) } ?: "— dB",
+                    color = p.textSecondary, fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "$sourceLabel · 每 150 ms 刷新 · " +
+                    if (useSpectrum) "频谱 ${spectrum.firstOrNull()?.size ?: 0} bin × ${spectrum.size} 帧"
+                    else "RSSI ${rssi.size} 点（约 ${(rssi.size * 150 / 1000)} s）",
+                color = p.textTertiary, fontSize = 11.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(if (useSpectrum) 160.dp else 140.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(p.bg)
+                    .border(1.dp, p.border, RoundedCornerShape(8.dp)),
+            ) {
+                Canvas(Modifier.fillMaxSize().padding(4.dp)) {
+                    if (useSpectrum) {
+                        // 旧帧在上、新帧在下；颜色 = 相对能量热力
+                        val rows = spectrum.takeLast(64)
+                        val mn = rows.minOf { r -> r.min() }
+                        val mx = rows.maxOf { r -> r.max() }
+                        val span = (mx - mn).coerceAtLeast(0.001f)
+                        val rowH = size.height / rows.size
+                        val bins = rows.first().size
+                        val colW = size.width / bins
+                        rows.forEachIndexed { ri, row ->
+                            val y = ri * rowH
+                            row.forEachIndexed { bi, v ->
+                                val t = ((v - mn) / span).coerceIn(0f, 1f)
+                                drawRect(
+                                    heatColor(t, p.bg, p.spectrum, p.warn, p.accent),
+                                    topLeft = Offset(bi * colW, y),
+                                    size = Size(colW + 0.5f, rowH + 0.5f),
+                                )
+                            }
+                        }
+                    } else {
+                        // RSSI 色条：低于门限用蓝灰，高门限用 CR 红/绿
+                        val n = rssi.size
+                        fun dbToY(db: Float): Float =
+                            size.height * (1f - ((db + 140f) / 90f).coerceIn(0f, 1f))
+                        // 门限虚线
+                        var x = 0f
+                        while (x < size.width) {
+                            drawLine(
+                                p.warn.copy(alpha = 0.65f),
+                                Offset(x, dbToY(gateDb)),
+                                Offset((x + 8f).coerceAtMost(size.width), dbToY(gateDb)),
+                                1.2f,
+                            )
+                            x += 14f
+                        }
+                        if (n == 0) {
+                            drawLine(
+                                p.textTertiary.copy(alpha = 0.5f),
+                                Offset(0f, dbToY(-140f)),
+                                Offset(size.width, dbToY(-140f)),
+                                2f,
+                            )
+                        } else {
+                            val step = if (n > 1) size.width / (n - 1) else size.width
+                            rssi.forEachIndexed { i, db ->
+                                val barX = size.width - (n - 1 - i) * step
+                                val on = db >= gateDb
+                                drawLine(
+                                    if (on) p.accent else p.spectrum.copy(alpha = 0.55f),
+                                    Offset(barX, dbToY(db)),
+                                    Offset(barX, size.height),
+                                    if (n > 1) 2f else 4f,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (useSpectrum) "颜色越亮能量越强；红色 = 当前信号最强 bin（门限 ${"%.0f".format(Locale.US, gateDb)} dB 仅对 RSSI 判定）"
+                else "红/绿 = 超过门限 ${"%.0f".format(Locale.US, gateDb)} dB，蓝色 = 低于门限；虚线为门限",
+                color = p.textTertiary, fontSize = 10.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onToggle,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (running) p.surfaceAlt else p.accent,
+                        contentColor = if (running) p.text else p.onAccent,
+                    ),
+                ) {
+                    Text(
+                        if (running) "■  停止接收" else "▶  开始接收",
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.height(42.dp),
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = p.surfaceAlt, contentColor = p.text),
+                ) { Text("关闭", fontSize = 13.sp) }
+            }
+        }
+    }
+}
+
+/** 门控状态文案（解码页信号条 / 瀑布弹层共用） */
+private fun gateLabel(gate: Int): String = when (gate) {
+    0 -> "门控关闭"; 1 -> "待命"; 2 -> "有信号"; 3 -> "保持"; 4 -> "旁路"; else -> "未知"
+}
+
+/** 热力色阶：低=底色，中=蓝（频谱），高=黄，最高=CR 红 */
+private fun heatColor(
+    t: Float,
+    low: androidx.compose.ui.graphics.Color,
+    mid: androidx.compose.ui.graphics.Color,
+    high: androidx.compose.ui.graphics.Color,
+    top: androidx.compose.ui.graphics.Color,
+): androidx.compose.ui.graphics.Color = when {
+    t < 0.35f -> lerp(low, mid, t / 0.35f)
+    t < 0.7f -> lerp(mid, high, (t - 0.35f) / 0.35f)
+    else -> lerp(high, top, (t - 0.7f) / 0.3f)
 }
 
 /** 当前解码大卡：车次大号 + 方向方块 + 速度/公里标/线路/机车/时间 + 自动查询的车次/配属信息 */

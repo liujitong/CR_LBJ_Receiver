@@ -168,10 +168,14 @@ class HistoryDb:
             return 'failed'
 
     def queryRecent(self, limit: int = 1000) -> List[Dict[str, Any]]:
-        """查询最近的记录（含 id 供详情查询）。"""
+        """查询最近的记录（含 id 供详情查询）。
+
+        v3.1.1：多带 latitude / longitude，历史记录对话框要显示「有坐标」标记。
+        """
         sql = """
         SELECT id, timeStr, train, direction, speed, position, route, loco, category,
-               isDetailed, rawBcd, rawAddr, rawFunc, etaTime, etaDistanceKm
+               isDetailed, rawBcd, rawAddr, rawFunc, etaTime, etaDistanceKm,
+               latitude, longitude
         FROM records ORDER BY id DESC LIMIT ?
         """
         try:
@@ -233,11 +237,35 @@ class HistoryDb:
         except Exception:
             return None
 
+    def deleteByIds(self, ids: List[int]) -> int:
+        """按 id 批量删除记录，返回实际删除条数（v3.1.1 历史记录对话框用）。"""
+        clean = [int(i) for i in (ids or []) if str(i).strip().isdigit()]
+        if not clean:
+            return 0
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                marks = ','.join(['?'] * len(clean))
+                cur = conn.execute('DELETE FROM records WHERE id IN (%s)' % marks, clean)
+                return int(cur.rowcount or 0)
+        except Exception:
+            return 0
+
     def clear(self) -> bool:
+        """清空全部历史记录。
+
+        注意 VACUUM 不能放在 DELETE 开启的事务里（Python sqlite3 默认 deferred
+        隔离级别，DELETE 会隐式开事务），否则 3.14 下直接抛
+        `cannot VACUUM from within a transaction`；这里先提交再单独 VACUUM，
+        VACUUM 失败也不影响“已删空”这个结果。
+        """
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("DELETE FROM records")
-                conn.execute("VACUUM")
+                conn.commit()
+                try:
+                    conn.execute("VACUUM")
+                except Exception:
+                    pass
             return True
         except Exception:
             return False

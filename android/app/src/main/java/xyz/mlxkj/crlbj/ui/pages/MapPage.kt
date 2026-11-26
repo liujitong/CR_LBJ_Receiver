@@ -24,11 +24,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -125,6 +130,13 @@ fun MapPage(vm: ReceiverViewModel) {
     var pendingCenter by remember { mutableStateOf(false) }
     /** 底图瓦片连续失败（多半是网络到不了该图源）→ 底部横幅提示换底图 */
     var tileFail by remember { mutableStateOf(false) }
+    /**
+     * 页面底图是否已与 `settings.mapBase` 一致（= applyConfig 已真正生效）。
+     * 页面是 file:// 直接加载的，启动瞬间按自身默认底图（高德）渲染并可能回报
+     * onLayers；若直接落盘就会把用户在设置里选的底图冲掉（v3.1.1 修的就是这个）。
+     * 所以只有确认一致后才接受页面回报。
+     */
+    val pageSynced = remember { mutableStateOf(false) }
 
     // 居中到本机位置（WGS-84）。centerLatLng 契约：居中 + 停止自动跟随 + 页面 toast；
     // 接口未就绪时静默跳过（返回 no-api），原生侧仍把 mapFollow 落盘为 false。
@@ -189,11 +201,14 @@ fun MapPage(vm: ReceiverViewModel) {
         }
     }
 
-    // ---- 页面加载完成后下发配置 ----
+    // ---- 页面就绪：重置同步态 + 注入移动端 CSS + 取图层清单（配置由下一个 effect 统一下发）----
     LaunchedEffect(ready) {
-        if (!ready) return@LaunchedEffect
+        if (!ready) {
+            // 页面重载/离开：之前的「已同步」不再成立，回报一律先不落盘
+            pageSynced.value = false
+            return@LaunchedEffect
+        }
         val w = web ?: return@LaunchedEffect
-        w.evaluateJavascript(applyConfigJs(settings), null)
         // 页面自带的图层/提示层在手机屏上不合适，统一收进本页的胶囊与面板：
         //  · #panel：右上角图层选择面板（手机屏太小，且会压到状态栏）
         //  · #hint ：瓦片全灭时的整屏提示（文案指向已隐藏的 panel，改由本页横幅提示）
@@ -207,17 +222,23 @@ fun MapPage(vm: ReceiverViewModel) {
         w.evaluateJavascript("JSON.stringify(window.LBJ.layers())") { json ->
             layers = parseLayers(json)
         }
-        Log.i(TAG, "已下发地图配置 base=${settings.mapBase} rail=${settings.mapRail}")
+        Log.i(TAG, "页面就绪，等待下发配置 base=${settings.mapBase} rail=${settings.mapRail}")
     }
 
-    // ---- 设置页改了地图项 → 重新下发配置（幂等，不会触发回环）----
+    // ---- 首次进入 / 设置页改了地图项 → 全量下发配置（幂等，不会触发回环）----
+    // 依赖里带 ready：页面重载后（ready 由 false→true）会重新下发，保证「杀进程重启后
+    // 再进地图仍是用户选的底图」。
     LaunchedEffect(
         ready, settings.mapBase, settings.mapRail, settings.mapRailOpacity,
         settings.mapNight, settings.mapTdtKey, settings.mapZoom,
-        settings.mapCenterLat, settings.mapCenterLng,
+        settings.mapCenterLat, settings.mapCenterLng, settings.mapFollow,
     ) {
         if (!ready) return@LaunchedEffect
-        web?.evaluateJavascript(applyConfigJs(settings), null)
+        val w = web ?: return@LaunchedEffect
+        // 配置刚改，页面还没切过去：先暂停接受图层回报，等 status 确认 base 后再放开
+        pageSynced.value = false
+        w.evaluateJavascript(applyConfigJs(settings), null)
+        Log.i(TAG, "已下发地图配置 base=${settings.mapBase} rail=${settings.mapRail}")
     }
 
     // ---- 列车坐标变化 → 推给页面（WGS-84 原值，不做任何坐标转换）----
@@ -242,6 +263,20 @@ fun MapPage(vm: ReceiverViewModel) {
                     } ?: raw?.take(120)))
                 }
                 if (st != null) {
+                    // 页面状态与设置一致（底图 + 实际生效铁路图层）→ applyConfig 已真正生效，
+                    // 此后才接受页面图层回报。rail 也要比：偏移坐标系底图下页面会主动关铁路
+                    // （effective=off），只看 base 会在「用户把铁路选成不显示」时误判为已同步。
+                    val s = vm.settings.value
+                    val wantRail = if (st.coord != "wgs") "off" else s.mapRail
+                    val synced = st.base == s.mapBase && st.rail == wantRail
+                    if (synced && !pageSynced.value) {
+                        pageSynced.value = true
+                        Log.i(TAG, "页面配置已生效: base=${st.base} rail=${st.rail}（接受图层回报）")
+                    } else if (!synced && pageSynced.value) {
+                        pageSynced.value = false
+                        Log.i(TAG, "页面状态与设置不一致: page base=${st.base} rail=${st.rail} " +
+                            "want base=${s.mapBase} rail=$wantRail（暂停接受回报）")
+                    }
                     if (st.locked && vm.settings.value.mapFollow) {
                         vm.updateViewSettings(vm.settings.value.copy(mapFollow = false))
                     }
@@ -274,7 +309,17 @@ fun MapPage(vm: ReceiverViewModel) {
                 }.also { w ->
                     w.addJavascriptInterface(
                         HostBridge(
-                            onLayersJson = { json -> w.post { persistLayers(vm, json) } },
+                            onLayersJson = { json ->
+                                w.post {
+                                    // v3.1.1 关键门禁：页面还没按用户配置切过去时，
+                                    // 它回报的是自身默认底图（高德），落盘会冲掉用户设置。
+                                    if (pageSynced.value) {
+                                        persistLayers(vm, json)
+                                    } else {
+                                        Log.i(TAG, "忽略配置生效前的图层回报: $json")
+                                    }
+                                }
+                            },
                             onCacheArea = { json ->
                                 cacheAreaJob?.cancel()
                                 cacheAreaJob = scope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -366,6 +411,15 @@ fun MapPage(vm: ReceiverViewModel) {
             update = { /* 页面内容由 evaluateJavascript 驱动，无需重建 View */ },
         )
 
+        // ---- 浮层统一避让状态栏/刘海/挖孔：WebView 仍全屏铺满，只有浮层缩进来 ----
+        Box(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+                )
+        ) {
         // ---- 左上角状态胶囊（地图页无重顶栏，胶囊浮在图上）----
         Box(
             Modifier
@@ -445,41 +499,42 @@ fun MapPage(vm: ReceiverViewModel) {
             )
         }
 
-        // ---- 空态 / 载入失败（半透明卡片，居中，不遮成全白）----
+        // ---- 空态 / 载入失败（半透明卡片，居中；v3.1.1 统一弱化：12sp/11sp + 三级灰）----
         if (trains.isEmpty() || loadError != null) {
             Column(
                 Modifier
                     .align(Alignment.Center)
                     .padding(horizontal = 32.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(p.surface.copy(alpha = 0.92f))
-                    .border(1.dp, p.border, RoundedCornerShape(16.dp))
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(p.surface.copy(alpha = 0.90f))
+                    .border(1.dp, p.border, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 18.dp, vertical = 13.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (loadError != null) {
-                    Text("地图页加载失败", color = p.err, fontSize = 15.sp,
+                    Text("地图页加载失败", color = p.err, fontSize = 12.sp,
                         fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(6.dp))
-                    Text(loadError!!, color = p.textTertiary, fontSize = 12.sp)
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text(loadError!!, color = p.textTertiary, fontSize = 11.sp)
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         "重试",
                         color = p.accent,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         modifier = Modifier.clickable {
                             loadError = null
                             web?.loadUrl(MAP_URL)
                         },
                     )
                 } else {
-                    Text("暂无列车坐标", color = p.text, fontSize = 16.sp,
+                    Text("暂无列车坐标", color = p.textTertiary, fontSize = 12.sp,
                         fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         if (running) "已开始接收，等待含经纬度的长报文"
                         else "点状态胶囊「开始接收」，或到解码页一键开始",
-                        color = p.textSecondary, fontSize = 12.sp,
+                        color = p.textTertiary, fontSize = 11.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     )
                 }
             }
@@ -581,6 +636,7 @@ fun MapPage(vm: ReceiverViewModel) {
                 }
             }
         }
+        } // 浮层避让容器（WebView 铺满，不参与 insets）
     }
 
     // 图层/夜间面板必须**无条件调用**：如果直接写 `if (sheet) ModalBottomSheet(…)`，
@@ -923,19 +979,39 @@ private fun sourceLabel(s: ReceiverSettings): String = when (s.sourceType) {
     else -> s.sourceType
 }
 
-/** 把图层变化落盘（底图/铁路/透明度/夜间），不重建 DSP 链路 */
+/** 底图坐标系（来自页面图源清单）：偏移坐标系（gcj/bd）下页面会自动关闭 WGS-84 铁路图层 */
+private fun coordOfBase(baseId: String): String =
+    FALLBACK_LAYERS.firstOrNull { it.kind == "base" && it.id == baseId }?.coord ?: "wgs"
+
+/**
+ * 把页面回报的图层变化落盘（底图/铁路/透明度/夜间），不重建 DSP 链路。
+ *
+ * v3.1.1 防回退两道门：
+ *  ① 调用方（HostBridge）已用 pageSynced 过滤「配置生效前」的默认值回声；
+ *  ② 这里再做语义保护：偏移坐标系底图（高德/百度）下页面会**自动关闭** WGS-84
+ *     铁路图层并回报 rail=off，那不是用户的选择，不能写进设置（否则换回 OSM/
+ *     天地图后铁路图层永远恢复不了）。只有用户确实选 off 时才接受 off。
+ */
 private fun persistLayers(vm: ReceiverViewModel, json: String) {
     try {
         val o = JSONObject(json)
         val s = vm.settings.value
+        val reportedBase = o.optString("base", s.mapBase).ifEmpty { s.mapBase }
+        val reportedRail = o.optString("rail", s.mapRail).ifEmpty { s.mapRail }
+        val railAutoOff = reportedRail == "off" && s.mapRail != "off" &&
+            coordOfBase(reportedBase) != "wgs"
         val next = s.copy(
-            mapBase = o.optString("base", s.mapBase).ifEmpty { s.mapBase },
-            mapRail = o.optString("rail", s.mapRail).ifEmpty { s.mapRail },
+            mapBase = reportedBase,
+            mapRail = if (railAutoOff) s.mapRail else reportedRail,
             mapRailOpacity = if (o.has("railOpacity")) o.optDouble("railOpacity", s.mapRailOpacity)
             else s.mapRailOpacity,
             mapNight = if (o.has("night")) o.optBoolean("night", s.mapNight) else s.mapNight,
         )
-        if (next != s) vm.updateViewSettings(next)
+        if (next != s) {
+            Log.i(TAG, "图层回报落盘: base=${next.mapBase} rail=${next.mapRail} " +
+                "（page base=$reportedBase rail=$reportedRail）")
+            vm.updateViewSettings(next)
+        }
     } catch (t: Throwable) {
         Log.w(TAG, "图层回报解析失败: ${t.message}")
     }

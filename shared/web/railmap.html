@@ -13,12 +13,12 @@
   body.dark {
     --bg: #10161c; --card: #191c21cc; --text: #d8dee6; --dim: #8c97a3;
     --border: #2b3138; --accent: #F0604F; --warn: #F0A020; --ok: #4CAF7D;
-    --sub-bg: rgba(10,14,18,.78);
+    --sub-bg: rgba(8,12,16,.88);
   }
   body.light {
     --bg: #f4f6f8; --card: #ffffffdd; --text: #1b2026; --dim: #5a6572;
     --border: #d5dce4; --accent: #DA291C; --warn: #A96500; --ok: #2E7D53;
-    --sub-bg: rgba(255,255,255,.86);
+    --sub-bg: rgba(255,255,255,.94);
   }
   html, body { height: 100%; width: 100%; margin: 0; padding: 0;
     background: var(--bg); overflow: hidden;
@@ -35,8 +35,10 @@
   .lbj-marker .tag { display: inline-block; padding: 2px 6px; border-radius: 3px;
     color: #fff; font-weight: 700; letter-spacing: .3px;
     box-shadow: 0 1px 4px rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.35); }
-  .lbj-marker .sub { display: block; margin-top: 1px; padding: 0 4px; border-radius: 2px;
-    background: var(--sub-bg); color: var(--text); font-size: 9.5px; }
+  .lbj-marker .sub { display: block; margin-top: 1px; padding: 1px 5px; border-radius: 3px;
+    background: var(--sub-bg); color: var(--text); font-size: 11px; font-weight: 600;
+    letter-spacing: .2px; text-shadow: 0 1px 2px rgba(0,0,0,.7);
+    border: 1px solid rgba(255,255,255,.22); }
   .lbj-marker .dot { position: absolute; left: 50%; bottom: 0;
     width: 9px; height: 9px; margin-left: -4.5px; margin-bottom: -4.5px;
     border-radius: 50%; background: var(--accent);
@@ -150,8 +152,8 @@
         LBJ.applyConfig(cfg) / setBase(id) / setRailway(b) / setRailStyle(id)
         LBJ.railOpacity(v) / status() / layers()
         LBJ.centerLatLng(lat, lng[, zoom])   转到本机位置（WGS-84 入参）
-        LBJ.setTrainInfo(idOrTrain, info)    补充车次/机车信息（等级/担当局/配属段/车型/
-                                              机车配属/制造厂），显示在标记与弹窗里
+        LBJ.setTrainInfo(idOrTrain, info)    兼容接口：宿主推送车次/机车信息（v3.1.1 起
+                                              地图上不再渲染，信息在宿主面板展示）
         LBJ.onCacheProgress(done, total)     宿主回调：缓存进度
         LBJ.cacheStats(json)                 宿主回调：{count, bytes}
       离线缓存：宿主侧代拉瓦片并落盘；本页通过
@@ -648,31 +650,38 @@
     });
   }
 
-  // 车次/机车信息（宿主异步查询后随 update 或 setTrainInfo 送来）：
-  //   grade 等级 · bureau 担当局 · section 担当段/客运段 · owner 配属段/车辆段
-  //   model 车型 · locoDepot 机车配属单位 · locoMaker 制造厂 · from/to 始发终到
-  function infoRows(d) {
-    var info = (d && d.info) || {};
-    var rows = [];
-    var grade = info.grade || '';
-    var line1 = [grade, info.bureau, info.section].filter(Boolean).join(' · ');
-    if (line1) rows.push(['车次信息', line1]);
-    var owner = info.owner || '';
-    var line2 = [owner, info.model].filter(Boolean).join(' · ');
-    if (line2) rows.push(['车底', line2]);
-    if (info.from || info.to) {
-      rows.push(['区间', (info.from || '?') + ' → ' + (info.to || '?')]);
-    }
-    var locoLine = [info.locoDepot, info.locoMaker].filter(Boolean).join(' · ');
-    if (locoLine) rows.push(['机车配属', locoLine]);
-    return rows;
+  // 车次/机车信息（宿主异步查询后随 update 或 setTrainInfo 送来）。
+  // v3.1.1 起**不在图上展示**（用户要求地图不标注线路/机车/类别/车次信息/车底/配属）；
+  // 数据仍保存在 state[id].data.info 里，仅作宿主侧面板数据源，页面不渲染。
+  function showInfo(id) {
+    var st = state[id];
+    if (!st) return;
+    var d = st.data;
+    var span = trailSpan(st.trail);
+    var rows = [
+      ['车次', d.train || '----'],
+      ['方向', d.direction || '未知'],
+      ['速度', (d.speed || '---') + ' km/h'],
+      ['公里标', 'K' + (d.km || d.position || '---.-')]
+    ];
+    rows.push(['收到', d.time || '----']);
+    if (span) rows.push(['轨迹里程', span]);
+    rows.push(['坐标', Number(d.lat).toFixed(5) + ', ' + Number(d.lon).toFixed(5)]);
+    var html = '<div style="font-size:12.5px;line-height:1.85">' +
+      rows.map(function (r) {
+        return '<div><span style="color:var(--dim);display:inline-block;min-width:56px">' +
+          escapeHtml(r[0]) + '</span>' + escapeHtml(r[1]) + '</div>';
+      }).join('') + '</div>';
+    L.popup({ closeButton: true, autoPan: false })
+      .setLatLng(st.marker.getLatLng()).setContent(html).openOn(map);
   }
+  // 地图标记下方的小字：只放「速度 · 公里标」。
+  // 车次等级/担当局/配属等**不在图上标注**（v3.1.1 用户要求）——那些信息在宿主
+  // （桌面「车次信息 / 机车信息」卡片、安卓解码卡）里展示。
   function markerSub(d) {
     var bits = [];
     if (d.speed && d.speed !== '---') bits.push(d.speed + ' km/h');
     if (d.km && d.km !== '---.-') bits.push('K' + d.km);
-    var info = d.info || {};
-    if (info.grade) bits.push(info.grade);
     return bits;
   }
 
@@ -740,34 +749,6 @@
     }
   }
 
-  function showInfo(id) {
-    var st = state[id];
-    if (!st) return;
-    var d = st.data;
-    var span = trailSpan(st.trail);
-    var rows = [
-      ['车次', d.train || '----'],
-      ['方向', d.direction || '未知'],
-      ['速度', (d.speed || '---') + ' km/h'],
-      ['公里标', 'K' + (d.km || d.position || '---.-')],
-      ['线路', d.route || '----'],
-      ['机车', d.loco || '----'],
-      ['类别', d.category || '----']
-    ];
-    // 车次等级 / 担当路局 / 担当段 / 配属段 / 车型 / 机车配属 / 制造厂
-    rows = rows.concat(infoRows(d));
-    rows.push(['收到', d.time || '----']);
-    if (span) rows.push(['轨迹里程', span]);
-    rows.push(['坐标', Number(d.lat).toFixed(5) + ', ' + Number(d.lon).toFixed(5)]);
-    var html = '<div style="font-size:12px;line-height:1.9">' +
-      rows.map(function (r) {
-        return '<div><span style="color:var(--dim);display:inline-block;min-width:56px">' +
-          escapeHtml(r[0]) + '</span>' + escapeHtml(r[1]) + '</div>';
-      }).join('') + '</div>';
-    L.popup({ closeButton: true, autoPan: false })
-      .setLatLng(st.marker.getLatLng()).setContent(html).openOn(map);
-  }
-
   function trailSpan(trail) {
     if (!trail || trail.length < 2) return '';
     var dist = 0;
@@ -803,7 +784,13 @@
   }
 
   var _hostLast = '';
+  // 宿主是否已经把用户配置下发进来（applyConfig 调过）。
+  // 安卓端是 file:// 直接加载页面、不注入配置：页面先按 DEFAULT_CONFIG(amap) 起来，
+  // 若此时就 notifyHost 上报 base=amap，宿主会把它落盘成配置，**冲掉用户选的底图**。
+  // 所以：配置未下发前只做本地渲染，不上报。
+  var configApplied = false;
   function notifyHost() {
+    if (!configApplied) return;      // 用户配置还没进来：别把默认底座当成用户选择上报
     // 自动暂停（偏移底图）时上报「用户想要的图层」，避免把 rail=off 写进配置，
     // 否则切回 OSM/天地图后铁路图层永远恢复不了。
     var reportedRail = railAutoOff ? (railWanted || 'orm_standard') : railId;
@@ -1194,6 +1181,10 @@
     // 时弹两次「无法叠加」的提示。
     if (cfg && cfg.base && BASE_SOURCES[cfg.base]) { setBase(cfg.base); }
     if (cfg && cfg.rail && RAIL_SOURCES[cfg.rail]) {
+      // 用户配置里的铁路图层是「想要的」；偏移底图下只暂停，不覆盖 railWanted
+      if (isOffsetBase() && cfg.rail !== 'off') {
+        railWanted = cfg.rail;
+      }
       setRailStyle((isOffsetBase() && cfg.rail !== 'off') ? 'off' : cfg.rail);
     }
     if (cfg && typeof cfg.railOpacity === 'number') railOpacity(cfg.railOpacity);
@@ -1203,6 +1194,8 @@
       centerApplied = true;
       map.setView(toMap(cfg.center.lat, cfg.center.lng), CONFIG.zoom || map.getZoom(), { animate: false });
     }
+    // 配置已生效：之后页面里的图层变化才允许回传宿主落盘。
+    configApplied = true;
     refreshStatus();
   }
 

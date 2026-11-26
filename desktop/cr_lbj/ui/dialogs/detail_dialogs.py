@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from cr_lbj.runtime import *  # noqa: F401,F403
 
+from cr_lbj.data import depot_names
+from cr_lbj.ui.components.train_query import TimetableDialog
+from cr_lbj.ui.info_lookup import (
+    TrainFullQueryWorker, source_name, timetable_data, train_display)
 from cr_lbj.ui.ui_threads import keep_thread as _trackQuery
 
 
@@ -51,7 +55,7 @@ class LocoDetailDialog(QDialog):
         info_items = [
             ('机型名称', self._loco_info.get('name', '—')),
             ('机车类型', self._loco_info.get('type', '—')),
-            ('制造厂商', self._loco_info.get('maker', '—')),
+            ('制造厂商', depot_names.full_maker(self._loco_info.get('maker', '—'))),
             ('轴式', self._loco_info.get('axle', '—')),
             ('功率', self._loco_info.get('power', '—')),
             ('最高速度', self._loco_info.get('speed', '—')),
@@ -64,7 +68,8 @@ class LocoDetailDialog(QDialog):
             _r = {}
         if _r:
             if _r.get('exact'):
-                info_items.append(('配属单位', _r.get('depot') or '（原表未标注）'))
+                info_items.append(
+                    ('配属单位', depot_names.full_depot(_r.get('depot')) or '（原表未标注）'))
             elif _r.get('ok'):
                 info_items.append(('配属单位', '未知（%s）' % (_r.get('reason') or '号段未收录')))
             info_items.append(('号段', _r.get('range') or '—'))
@@ -173,12 +178,12 @@ class RecordDetailDialog(QDialog):
         btnLayout.addWidget(closeBtn)
         layout.addLayout(btnLayout)
 
-        # 启动 12306 后台查询（仅详细报文）
+        # 启动 RailGo 车次信息后台查询（仅详细报文；查不到只提示，不阻塞）
         if record.get('isDetailed'):
-            self._startTrainQuery(record)
+            self._startRailgoQuery(record)
         else:
-            self._trainQueryLabel.setText('非详细报文，不查询')
-            K.setLabelStyle(self._trainQueryLabel, color=CLR('faint'))
+            self._railgoLabel.setText('非详细报文，不查询车次信息')
+            K.setLabelStyle(self._railgoLabel, color=CLR('faint'))
 
     # ------------------------------------------------------------------
     # 版面小工具
@@ -254,7 +259,7 @@ class RecordDetailDialog(QDialog):
             roster, specs = {}, {}
         self._rosterData = roster
         if roster.get('exact'):
-            depot_text = str(roster.get('depot') or '（原表未标注配属）')
+            depot_text = depot_names.full_depot(roster.get('depot')) or '（原表未标注配属）'
         elif roster.get('ok'):
             depot_text = '未知（%s）' % (roster.get('reason') or '号段未收录')
         else:
@@ -315,23 +320,26 @@ class RecordDetailDialog(QDialog):
         hl.addWidget(self._locoDetailBtn, 0, Qt.AlignTop)
         v.addWidget(locoBox)
 
-        # 12306 查询结论
+        # v3.1.1：RailGo 车次信息（等级 / 担当局段 / 配属段 / 车型 / 始发终到 /
+        # 主要停站时间）——异步加载，查不到显示「未查询到」，绝不阻塞对话框。
         qBox = QWidget()
         ql = QHBoxLayout(qBox)
         ql.setContentsMargins(spx(10), 0, spx(10), spx(6))
         ql.setSpacing(spx(8))
-        qTag = QLabel('12306')
-        K.setLabelStyle(qTag, color=CLR('accent2'), bold=True)
-        self._trainQueryLabel = QLabel('查询中...')
-        self._trainQueryLabel.setWordWrap(True)
-        K.setLabelStyle(self._trainQueryLabel, color=CLR('accent2'))
-        self._trainQueryBtn = K.small_button('时刻表', h=26, px=11.5)
-        self._trainQueryBtn.setEnabled(False)
-        self._trainQueryData: Optional[dict] = None
-        self._trainQueryBtn.clicked.connect(self._openTrainQueryResult)
-        ql.addWidget(qTag, 0, Qt.AlignTop)
-        ql.addWidget(self._trainQueryLabel, 1)
-        ql.addWidget(self._trainQueryBtn, 0, Qt.AlignTop)
+        self._railgoTag = QLabel('RailGo')
+        K.setLabelStyle(self._railgoTag, color=CLR('accent2'), bold=True)
+        self._railgoLabel = QLabel('车次信息查询中…')
+        self._railgoLabel.setWordWrap(True)
+        self._railgoLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        K.setLabelStyle(self._railgoLabel, color=CLR('accent2'))
+        self._railgoBtn = K.small_button('时刻表', h=26, px=11.5)
+        self._railgoBtn.setToolTip('查看该车次时刻表（RailGo / 12306）')
+        self._railgoBtn.setEnabled(False)
+        self._railgoData: Optional[dict] = None
+        self._railgoBtn.clicked.connect(self._openRailgoTimetable)
+        ql.addWidget(self._railgoTag, 0, Qt.AlignTop)
+        ql.addWidget(self._railgoLabel, 1)
+        ql.addWidget(self._railgoBtn, 0, Qt.AlignTop)
         v.addWidget(qBox)
         v.addStretch(1)
 
@@ -424,24 +432,26 @@ class RecordDetailDialog(QDialog):
         url = (f'https://map.tianditu.gov.cn/#/map?center={lon:.6f},{lat:.6f}&zoom=15')
         QDesktopServices.openUrl(QUrl(url))
 
-    def _startTrainQuery(self, record: dict):
-        """启动后台 12306 查询。"""
-        train = record.get('train', '')
-        if not train or train == '----':
-            self._trainQueryLabel.setText('无车次')
-            self._trainQueryLabel.setStyleSheet(f'color: {CLR("faint")}; font-size: 11px;')
+    def _startRailgoQuery(self, record: dict):
+        """异步查 RailGo 车次信息（等级/担当/配属/车型/区间/主要停站）。"""
+        train = str(record.get('train') or '')
+        if not train or train in ('----', '未知'):
+            self._railgoLabel.setText('无车次号，不查询车次信息')
+            K.setLabelStyle(self._railgoLabel, color=CLR('faint'))
             return
-        dateStr = record.get('timeStr', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))[:10].replace('-', '')
-        if len(dateStr) != 8:
-            dateStr = datetime.now().strftime('%Y%m%d')
-        self._worker = TrainQueryWorker(train, dateStr)
+        prefer = 'auto'
+        try:
+            cfg = CoreConfig.load(CONFIG_PATH)
+            prefer = str(getattr(cfg, 'trainQuerySource', 'auto') or 'auto')
+        except Exception:
+            pass
+        self._worker = TrainFullQueryWorker(train, prefer)
         _trackQuery(self._worker)
-        self._worker.resultReady.connect(self._onTrainQueryResult)
-        self._worker.queryFailed.connect(self._onTrainQueryFailed)
+        self._worker.ready.connect(self._onRailgoResult)
         self._worker.start()
 
     def closeEvent(self, event):
-        """关窗前给查询线程一点收尾时间（真正的防崩靠 _RUNNING_QUERIES 保活）。"""
+        """关窗前给查询线程一点收尾时间（真正的防崩靠 ui_threads 保活）。"""
         th = getattr(self, '_worker', None)
         if th is not None and th.isRunning():
             try:
@@ -450,32 +460,67 @@ class RecordDetailDialog(QDialog):
                 pass
         super().closeEvent(event)
 
-    def _onTrainQueryResult(self, data: dict):
-        self._trainQueryData = data
-        code = data.get('trainCode', '')
-        startSt = data.get('startStation', '')
-        endSt = data.get('endStation', '')
-        startTime = data.get('startTime', '')
-        endTime = data.get('endTime', '')
-        stations = data.get('stations', [])
-        text = f'{startSt}({startTime}) → {code} → {endSt}({endTime})'
-        self._trainQueryLabel.setText(text)
-        self._trainQueryLabel.setStyleSheet(
-            f'color: {CLR("accent")}; font-size: 11px; font-weight: bold; padding: 2px;')
-        self._trainQueryBtn.setEnabled(True)
+    def _onRailgoResult(self, res: dict):
+        res = res or {}
+        disp = train_display(res)
+        self._railgoData = res if res.get('ok') else None
+        if not disp['ok']:
+            err = disp['error'] or '未查询到车次信息'
+            self._railgoLabel.setText('未查询到 %s 的车次信息（%s）' % (
+                disp['train'] or '该车次', err))
+            K.setLabelStyle(self._railgoLabel, color=CLR('warn'))
+            return
 
-    def _onTrainQueryFailed(self, err: str):
-        if '网络' in err or 'URLError' in err:
-            self._trainQueryLabel.setText('此功能需连接互联网使用')
-            self._trainQueryLabel.setStyleSheet(f'color: {CLR("err")}; font-size: 11px;')
-        else:
-            self._trainQueryLabel.setText(err)
-            self._trainQueryLabel.setStyleSheet(f'color: {CLR("warn")}; font-size: 11px;')
+        lines = []
+        head_bits = []
+        if disp['grade']:
+            head_bits.append(disp['grade'])
+        if disp['duty']:
+            head_bits.append('担当 ' + disp['duty'])
+        if head_bits:
+            lines.append(' · '.join(head_bits))
+        owner_bits = []
+        if disp['owner']:
+            owner_bits.append('配属 ' + disp['owner'])
+        if disp['model']:
+            owner_bits.append('车型 ' + disp['model'])
+        if owner_bits:
+            lines.append(' · '.join(owner_bits))
+        route = disp['range_text']
+        if route:
+            t_start = ('（%s）' % disp['start_time']) if disp['start_time'] else ''
+            t_end = ('（%s）' % disp['end_time']) if disp['end_time'] else ''
+            lines.append('%s%s → %s%s' % (disp['start'], t_start,
+                                           disp['end'], t_end))
+        # 主要停站时间：取中间有到/发时刻的站，最多 6 个，避免长时刻表撑爆详情页
+        mids = [s for s in disp['stays'][1:-1]
+                if s[1] not in ('----', '') or s[2] not in ('----', '')]
+        if mids:
+            shots = []
+            for name, arr, dep in mids[:6]:
+                if arr not in ('----', '') and dep not in ('----', ''):
+                    shots.append('%s %s/%s' % (name, arr, dep))
+                elif dep not in ('----', ''):
+                    shots.append('%s 发%s' % (name, dep))
+                else:
+                    shots.append('%s 到%s' % (name, arr))
+            lines.append('主要停站：' + ' · '.join(shots)
+                         + (' 等' if len(mids) > 6 else ''))
+        lines.append('来源 %s' % source_name(disp['source']))
+        self._railgoLabel.setText('\n'.join(lines))
+        self._railgoLabel.setStyleSheet(
+            f'color: {CLR("text")}; font-size: {spx(11)}px; background: transparent;')
+        has_stops = bool(res.get('stops'))
+        self._railgoBtn.setEnabled(has_stops)
+        self._railgoBtn.setToolTip(
+            '查看该车次时刻表（%s）' % source_name(disp['source'])
+            if has_stops else '未返回时刻表数据')
 
-    def _openTrainQueryResult(self):
-        if self._trainQueryData:
-            dlg = TimetableDialog(self._trainQueryData, self)
-            dlg.exec()
+    def _openRailgoTimetable(self):
+        if not self._railgoData or not self._railgoData.get('stops'):
+            return
+        dlg = TimetableDialog(timetable_data(self._railgoData), self)
+        dlg.exec()
 
     def _openLocoDetail(self):
         """弹出机车详情对话框（技术参数 + 资料来源）。"""

@@ -2,10 +2,13 @@ package xyz.mlxkj.crlbj.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.GraphicEq
@@ -61,11 +64,19 @@ fun LbjApp() {
     var current by rememberSaveable { mutableIntStateOf(TAB_DECODE) }
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
-        // 地图页要全屏出血（WebView 铺满），其余页让开状态栏
+        // 地图页要全屏出血（WebView 铺满），浮层的避让由 MapPage 自己处理；
+        // 其余页统一让开状态栏/刘海（safeDrawing = 状态栏 + 挖孔 + 导航栏 + IME）
         if (current == TAB_MAP) {
             MapPage(vm)
         } else {
-            Box(Modifier.fillMaxSize().statusBarsPadding()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+                    )
+            ) {
                 when (current) {
                     TAB_DECODE -> DecodePage(
                         vm = vm,
@@ -92,7 +103,10 @@ fun LbjApp() {
             onSelect = { current = it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+                )
                 .padding(bottom = 10.dp),
         )
     }
