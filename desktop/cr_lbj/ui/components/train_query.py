@@ -99,7 +99,7 @@ class TimetableDialog(QDialog):
 
 
 class TrainQueryPanel(QWidget):
-    """车次信息卡片（v3.1.1）：RailGo 车次信息 + 时刻表入口。
+    """车次信息卡片（v3.2.1）：RailGo 车次信息 + 时刻表入口。
 
     数据源按 `train_info.query(train, prefer)` 走——默认先 RailGo（字段全），
     失败自动退 12306；结果异步取回，不阻塞解码。展示内容：
@@ -303,7 +303,7 @@ class LocoInfoPanel(QWidget):
         cr_lbj/data/loco_info.py     报文「机车代号」→ 车型名/类型/轴式/简介
         cr_lbj/data/loco_roster.py   型号 + 机车号 → 配属局段（号段表命中）
 
-    v3.1.1：号段表里的配属是简称（`上局沪段`），卡片按用户要求显示全称
+    v3.2.1：号段表里的配属是简称（`上局沪段`），卡片按用户要求显示全称
     （`上海局上海机务段`），制造厂同理（`中车株洲电力机车有限公司`）；
     配属与制造厂各占一行、自动换行，不再截断拼接。
     """
@@ -397,7 +397,7 @@ class LocoInfoPanel(QWidget):
             f'color: {CLR("ok") if (info or hit) else CLR("warn")};'
             f' font-size: {spx(12)}px; font-weight: bold;')
 
-        # ---- 配属（v3.1.1）：命中号段 → 全称局段 + 号段 + 全称制造厂（分两行） ----
+        # ---- 配属（v3.2.1）：命中号段 → 全称局段 + 号段 + 全称制造厂（分两行） ----
         specs = {}
         try:
             specs = loco_roster.specs_for(roster.get('model') or model_name) or {}

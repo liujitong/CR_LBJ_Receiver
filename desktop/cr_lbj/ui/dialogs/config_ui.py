@@ -241,7 +241,7 @@ class ConfigPanel(QWidget):
         srcGrid.setColumnStretch(1, 1)
         page('数据源与射频').addWidget(srcGroup)
 
-        # ---- 连接与射频（v3.1.1：数据源 + 射频合并为一页，字段按「源 → 采样 → 射频」排） ----
+        # ---- 连接与射频（v3.2.1：数据源 + 射频合并为一页，字段按「源 → 采样 → 射频」排） ----
         # 顺序：源类型（在上面的数据源组）/ 主机 / 端口 → 采样率 → 中心频率 /
         #       硬件增益 / PPM / 信道带宽 / DC 偏移 → 块大小。
         rfGroup = QGroupBox('连接与射频')

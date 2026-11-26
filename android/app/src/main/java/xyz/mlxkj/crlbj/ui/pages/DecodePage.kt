@@ -124,7 +124,7 @@ fun DecodePage(
                     running = running,
                     lastEventTs = latest?.timestamp,
                     onToggle = { vm.toggleStartStop() },
-                    // v3.1.1：点胶囊打开「信号瀑布」小弹层（替代原先常驻的频谱图）
+                    // v3.2.1：点胶囊打开「信号瀑布」小弹层（替代原先常驻的频谱图）
                     onOpen = { signalSheet = true },
                 )
             },
@@ -149,7 +149,7 @@ fun DecodePage(
 
         Spacer(Modifier.height(Dim.gap))
 
-        // ---- 信号摘要条（v3.1.1：不再常驻画图；点它或点顶部胶囊看「信号瀑布」）----
+        // ---- 信号摘要条（v3.2.1：不再常驻画图；点它或点顶部胶囊看「信号瀑布」）----
         SignalStrip(
             status = status,
             onClick = { signalSheet = true },

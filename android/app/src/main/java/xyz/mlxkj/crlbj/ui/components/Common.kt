@@ -273,7 +273,7 @@ fun MetricTile(
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 // 权重 + Ellipsis：长数字（如调谐 821.2375 MHz）只截断数字，
-                // 绝不会把单位挤成 0 宽而把整块撑高（v3.1.1 状态页修复）
+                // 绝不会把单位挤成 0 宽而把整块撑高（v3.2.1 状态页修复）
                 modifier = Modifier.weight(1f, fill = false),
             )
             if (unit.isNotEmpty()) {

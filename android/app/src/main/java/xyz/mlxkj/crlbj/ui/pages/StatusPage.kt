@@ -48,7 +48,7 @@ import java.util.Locale
 import kotlinx.coroutines.delay
 
 /**
- * 状态页 v3.1.1：指标按「信号·门控 / 数据流 / 射频·链路」三组重排。
+ * 状态页 v3.2.1：指标按「信号·门控 / 数据流 / 射频·链路」三组重排。
  *
  *  · 第一组是主指标（2 列大块，24sp 数字），一眼能读；其余两组 3 列紧凑块，
  *    同组内格子等宽等号，不再出现大小参差；
@@ -186,7 +186,7 @@ private fun metricGroups(f: StatusFrame): List<MetricGroup> = listOf(
         title = "射频 · 链路", columns = 3, large = false,
         tiles = listOf(
             Tile("采样率", "%.0f".format(Locale.US, f.actualSampleRate / 1000.0), "kS/s"),
-            // 4 位小数 + 单位会撑破 1/3 宽格子（v3.1.1 实测会把整行撑高），
+            // 4 位小数 + 单位会撑破 1/3 宽格子（v3.2.1 实测会把整行撑高），
             // 单位并入标签、数值保留 3 位小数（1 kHz 精度，48k 带宽下足够）
             Tile("调谐 MHz", "%.3f".format(Locale.US, f.hwFreqHz / 1e6)),
             Tile("增益", "%.1f".format(Locale.US, f.appliedGainCentiDb / 100.0), "dB"),

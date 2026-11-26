@@ -364,7 +364,7 @@ class DesktopHostContractTest(unittest.TestCase):
                       '安卓代拉 ORM 瓦片必须带 Referer')
 
     def test_train_info_display_contract(self):
-        """v3.1.1：地图页**不再**标注线路/机车/类别/车次信息/车底/配属。
+        """v3.2.1：地图页**不再**标注线路/机车/类别/车次信息/车底/配属。
 
         这些信息改在宿主面板展示（桌面「车次信息 / 机车信息」卡片、安卓解码卡）；
         页面的 setTrainInfo 仅保留为宿主推送通道，不渲染。
@@ -395,7 +395,7 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertIn('ti.runner', decode, '安卓解码页应展示担当段')
 
     def test_marker_footnote_readability(self):
-        """v3.1.1：地图标记下的速度/公里标小字要能看清（字号/底色/描边）。"""
+        """v3.2.1：地图标记下的速度/公里标小字要能看清（字号/底色/描边）。"""
         html = read_html()
         self.assertIn('.lbj-marker .sub', html)
         sub_css = html.split('.lbj-marker .sub', 1)[1].split('}', 1)[0]
@@ -404,7 +404,7 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertIn('text-shadow', sub_css, '脚注需要描边/阴影保证可读')
 
     def test_config_applied_gate(self):
-        """v3.1.1 底图回退 bug：页面在宿主 applyConfig 之前不得上报图层。
+        """v3.2.1 底图回退 bug：页面在宿主 applyConfig 之前不得上报图层。
 
         安卓端 file:// 加载时页面先按默认底座(amap)起来；若此时 notifyHost 上报，
         宿主会把它落盘成配置，冲掉用户选的底图。
@@ -475,19 +475,19 @@ class DocsVersionTest(unittest.TestCase):
 
     def test_readme_version(self):
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.1.1', readme, 'README 版本号应为 v3.1.1')
+        self.assertIn('v3.2.1', readme, 'README 版本号应为 v3.2.1')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
         self.assertNotIn('**版本** v3.2.0', readme)
-        self.assertIn('v3.1.1', readme.split('## 更新记录', 1)[-1],
-                      'README 更新记录表应有 v3.1.1 行')
+        self.assertIn('v3.2.1', readme.split('## 更新记录', 1)[-1],
+                      'README 更新记录表应有 v3.2.1 行')
 
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.1.1', text, '%s 文首版本号应为 v3.1.1' % name)
+            self.assertIn('v3.2.1', text, '%s 文首版本号应为 v3.2.1' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.1.1', changelog, 'CHANGELOG 顶部应有 v3.1.1 条目')
+        self.assertIn('## v3.2.1', changelog, 'CHANGELOG 顶部应有 v3.2.1 条目')
 
 
 if __name__ == '__main__':

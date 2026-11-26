@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""历史记录对话框（v3.1.1：从主界面页签移到「工具 → 历史记录…」）。
+"""历史记录对话框（v3.2.1：从主界面页签移到「工具 → 历史记录…」）。
 
 主界面只保留「当前解码」，历史记录改为按需打开的独立对话框：
 
@@ -20,7 +20,7 @@ from cr_lbj.runtime import *  # noqa: F401,F403
 from cr_lbj.data.history import HistoryDb
 from cr_lbj.ui.dialogs.detail_dialogs import RecordDetailDialog
 
-#: 历史记录列表的列（v3.1.1）
+#: 历史记录列表的列（v3.2.1）
 HISTORY_COLUMNS = ['时间', '车次', '方向', '速度', '公里标', '线路',
                    '机车', '类别', '坐标']
 

@@ -133,7 +133,7 @@ fun MapPage(vm: ReceiverViewModel) {
     /**
      * 页面底图是否已与 `settings.mapBase` 一致（= applyConfig 已真正生效）。
      * 页面是 file:// 直接加载的，启动瞬间按自身默认底图（高德）渲染并可能回报
-     * onLayers；若直接落盘就会把用户在设置里选的底图冲掉（v3.1.1 修的就是这个）。
+     * onLayers；若直接落盘就会把用户在设置里选的底图冲掉（v3.2.1 修的就是这个）。
      * 所以只有确认一致后才接受页面回报。
      */
     val pageSynced = remember { mutableStateOf(false) }
@@ -311,7 +311,7 @@ fun MapPage(vm: ReceiverViewModel) {
                         HostBridge(
                             onLayersJson = { json ->
                                 w.post {
-                                    // v3.1.1 关键门禁：页面还没按用户配置切过去时，
+                                    // v3.2.1 关键门禁：页面还没按用户配置切过去时，
                                     // 它回报的是自身默认底图（高德），落盘会冲掉用户设置。
                                     if (pageSynced.value) {
                                         persistLayers(vm, json)
@@ -499,7 +499,7 @@ fun MapPage(vm: ReceiverViewModel) {
             )
         }
 
-        // ---- 空态 / 载入失败（半透明卡片，居中；v3.1.1 统一弱化：12sp/11sp + 三级灰）----
+        // ---- 空态 / 载入失败（半透明卡片，居中；v3.2.1 统一弱化：12sp/11sp + 三级灰）----
         if (trains.isEmpty() || loadError != null) {
             Column(
                 Modifier
@@ -986,7 +986,7 @@ private fun coordOfBase(baseId: String): String =
 /**
  * 把页面回报的图层变化落盘（底图/铁路/透明度/夜间），不重建 DSP 链路。
  *
- * v3.1.1 防回退两道门：
+ * v3.2.1 防回退两道门：
  *  ① 调用方（HostBridge）已用 pageSynced 过滤「配置生效前」的默认值回声；
  *  ② 这里再做语义保护：偏移坐标系底图（高德/百度）下页面会**自动关闭** WGS-84
  *     铁路图层并回报 rail=off，那不是用户的选择，不能写进设置（否则换回 OSM/

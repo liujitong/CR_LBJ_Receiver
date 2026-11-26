@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""桌面端 v3.1.1 改动回归测试（新增文件，由 desktop-fix 提交）。
+"""桌面端 v3.2.1 改动回归测试（新增文件，由 desktop-fix 提交）。
 
 覆盖两类无需启动 Qt 的检查：
 
 1. `cr_lbj.data.depot_names` 的配属/制造厂全称化（含用户要求的
    「南局南段 → 南昌局南昌机务段」与查不到时原样返回、不编造）；
-2. 桌面端源码里的 v3.1.1 结构约定（版本号、配置分页合并、历史记录进工具菜单、
+2. 桌面端源码里的 v3.2.1 结构约定（版本号、配置分页合并、历史记录进工具菜单、
    列车信息面板瘦身、车次卡改用整份查询结果）。
 
 Qt 界面本身由离屏冒烟与人工验收覆盖，这里不导入 Qt，保证测试快速稳定。
@@ -89,11 +89,11 @@ def _read(*parts: str) -> str:
         return f.read()
 
 
-def test_version_is_v311():
+def test_version_is_v321():
     init = _read('cr_lbj', '__init__.py')
-    assert "__version__ = '3.1.1'" in init
+    assert "__version__ = '3.2.1'" in init
     main = _read('cr_lbj', 'ui', 'windows', 'main_window.py')
-    assert 'v3.1.1' in main
+    assert 'v3.2.1' in main
     assert 'v3.2.0' not in main
 
 

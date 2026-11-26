@@ -170,7 +170,7 @@ class HistoryDb:
     def queryRecent(self, limit: int = 1000) -> List[Dict[str, Any]]:
         """查询最近的记录（含 id 供详情查询）。
 
-        v3.1.1：多带 latitude / longitude，历史记录对话框要显示「有坐标」标记。
+        v3.2.1：多带 latitude / longitude，历史记录对话框要显示「有坐标」标记。
         """
         sql = """
         SELECT id, timeStr, train, direction, speed, position, route, loco, category,
@@ -238,7 +238,7 @@ class HistoryDb:
             return None
 
     def deleteByIds(self, ids: List[int]) -> int:
-        """按 id 批量删除记录，返回实际删除条数（v3.1.1 历史记录对话框用）。"""
+        """按 id 批量删除记录，返回实际删除条数（v3.2.1 历史记录对话框用）。"""
         clean = [int(i) for i in (ids or []) if str(i).strip().isdigit()]
         if not clean:
             return 0

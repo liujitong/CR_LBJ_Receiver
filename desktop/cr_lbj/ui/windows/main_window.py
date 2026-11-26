@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.1.1')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.1')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -427,7 +427,7 @@ class MainWindow(QMainWindow):
         toolsMenu.addAction(self.actLocoQuery)
         toolsMenu.addSeparator()
 
-        # v3.1.1：历史记录不再占主界面页签，改到这里按需打开对话框
+        # v3.2.1：历史记录不再占主界面页签，改到这里按需打开对话框
         self.actHistory = QAction('历史记录...', self, shortcut='Ctrl+H')
         self.actHistory.setToolTip('查看 / 删除历史解码记录，可看单条详情 (Ctrl+H)')
         self.actHistory.triggered.connect(self.openHistoryDialog)
@@ -564,7 +564,7 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
         return dlg
 
-    # ---- v3.1.1：历史记录对话框（工具菜单） ----
+    # ---- v3.2.1：历史记录对话框（工具菜单） ----
     def openHistoryDialog(self):
         """打开历史记录对话框：列表 / 详情 / 删除选中 / 删除全部 / 导出。
 
@@ -687,7 +687,7 @@ class MainWindow(QMainWindow):
         self.infoService = TrainInfoService(self)
         self.infoService.infoReady.connect(self._onTrainInfoReady)
 
-        # v3.1.1：主界面只留「当前解码」；历史记录改到「工具 → 历史记录…」，
+        # v3.2.1：主界面只留「当前解码」；历史记录改到「工具 → 历史记录…」，
         # 这里只保留数据库句柄用于写入（界面不再常驻历史表）。
         self.historyDb = HistoryDb(DB_PATH)
 
@@ -1404,7 +1404,7 @@ class MainWindow(QMainWindow):
            if data_update.auto_enabled(self.config) else '关')
 
         group('界面')
-        kv('版本', 'v3.1.1')
+        kv('版本', 'v3.2.1')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(

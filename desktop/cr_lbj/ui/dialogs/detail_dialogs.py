@@ -320,7 +320,7 @@ class RecordDetailDialog(QDialog):
         hl.addWidget(self._locoDetailBtn, 0, Qt.AlignTop)
         v.addWidget(locoBox)
 
-        # v3.1.1：RailGo 车次信息（等级 / 担当局段 / 配属段 / 车型 / 始发终到 /
+        # v3.2.1：RailGo 车次信息（等级 / 担当局段 / 配属段 / 车型 / 始发终到 /
         # 主要停站时间）——异步加载，查不到显示「未查询到」，绝不阻塞对话框。
         qBox = QWidget()
         ql = QHBoxLayout(qBox)

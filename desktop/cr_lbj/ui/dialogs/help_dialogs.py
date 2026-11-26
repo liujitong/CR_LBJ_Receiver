@@ -304,7 +304,7 @@ class ManualDialog(QDialog):
         sep8.setStyleSheet(f'background-color: {CLR("border")};')
         contentLayout.addWidget(sep8)
 
-        title9 = QLabel('九、车次信息卡与时刻表查询（v3.1.1）')
+        title9 = QLabel('九、车次信息卡与时刻表查询（v3.2.1）')
         title9.setStyleSheet(f'color: {CLR("accent")}; font-size: 15px; font-weight: bold;')
         contentLayout.addWidget(title9)
         text9 = QLabel(
@@ -391,7 +391,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v3.1.1  ·  2026-11')
+        ver = QLabel('v3.2.1  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)

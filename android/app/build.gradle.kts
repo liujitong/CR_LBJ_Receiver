@@ -58,9 +58,9 @@ android {
         targetSdk = 35
         // 用户指定 NDK r27
         ndkVersion = "27.2.12479018"
-        // v3.1.1：用户指定（比 v3.2.0 小，按用户要求照做）；versionCode 用户指定 311
-        versionCode = 311
-        versionName = "3.1.1"
+        // v3.2.1：在 v3.2.0 基础上的修复与打磨版；versionCode 321（大于 320，可覆盖安装）
+        versionCode = 321
+        versionName = "3.2.1"
     }
 
     signingConfigs {
