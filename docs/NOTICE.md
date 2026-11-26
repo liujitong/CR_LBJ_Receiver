@@ -40,6 +40,22 @@
   本地矢量铁路层（本项目 `rail_local.geojson`）的离线兜底思路，均参考 LBJ_Console 的实现。
   感谢 undef-i 及其贡献者以 GPL-3.0 开放这些数据与代码。
 
+### 2.1 信号瀑布图（v3.2.7 参考其算法）
+
+安卓端「信号瀑布」的实现方式参考了 LBJ_Console 的
+`lib/widgets/audio_waterfall_widget.dart`（GPL-3.0）：
+
+| 参考点 | 本项目实现 |
+|---|---|
+| `poolSpectrumToWidth()`：频谱 bin 池化到屏幕宽度时**取区间最大值**（保峰，避免窄带峰被插值抹平） | `DecodePage.buildWaterfallBitmap()` 的横向 max-pooling |
+| `_intensityToArgb()` + 256 级 `_colorLUT`：深蓝 → 蓝 → 青 → 绿 → 黄 → 红 | `DecodePage.spectrumColor()` 同款光谱色阶 |
+| `pixels.setRange` 整体上移一行 + 新行写顶部（瀑布滚动） | 新帧追加、旧帧淘汰的环形帧缓存 |
+| 定时器拉帧 + `ui.decodeImageFromPixels` 位图绘制 | `StatusFramePoller`（70 ms）+ `Bitmap.setPixels` + 后台线程 |
+
+差异：本项目的频谱是**射频窄带 FFT（32 bin，native 输出）**，而 LBJ_Console 是
+**音频解调后的频谱（多协议条带、bin 数更多）**，因此本项目额外做了纵向帧间插值
+与对数动态范围压缩以适配本地信噪比；原始分辨率仍受 native `kSpectrumBins` 限制。
+
 ## 3. 机车类型代号表 —— `shared/data/loco_types.csv`
 
 - 由 `tools/gen_shared_data.py` 生成，不手工编辑。

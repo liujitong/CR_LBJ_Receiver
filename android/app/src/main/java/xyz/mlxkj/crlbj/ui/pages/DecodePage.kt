@@ -470,17 +470,27 @@ private fun gateLabel(gate: Int): String = when (gate) {
     0 -> "门控关闭"; 1 -> "待命"; 2 -> "有信号"; 3 -> "保持"; 4 -> "旁路"; else -> "未知"
 }
 
-/** 热力色阶：低=底色，中=蓝（频谱），高=黄，最高=CR 红 */
-private fun heatColor(
-    t: Float,
-    low: androidx.compose.ui.graphics.Color,
-    mid: androidx.compose.ui.graphics.Color,
-    high: androidx.compose.ui.graphics.Color,
-    top: androidx.compose.ui.graphics.Color,
-): androidx.compose.ui.graphics.Color = when {
-    t < 0.35f -> lerp(low, mid, t / 0.35f)
-    t < 0.7f -> lerp(mid, high, (t - 0.35f) / 0.35f)
-    else -> lerp(high, top, (t - 0.7f) / 0.3f)
+/**
+ * 瀑布色阶：与 LBJ_Console 的 `_intensityToArgb` 同一套光谱色阶（v3.2.7 小改）。
+ *
+ * 深蓝(0,0,0x33) → 纯蓝 → 青 → 绿 → 黄 → 红，256 级。之前用主题色做低→蓝→黄→红，
+ * 低端对比度不足、窄峰看起来"糊"；换成经典瀑布色阶后弱信号层次明显更清楚。
+ */
+private fun spectrumColor(t: Float): androidx.compose.ui.graphics.Color {
+    val x = t.coerceIn(0f, 1f)
+    val dark = androidx.compose.ui.graphics.Color(0xFF000033)
+    val blue = androidx.compose.ui.graphics.Color(0xFF0000FF)
+    val cyan = androidx.compose.ui.graphics.Color(0xFF00FFFF)
+    val green = androidx.compose.ui.graphics.Color(0xFF00FF00)
+    val yellow = androidx.compose.ui.graphics.Color(0xFFFFFF00)
+    val red = androidx.compose.ui.graphics.Color(0xFFFF0000)
+    return when {
+        x < 0.2f -> lerp(dark, blue, x / 0.2f)
+        x < 0.4f -> lerp(blue, cyan, (x - 0.2f) / 0.2f)
+        x < 0.6f -> lerp(cyan, green, (x - 0.4f) / 0.2f)
+        x < 0.8f -> lerp(green, yellow, (x - 0.6f) / 0.2f)
+        else -> lerp(yellow, red, (x - 0.8f) / 0.2f)
+    }
 }
 
 /**
@@ -499,9 +509,9 @@ private fun heatColor(
  *
  * 返回 `ImageBitmap` 供 `Image(..., filterQuality = Medium)` 直接绘制。
  */
-private const val WATERFALL_INTERP_X = 8
-private const val WATERFALL_INTERP_Y = 2
-private const val WATERFALL_DRC = 4.0f   // 对数压缩强度：越大弱信号越明显
+private const val WATERFALL_INTERP_X = 10   // 每个 bin 在横向池化出的列数
+private const val WATERFALL_INTERP_Y = 2    // 每帧在纵向占的行数（消除横条纹）
+private const val WATERFALL_DRC = 2.0f      // 对数动态范围压缩强度
 
 private fun buildWaterfallBitmap(
     rows: List<FloatArray>,
@@ -517,36 +527,23 @@ private fun buildWaterfallBitmap(
     }
     val h = rows.size
 
-    // 1) 横向三点平滑（先平滑再插值，边界不会出锯齿）
-    val hs = Array(h) { y ->
-        val r = rows[y]
-        FloatArray(bins).also { out ->
-            for (x in 0 until bins) {
-                val a = r[if (x > 0) x - 1 else 0]
-                val b = r[x]
-                val c = r[if (x < bins - 1) x + 1 else bins - 1]
-                out[x] = 0.25f * a + 0.5f * b + 0.25f * c
-            }
-        }
-    }
-
-    // 2) 能量范围（整块瀑布统一，避免逐帧跳色）
+    // 1) 能量范围（整块瀑布统一，避免逐帧跳色）
     var mn = Float.MAX_VALUE
     var mx = -Float.MAX_VALUE
-    for (row in hs) for (v in row) {
+    for (row in rows) for (v in row) {
         if (v < mn) mn = v
         if (v > mx) mx = v
     }
     val span = (mx - mn).coerceAtLeast(0.001f)
 
-    // 3) 颜色查找表（256 级），避免每像素都算 lerp
-    val lut = IntArray(256) { i ->
-        heatColor(i / 255f, low, mid, high, top).toArgb()
-    }
+    // 2) 颜色查找表（256 级光谱色阶，与 LBJ_Console 同款；每像素只查表）
+    val lut = IntArray(256) { i -> spectrumColor(i / 255f).toArgb() }
     val lnMax = ln(1f + WATERFALL_DRC)
 
-    // 4) 双线性插值输出
-    val w = (bins - 1).coerceAtLeast(1) * WATERFALL_INTERP_X + 1
+    // 3) 横向 max-pooling：参照 LBJ_Console 的 poolSpectrumToWidth——
+    //    每个输出列覆盖一段 bin，取其**最大值**。窄带信号的单点峰不会被插值抹平，
+    //    这正是之前"糊"的主因（线性插值把峰摊成了缓坡）。
+    val w = bins * WATERFALL_INTERP_X
     val H = h * WATERFALL_INTERP_Y
     val pixels = IntArray(w * H)
     for (py in 0 until H) {
@@ -554,19 +551,25 @@ private fun buildWaterfallBitmap(
         val y0 = fy.toInt().coerceIn(0, h - 1)
         val y1 = (y0 + 1).coerceAtMost(h - 1)
         val ty = (fy - y0).coerceIn(0f, 1f)
-        val r0 = hs[y0]
-        val r1 = hs[y1]
+        val r0 = rows[y0]
+        val r1 = rows[y1]
         val base = py * w
         for (px in 0 until w) {
-            val fx = px.toFloat() / WATERFALL_INTERP_X
-            val x0 = fx.toInt().coerceIn(0, bins - 1)
-            val x1 = (x0 + 1).coerceAtMost(bins - 1)
-            val tx = (fx - x0).coerceIn(0f, 1f)
-            // 双线性：横向 + 纵向同时插值
-            val v = (r0[x0] * (1f - tx) + r0[x1] * tx) * (1f - ty) +
-                    (r1[x0] * (1f - tx) + r1[x1] * tx) * ty
+            val start = px * bins / w
+            var end = (px + 1) * bins / w
+            if (end <= start) end = start + 1
+            end = end.coerceAtMost(bins)
+            // 时间方向：相邻两帧按小数权重取较大值（平滑但不丢峰）
+            var v0 = r0[start]
+            var v1 = r1[start]
+            for (b in start + 1 until end) {
+                if (r0[b] > v0) v0 = r0[b]
+                if (r1[b] > v1) v1 = r1[b]
+            }
+            val v = v0 * (1f - ty) + v1 * ty
             val raw = ((v - mn) / span).coerceIn(0f, 1f)
-            // 对数动态范围压缩：弱信号层次更丰富
+            // 对数动态范围压缩：弱信号层次更丰富（LBJ_Console 的音频频谱动态范围小，
+            // 本地射频噪声底与峰值跨度大，保留压缩但比之前温和）
             val t = ln(1f + WATERFALL_DRC * raw) / lnMax
             pixels[base + px] = lut[(t * 255f).toInt().coerceIn(0, 255)]
         }

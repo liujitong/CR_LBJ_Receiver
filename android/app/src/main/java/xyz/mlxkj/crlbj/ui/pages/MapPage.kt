@@ -40,6 +40,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.CloudDownload
@@ -525,12 +526,14 @@ fun MapPage(vm: ReceiverViewModel) {
             )
         }
 
-        // ---- 空态 / 载入失败（半透明卡片，居中；v3.2.1 统一弱化：12sp/11sp + 三级灰）----
+        // ---- 空态 / 载入失败（半透明卡片，**左下角**；v3.2.7 小改：
+        // 原来居中会挡住地图中心与列车标记，移到左下角并限制宽度。）----
         if (trains.isEmpty() || loadError != null) {
             Column(
                 Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 32.dp)
+                    .align(Alignment.BottomStart)
+                    .padding(start = 12.dp, end = 12.dp, bottom = Dim.dockSpace + 8.dp)
+                    .widthIn(max = 320.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(p.surface.copy(alpha = 0.90f))
                     .border(1.dp, p.border, RoundedCornerShape(14.dp))
