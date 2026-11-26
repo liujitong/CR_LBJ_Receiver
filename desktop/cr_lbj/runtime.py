@@ -61,7 +61,7 @@ CONFIG_PAGES = ['数据源与射频', '到达估算', '地图与车次',
 #: 数据源类型下拉的 (显示名, 内部值)
 SOURCE_TYPE_LABELS = [
     ('本机 USB (直连，推荐)', 'rtl_usb'),
-    ('本机 USB (经 rtl_tcp 中转)', 'rtl_usb_tcp'),
+    ('本机 USB (经 RTL-TCP 中转)', 'rtl_usb_tcp'),
     ('局域网 / 本地 RTL-TCP', 'rtl_tcp'),
     ('OWRX (OpenWebRX)', 'owrx'),
 ]

@@ -23,12 +23,9 @@ data class SourceProfile(
     val ppm: Double = 1.0,
     val dcOffsetHz: Double = 50000.0,
 ) {
+    /** 界面显示名：USB 直连 / RTL-TCP / OWRX（统一由 RtlProfile 给出，v3.2.7） */
     val typeLabel: String
-        get() = when (type) {
-            "usb" -> "本机 USB"
-            "owrx" -> "OWRX"
-            else -> "rtl_tcp"
-        }
+        get() = RtlProfile.typeLabel(type)
 
     /** 列表里的一行副标题：USB 不显示主机端口 */
     val detail: String
@@ -213,11 +210,11 @@ data class ReceiverSettings(
         /** 现行底图 id 全集（与 railmap.html BASE_SOURCES 一致）；旧配置里的废弃 id 读取时回退默认 */
         val KNOWN_BASES = setOf("amap", "amap_img", "baidu", "baidu_sat", "osm", "tdt_vec", "tdt_img")
 
-        /** 默认多数据源（v3.2.5）：USB 直连 / 本地 rtl_tcp / OWRX，可在设置里增删切换 */
+        /** 默认多数据源：USB 直连 / 本地 RTL-TCP / OWRX，可在设置里增删切换 */
         val DEFAULT_SOURCES = listOf(
             SourceProfile("本机 USB 直连", "usb", sampleRate = 240000,
                 gainDb = 19.7, ppm = 1.0, dcOffsetHz = 50000.0),
-            SourceProfile("本地 rtl_tcp", "rtl_tcp", host = "127.0.0.1", port = 1234,
+            SourceProfile("本地 RTL-TCP", "rtl_tcp", host = "127.0.0.1", port = 1234,
                 sampleRate = 960000, gainDb = 15.7, ppm = 1.0, dcOffsetHz = 50000.0),
             SourceProfile("OWRX 服务器", "owrx", host = "127.0.0.1", port = 8073,
                 sampleRate = 960000, gainDb = 15.7, ppm = 1.0, dcOffsetHz = 0.0),
@@ -299,7 +296,7 @@ data class ReceiverSettings(
             val nm = when (s.sourceType) {
                 "usb" -> "本机 USB 直连"
                 "owrx" -> "OWRX 服务器"
-                else -> "本地 rtl_tcp"
+                else -> "本地 RTL-TCP"
             }
             val cur = SourceProfile(
                 name = nm, type = s.sourceType, host = s.host, port = s.port,

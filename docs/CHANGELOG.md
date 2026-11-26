@@ -1,17 +1,98 @@
 # 更新记录
 
+> 适用版本：**v3.2.7**（2026-11-26） ｜ 适用端：桌面 / 安卓 ｜ 最后更新：2026-11-26
+>
+> 本文件记录各版本变更，**最新版本在最上方**；历史条目保持发布时的原样，只做格式与链接校正。
+> 当前版本 v3.2.7 的条目由项目维护者在发版时补充（本文不预置）。
+
 版本号规则（自 v3 起）：
 
 - **大版本**：`v3`（架构/形态级变更才升），以后由用户指定新大版本。
 - **小版本**：`v3.x`——功能更新，**桌面与安卓同时升**。
-- **最小版本**：`v3.x.y`——只改了一个端才编最小版本号，改哪个端就编哪个端的号。
+- **最小版本**：`v3.x.y`——修复/打磨版本，桌面端与安卓端**同版本号**发布。
 
-桌面端与安卓端**共用同一个版本号**（本版两端都是 `v3.2.1`），因为 v3 的目标就是
-"一次发布、两端同步"。
+桌面端与安卓端**共用同一个版本号**（当前为 `v3.2.7`），因为 v3 的目标就是
+「一次发布、两端同步」。
 
-> 关于版本编号：本版是 `v3.2.0`（地图可达误判修复 / ORM 铁路图层叠加修复）之后的
-> **修复与打磨版**，版本号 **v3.2.1**（安卓 `versionCode 321` > `320`，已装 v3.2.0 可直接覆盖升级）。
-> 这批 UI/交互改动开发期间曾按内部口径记作 `v3.1.1`，最终统一为 `v3.2.1` 发布。
+## 目录
+
+- [v3.2.7 · 2026-11-26](#v327--2026-11-26)
+- [v3.2.6 · 2026-11-26](#v326--2026-11-26)
+- [v3.2.5 · 2026-11-26](#v325--2026-11-26)
+- [v3.2.4 · 2026-11-26](#v324--2026-11-26)
+- [v3.2.3 · 2026-11-26](#v323--2026-11-26)
+- [v3.2.2 · 2026-11-26](#v322--2026-11-26)
+- [v3.2.1 · 2026-11-26](#v321--2026-11-26)
+- [v3.2.0 · 2026-11-26](#v320--2026-11-26)
+- [v3.1.0 · 2026-11-26](#v310--2026-11-26)
+- [v3.0.0 · 2026-11-26](#v300--2026-11-26)
+- [历史版本（v2.x 桌面端 / v3.0 安卓 M0–M3）](#历史版本v2x-桌面端--v30-安卓-m0m3)
+
+---
+
+## v3.2.7 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.2.7`，安卓 `versionName = 3.2.7` / `versionCode = 327`。
+> 主题：**安卓端 RTL 型号识别与推荐配置（对齐桌面端规则）、数据源文案统一为 RTL-TCP / OWRX；
+> 文档全部收进 `docs/` 并按统一模板重编排、润色；桌面端界面文案同步统一。**
+
+### 一、安卓：RTL 型号识别 + 按型号推荐（对齐 PC 端）
+
+用户要求「安卓参考 PC 端的推荐方法，识别 RTL 型号，推荐相关配置；OWRX、RTL-TCP 也要推荐」。
+桌面端早已有 `core/usb_direct.py` 的 `probeDevices()` / `recommendProfile()`（读 tuner 型号与
+可用增益表 → 推荐 960 kS/s / 手动增益 / DC 50 kHz，关 AGC）。安卓端补上等价能力：
+
+* **native 新增型号探测**：`engine.cpp` 增 `LbjEngine::probeTuner(fd)`——临时
+  `rtlsdr_open_fd` → 读 `rtlsdr_get_tuner_type` + `rtlsdr_get_tuner_gains` → 立刻 `rtlsdr_close`，
+  返回 JSON（`tunerType` / `tuner` / `gains`）；JNI `nativeProbeTuner(fd)` 暴露给 Kotlin。
+* **Kotlin `core/RtlProfile.kt`**（新）：与 PC 端规则**逐条对齐**——
+  * tuner 表：Unknown / E4000 / FC0012 / FC0013 / FC2580 / R820T / R828D；
+  * R828D → 15.7 dB 起调；R820T/R820T2 → 19.7 dB；E4000/FC0012/FC0013 → 19.7 dB；未知 → 15.7 dB；
+  * 统一 960 kS/s + 手动增益（AGC 关）+ DC 偏移 50 kHz（本地硬件），并附人话说明；
+  * `recommendFor(type, tunerId)`：USB 优先用探测到的型号；**RTL-TCP** 说明「同一块 RTL 硬件经网络
+    转发，与 USB 共用射频参数」；**OWRX** 说明「采样率由服务器端决定、DC 偏移设 0」。
+* **设置页「数据源与射频」**：
+  * 新增「RTL 型号：R820T（或未检测）」行；运行中直接读 native 已填的
+    `StatusFrame.tunerTypeId`，未运行时点「检测设备」走 `UsbSource.probeTunerModel()`
+    （请求权限 → openDevice → 探测 → 关闭，失败给明确原因，如设备被占用/未插棒）；
+  * 切换类型时的推荐弹窗升级为「型号 / 类型 + 推荐参数 + 说明」，并继续保持 v3.2.6 的
+    「采用推荐值 / 保持当前」；采用后仍走草稿保存（不静默落盘）。
+
+### 二、两端文案统一
+
+* 数据源显示名统一：**USB 直连 / RTL-TCP / OWRX**（内部 id `usb` / `rtl_tcp` / `owrx` 不变，
+  工具名 `rtl_tcp.exe` 等实际文件名保留原文）。
+* 安卓：`RtlProfile.typeLabel()` 统一驱动设置页 chip、数据源列表副标题、解码/地图页状态胶囊；
+  默认数据源名改为「本地 RTL-TCP」。
+* 桌面：`decoder.py` 的 `SOURCE_TYPE_NAMES`（本机 USB (RTL-TCP 中转)）、启动失败/超时日志、
+  USB 回退提示，以及 `runtime.py` 数据源预设名、`help_dialogs.py` 手册说明，统一为 RTL-TCP。
+
+### 三、仓库整理：所有文档进 `docs/`
+
+用户要求「所有文档必须放在 /docs 下，并对 docs 所有文档重编、整理、润色」：
+
+* `shared/NOTICE.md` → `docs/NOTICE.md`；`android/docs/*.md` → `docs/`（`安卓移植日志.md`、
+  `安卓模块划分方案.md`，并标为历史存档）；`docs/调研-USB直连与设备自适应连接.md` →
+  `docs/USB直连与设备自适应.md`（调研稿转正式文档）；删除空目录 `android/docs/`。
+* 根 `README.md` 保留为仓库入口，精简为「简介 + 快速开始 + 文档导航（13 篇指向 docs/）+
+  致谢要点 + 声明/License」；原详细内容全部下沉 docs。
+* 13 篇文档统一元信息块（适用版本 v3.2.7 / 适用端 / 最后更新）+ 「目录」+ 章节层级；
+  清理与 CHANGELOG 重复的「版本变化」章节、修正历史转义损坏与编号断档、去掉过期描述
+  （历史页签、ORM 伪造 Referer、文档散落路径等）；术语统一 RTL-TCP / OWRX / USB 直连。
+* 同步更新引用：`desktop/build.py` 的 `REQUIRED_DOCS`（8 → 13 项，含改名与归档文档）、
+  `usb_direct.py` / `updater.py` / `tools/gen_shared_data.py` 里的文档路径注释、README 与
+  各文档间的相对链接（`grep shared/NOTICE.md` 全仓 0 处）。
+
+### 四、验证
+
+* `pytest`：**122 passed**（新增 `test_docs_single_directory`：docs 目录完整、NOTICE 已迁、
+  `android/docs` 已归档；README 断言改为「入口 + docs 导航」）。
+* 安卓 `assembleDebug` 通过、单测 40/40；桌面 `desktop/build.py` 通过（产物含 13 篇文档）。
+* 模拟器实测：设置页「RTL 型号：未检测」+「检测设备」按钮；无 USB 设备时提示
+  「检测失败：未找到 RTL-SDR 设备（先插电视棒）」；切 RTL-TCP 弹「RTL-TCP 推荐配置」
+  （型号/类型 + 960 kS/s · 19.7 dB · DC 50 kHz + 说明）。
+* 真机 USB 直连（v3.2.3 起修复）：`[USB] tuner#3 ...（fd 直连）` 正常、接收中；
+  运行中点「检测设备」会提示设备被占用（符合预期，可先停止再检测）。
 
 ---
 
@@ -278,6 +359,8 @@ comm="DefaultDispatch"
 
 ---
 
+## v3.2.2 · 2026-11-26
+
 > 版本号：桌面 `cr_lbj.__version__ = 3.2.2`，安卓 `versionName = 3.2.2` / `versionCode = 322`。
 > 主题：**修复 OpenStreetMap / OpenRailwayMap 瓦片「418 Access blocked」——按两家使用政策做合规整改。**
 
@@ -320,7 +403,7 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
 4. **底图不可达提示**：OSM 被封时明确解释「需合规 UA、禁止预取，本程序已整改；
    仍被封通常是临时封禁」；一键换底图改为推荐 **高德 / 天地图**（不再推荐 OSM）。
 5. 文档：`docs/地图与图源.md` 增加「OSM / ORM 使用政策与合规要求」小节；
-   `shared/NOTICE.md` 补充两条政策链接与我们的合规做法。
+   `docs/NOTICE.md` 补充两条政策链接与我们的合规做法。
 
 ### 验证
 
@@ -331,11 +414,6 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
   需等待解封（本程序已合规，解封后即可恢复）。
 
 ---
-
-## v3.2.2 · 2026-11-26
-
-> 版本号：桌面 `cr_lbj.__version__ = 3.2.2`，安卓 `versionName = 3.2.2` / `versionCode = 322`。
-> 主题：**修复 OpenStreetMap / OpenRailwayMap 瓦片「418 Access blocked」——按两家使用政策做合规整改。**
 
 ## v3.2.1 · 2026-11-26
 
@@ -405,7 +483,7 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
 
 ### 一、地图（误判修复 / ORM Referer 修复 / 失败判定规则）
 
-#### 1. 修复「可达却判不可达」误判
+**1. 修复「可达却判不可达」误判**
 
 - **根因**：`shared/web/railmap.html` 的瓦片统计原先底图与铁路共用一个计数器
   （`tilesTotal` / `tilesFailed`）。OpenRailwayMap 官方瓦片缺 Referer 时整层 403，
@@ -425,7 +503,7 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
   - 安卓 `MapPage` 同步改为 `tilesFailed >= 6` 且（`tilesTotal == 0` 或
     `tilesFailed >= tilesTotal * 19`）。
 
-#### 2. 修复 ORM 铁路图层叠加（关键）
+**2. 修复 ORM 铁路图层叠加（关键）**
 
 - **根因**：OpenRailwayMap 官方瓦片要求请求带合法 `Referer: https://www.openrailwaymap.org/`；
   **只带浏览器 UA 仍返回 403**，而两端地图页都以 `file://` 加载，页面自身没有 Referer
@@ -440,13 +518,13 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
   由原生代拉 `HttpURLConnection.setRequestProperty("Referer", …)` 补上。
 - **实测**：桌面 OSM 底图 + ORM 标准图层 **16/16 瓦片全部成功**（修复前整层 403）。
 
-#### 3. 失败降级
+**3. 失败降级**
 
 - 铁路瓦片仍失败时页面状态行显示「铁路 ok/失败」；全部失败（`railTileFail > 4 &&
   railTileOk === 0`）时提示「铁路图层不可用：需要合法 Referer（v3.2 起客户端已内置），
   可改用本地铁路线（GeoJSON）」，底图照常显示。
 
-#### 4. 铁路图层自动暂停状态（`railWanted` / `railAutoOff`）
+**4. 铁路图层自动暂停状态（`railWanted` / `railAutoOff`）**
 
 - 切到高德/百度（偏移坐标系）时页面把铁路图层自动置 `off`，提示改为「**铁路图层已暂停**」；
   页面用 `railWanted` / `railAutoOff` 记住「用户想要的样式」，`notifyHost()` 上报
@@ -485,13 +563,13 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
   逐项列出使用内容——`loco_roster.csv` 配属号段表、`loco_type_info.csv` 代号表、
   安卓界面骨架、OSM + OpenRailwayMap 图源方案、本地矢量铁路层思路；并补充 RailGo、
   OSM / ORM / Leaflet / 天地图 / 高德 / 百度等数据与服务致谢。
-- `shared/NOTICE.md` 第 2 节补致谢段（数据、界面骨架、图源方案、离线铁路层思路）。
+- `docs/NOTICE.md` 第 2 节补致谢段（数据、界面骨架、图源方案、离线铁路层思路）。
 - 桌面「关于」对话框新增「开源致谢」段；安卓「关于」页新增致谢段。
 
 ### 四、测试与验证
 
 - 文档同步：`README.md`、`docs/CHANGELOG.md`、`docs/地图与图源.md`、`docs/技术参考.md`、
-  `docs/用户手册.md`、`docs/安卓版说明.md`、`docs/架构说明.md`、`shared/NOTICE.md`
+  `docs/用户手册.md`、`docs/安卓版说明.md`、`docs/架构说明.md`、`docs/NOTICE.md`
   版本号与内容更新到 v3.2。
 - 自动化：`D:\Python\Python314\python.exe -m pytest tests -q` → **90 passed**（含新增的
   v3.2 契约测试：ORM Referer、瓦片分图层统计、车次·机车信息展示）。
@@ -606,7 +684,7 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
   - `shared/data/loco_types.csv`（176 个机车代号 → 短型号/中文名）
   - `shared/data/loco_specs.json`（45 个车型技术参数）
   - `shared/data/places.csv`（49 个预设中心）
-  - `shared/NOTICE.md`（第三方授权与条款说明）
+  - `docs/NOTICE.md`（第三方授权与条款说明）
 - 新增 `tools/gen_shared_data.py`（生成/校验共享数据）、`cr_lbj/data/paths.py`
   （数据目录分层：可写覆盖层 → 内置快照）、`tests/`（51 个用例）。
 

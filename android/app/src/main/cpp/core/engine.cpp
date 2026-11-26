@@ -375,4 +375,41 @@ void LbjEngine::setParams(const char* paramsJson) {
     chain_.afc.enabled = afcEnable_;
 }
 
+
+// ===========================================================================
+// v3.2.7：设备型号探测（供 App「检测设备并推荐」用）
+//   打开 Java 传来的 fd → 读 tuner 型号与可用增益表 → 立刻关闭。
+//   设备正在接收时会因被占用而失败，调用方应提示先停止接收。
+// ===========================================================================
+std::string LbjEngine::probeTuner(int fd) {
+    static const char* kNames[] = {"Unknown", "E4000", "FC0012", "FC0013",
+                                   "FC2580", "R820T", "R828D"};
+    if (fd < 0) return "{\"ok\":false,\"error\":\"invalid fd\"}";
+    rtlsdr_dev_t* dev = nullptr;
+    int r = rtlsdr_open_fd(&dev, fd);
+    if (r < 0 || dev == nullptr) {
+        return "{\"ok\":false,\"error\":\"rtlsdr_open_fd rc=" +
+               std::to_string(r) + "\"}";
+    }
+    int tunerType = (int)rtlsdr_get_tuner_type(dev);
+    const char* name =
+        (tunerType >= 0 && tunerType <= 6) ? kNames[tunerType] : "Unknown";
+    std::string gains = "[";
+    int n = rtlsdr_get_tuner_gains(dev, nullptr);
+    if (n > 0) {
+        std::vector<int> g(n);
+        int m = rtlsdr_get_tuner_gains(dev, g.data());
+        for (int i = 0; i < m; i++) {
+            if (i) gains += ",";
+            gains += std::to_string(g[i]);
+        }
+    }
+    gains += "]";
+    rtlsdr_close(dev);
+    std::string json = "{\"ok\":true,\"tunerType\":" + std::to_string(tunerType) +
+                       ",\"tuner\":\"" + name + "\",\"gains\":" + gains + "}";
+    // static 方法不能直调非静态 log：走单例（探测只在未运行时发生，安全）`n    instance().log("[检测] " + json);
+    return json;
+}
+
 } // namespace lbj

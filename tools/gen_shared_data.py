@@ -34,7 +34,7 @@ ROOT = os.path.dirname(HERE)
 SHARED = os.path.join(ROOT, 'shared', 'data')
 sys.path.insert(0, os.path.join(ROOT, 'desktop'))   # cr_lbj 包在 desktop/ 下
 
-# LBJ_Console 的「机车代号 → 短型号」原始表（GPL-3.0，见 shared/NOTICE.md）
+# LBJ_Console 的「机车代号 → 短型号」原始表（GPL-3.0，见 docs/NOTICE.md）
 # 这里内联成一张精简表，避免生成时依赖外部下载；新增代号时同步补这里。
 CODE_SHORT = {
     1: 'JF', 3: 'QJ', 5: 'JS', 6: 'KD7', 55: 'LJKC', 57: 'JW2', 58: 'GQ164',

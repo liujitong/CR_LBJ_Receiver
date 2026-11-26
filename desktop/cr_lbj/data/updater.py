@@ -55,7 +55,7 @@ MIN_CHINESE_DEPOT = 50
 
 _HEADER = (
     '# 机车配属号段表 · 数据来源: LBJ_Console 项目 resources 分支 loco_info.csv\n'
-    '#   https://github.com/undef-i/LBJ_Console  (GPL-3.0)  迁移说明见 shared/NOTICE.md\n'
+    '#   https://github.com/undef-i/LBJ_Console  (GPL-3.0)  迁移说明见 docs/NOTICE.md\n'
     '# 格式: 机车型号,起号,止号,配属单位(路局/机务段),备注,制造厂\n'
     '# 匹配规则: 机车型号精确匹配 + 机车号落在 [起号,止号] 闭区间\n'
 )

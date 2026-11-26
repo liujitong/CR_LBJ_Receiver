@@ -90,6 +90,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import xyz.mlxkj.crlbj.core.RtlProfile
 
 /**
  * 地图页（v3.0 重写）。
@@ -1052,12 +1053,7 @@ private fun MapToolItem(
 }
 
 /** 数据源显示名（胶囊文案） */
-private fun sourceLabel(s: ReceiverSettings): String = when (s.sourceType) {
-    "usb" -> "USB 直连"
-    "rtl_tcp" -> "rtl_tcp"
-    "owrx" -> "OWRX"
-    else -> s.sourceType
-}
+private fun sourceLabel(s: ReceiverSettings): String = RtlProfile.typeLabel(s.sourceType)
 
 /** 底图坐标系（来自页面图源清单）：偏移坐标系（gcj/bd）下页面会自动关闭 WGS-84 铁路图层 */
 private fun coordOfBase(baseId: String): String =

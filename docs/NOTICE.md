@@ -1,7 +1,23 @@
-# 第三方资源与授权说明（v3.2.6）
+# 第三方资源与授权说明
 
-本仓库 `shared/` 目录存放**桌面端与安卓端共用**的地图页与数据文件。以下逐项说明来源与授权，
-分发（尤其是打包成 exe / apk 对外发布）时请保留本文件与各项目自带的 LICENSE。
+> 适用版本：**v3.2.7**（2026-11-26） ｜ 适用端：桌面 / 安卓 ｜ 最后更新：2026-11-26
+>
+> 本文件逐项说明随程序分发的第三方数据、地图页与联网接口的来源与授权。
+> 这些资源位于 `shared/`（桌面端与安卓端共用）；对外分发（打包成 exe / apk 发布）时
+> 请保留本文件与各项目自带的 LICENSE。
+
+## 目录
+
+1. [Leaflet 1.9.4 —— shared/web/vendor/leaflet/](#1-leaflet-194--sharedwebvendorleaflet)
+2. [机车配属号段表 —— shared/data/loco_roster.csv](#2-机车配属号段表--shareddataloco_rostercsv)
+3. [机车类型代号表 —— shared/data/loco_types.csv](#3-机车类型代号表--shareddataloco_typescsv)
+4. [机型技术参数 —— shared/data/loco_specs.json](#4-机型技术参数--shareddataloco_specsjson)
+5. [预设中心点 —— shared/data/places.csv](#5-预设中心点--shareddataplacescsv)
+6. [地图瓦片与图源（运行时联网获取，不随仓库分发）](#6-地图瓦片与图源运行时联网获取不随仓库分发)
+7. [车次数据接口（运行时联网获取）](#7-车次数据接口运行时联网获取)
+8. [其它](#8-其它)
+
+---
 
 ## 1. Leaflet 1.9.4 —— `shared/web/vendor/leaflet/`
 
@@ -44,7 +60,8 @@
 
 ## 6. 地图瓦片与图源（运行时联网获取，不随仓库分发）
 
-v3.1 按用户要求只保留 4 类底图（高德/百度/OSM/天地图），其余（Esri/CARTO/OpenTopoMap/腾讯）已删除。
+v3.1 起底图按服务商分 4 类（高德 / 百度 / OSM / 天地图），共 **7 张**（各家街道/影像分别登记）；
+其余（Esri/CARTO/OpenTopoMap/腾讯）已删除。
 
 | 图源 | 用途 | 坐标基准 | 授权/条款要点 |
 |---|---|---|---|
@@ -53,7 +70,7 @@ v3.1 按用户要求只保留 4 类底图（高德/百度/OSM/天地图），其
 | 天地图（需自备 tk + Referer 白名单） | 底图 | CGCS2000（工程上等同 WGS-84） | 国家地理信息公共服务平台，需注册并按条款使用 |
 | OpenStreetMap 标准瓦片 | 底图 | WGS-84 | 数据 © OpenStreetMap contributors（ODbL）；**瓦片使用政策**要求可识别 User-Agent、禁止批量预取、禁止绕过限流（[政策原文](https://operations.osmfoundation.org/policies/tiles/)）。本程序 v3.2.2 起按其要求发 `CR-LBJ-Receiver/x.y.z (+仓库地址)` UA，且不对该图源做批量缓存 |
 | **OpenRailwayMap** | **铁路图层** | WGS-84 | 数据 © OpenStreetMap contributors（ODbL），渲染 © OpenRailwayMap（CC-BY-SA）；官方瓦片为**非商业公益服务**，要求应用公开免费、须发唯一 User-Agent、**不得伪造 Referer**、禁止预取与批量抓取，官方可无预警封禁。本程序 v3.2.2 起发合规 UA、不加伪造 Referer、不做批量预取 |
-| 本地铁路线 `rail_local.geojson`（可选，不随仓库分发） | 铁路图层离线兜底 | WGS-84 | 用户自建（Geofabrik/OSM 提取，ODbL），见 `docs/地图与图源.md` |
+| 本地铁路线 `rail_local.geojson`（可选，不随仓库分发） | 铁路图层离线兜底 | WGS-84 | 用户自建（Geofabrik/OSM 提取，ODbL），见 [地图与图源](地图与图源.md) |
 
 > ⚠️ **OSM / ORM 合规说明（v3.2.2 整改，必读）**
 >
@@ -68,7 +85,7 @@ v3.1 按用户要求只保留 4 类底图（高德/百度/OSM/天地图），其
 > 如需整片离线地图，请改用天地图/高德/百度底图做缓存，或自建瓦片。
 
 > ⚠️ OpenRailwayMap 官方瓦片服务器在中国大陆常被 TLS 阻断，且其条款要求「公开免费的应用」。
-> 若用于内部/商用分发，请自建瓦片（见 `docs/地图与图源.md` 的「自建 / 离线铁路图层」一节），
+> 若用于内部/商用分发，请自建瓦片（见 [地图与图源](地图与图源.md) 的「自建 / 离线铁路图层」一节），
 > 不要长期直连官方服务器。
 >
 > ⚠️ 高德/百度的「免 Key 瓦片」是两家面向自家 Web 产品的公开服务端点，本程序仅作个人使用接入；

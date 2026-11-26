@@ -43,6 +43,11 @@ object LbjNative {
     external fun nativeReadSpectrum(buffer: java.nio.ByteBuffer): Int
     external fun nativeSetParams(paramsJson: String)
 
+    /** v3.2.7：探测 fd 对应的 RTL 设备型号与增益表（临时打开→读取→关闭）。
+     *  返回 JSON：{"ok":true,"tunerType":5,"tuner":"R820T","gains":[...]}。
+     *  设备正在接收（被占用）时会返回 ok=false。 */
+    external fun nativeProbeTuner(fd: Int): String
+
     // ---- 供 native 回调（M1/M2 起 JNI 反向调用入口） ----
     @Suppress("unused")
     private fun onDecodeEventFromNative(json: String) {

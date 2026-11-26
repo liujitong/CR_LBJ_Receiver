@@ -501,20 +501,37 @@ class DocsVersionTest(unittest.TestCase):
     """发版时文档版本号必须同步（避免文档还停在旧版）。"""
 
     def test_readme_version(self):
+        # v3.2.7：README 精简为「入口 + 文档导航」（详细内容下沉 docs/），
+        # 不再维护「更新记录表」（版本历史统一在 docs/CHANGELOG.md）。
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.6', readme, 'README 版本号应为 v3.2.6')
+        self.assertIn('v3.2.7', readme, 'README 版本号应为 v3.2.7')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
-        self.assertNotIn('**版本** v3.2.5', readme)
-        self.assertIn('v3.2.6', readme.split('## 更新记录', 1)[-1],
-                      'README 更新记录表应有 v3.2.6 行')
+        self.assertNotIn('**版本** v3.2.6', readme)
+        self.assertIn('docs/', readme, 'README 必须给出 docs/ 文档导航')
+        for name in ('用户手册.md', '技术参考.md', 'CHANGELOG.md', 'NOTICE.md'):
+            self.assertIn(name, readme, 'README 导航缺 %s' % name)
+
+    def test_docs_single_directory(self):
+        """v3.2.7：所有文档必须在 docs/ 下（根目录只留 README 作入口）。"""
+        docs = os.path.join(ROOT, 'docs')
+        names = sorted(n for n in os.listdir(docs) if n.endswith('.md'))
+        for must in ('用户手册.md', '技术参考.md', '架构说明.md', '地图与图源.md',
+                     'CHANGELOG.md', 'NOTICE.md', '安卓版说明.md'):
+            self.assertIn(must, names, 'docs/ 缺少 %s' % must)
+        # 文档不应再散落在根 / shared / android/docs
+        for stray in ('NOTICE.md',):
+            self.assertFalse(os.path.exists(os.path.join(ROOT, 'shared', stray)),
+                             'shared/%s 应已移入 docs/' % stray)
+        self.assertFalse(os.path.exists(os.path.join(ROOT, 'android', 'docs')),
+                         'android/docs 应已归档进 docs/')
 
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2.6', text, '%s 文首版本号应为 v3.2.6' % name)
+            self.assertIn('v3.2.7', text, '%s 文首版本号应为 v3.2.7' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.6', changelog, 'CHANGELOG 顶部应有 v3.2.6 条目')
+        self.assertIn('## v3.2.7', changelog, 'CHANGELOG 顶部应有 v3.2.7 条目')
 
 
 if __name__ == '__main__':

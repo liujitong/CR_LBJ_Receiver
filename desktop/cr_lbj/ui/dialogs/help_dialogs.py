@@ -48,7 +48,7 @@ class ManualDialog(QDialog):
             '<li>PPM 校正：按晶振偏差调整（默认 1）</li>'
             '<li>信道带宽：35 kHz；AFC：建议开启</li>'
             '</ul>'
-            '<p><b>说明：</b>直连打不开（dll 缺失、被占用等）会自动退回 rtl_tcp 中转，'
+            '<p><b>说明：</b>直连打不开（dll 缺失、被占用等）会自动退回 RTL-TCP 中转，'
             '日志里会写明原因，不影响使用。</p>'
         )
         text1.setWordWrap(True)
@@ -73,7 +73,7 @@ class ManualDialog(QDialog):
             '<ul style="margin-left: 20px;">'
             '<li>模式：OWRX 兼容模式</li>'
             '<li>主机：OpenWebRX 服务器地址（如 127.0.0.1 或远程 IP）</li>'
-            '<li>端口：OpenWebRX 的 rtl_tcp 端口（通常为 1234）</li>'
+            '<li>端口：OpenWebRX 的 RTL-TCP 端口（通常为 1234）</li>'
             '<li>DC 偏移：0 Hz（OWRX 提供零中频 IQ 流，无需 DC 避让）</li>'
             '<li>采样率：与 OpenWebRX 设置一致（通常 960000 Hz）</li>'
             '<li>频率：821.2375 MHz</li>'
@@ -127,10 +127,10 @@ class ManualDialog(QDialog):
             '<ul style="margin-left: 20px;">'
             '<li><b>本机 USB（直连，推荐）</b>：插上 RTL-SDR 即可。程序直接调用内附的'
             ' <code>rtlsdr.dll</code> 收数，不经过 rtl_tcp、不走 TCP；'
-            '要求已用 Zadig 安装 WinUSB 驱动。直连打不开时会自动退回 rtl_tcp 中转。</li>'
-            '<li><b>本机 USB（rtl_tcp 中转）</b>：兼容模式，程序自动拉起 '
+            '要求已用 Zadig 安装 WinUSB 驱动。直连打不开时会自动退回 RTL-TCP 中转。</li>'
+            '<li><b>本机 USB（RTL-TCP 中转）</b>：兼容模式，程序自动拉起 '
             '<code>rtl_tcp.exe</code> 并连本地端口，退出时自动关闭。</li>'
-            '<li><b>RTL-TCP</b>：连接局域网或本机已有的 rtl_tcp 服务（默认 1234 端口）。</li>'
+            '<li><b>RTL-TCP</b>：连接局域网或本机已有的 RTL-TCP 服务（默认 1234 端口）。</li>'
             '<li><b>OWRX</b>：连接 OpenWebRX 的 rtl_tcp 兼容端口（DC 偏移设为 0）。</li>'
             '</ul>'
             '<p>发布包已内附 <code>rtl_tcp.exe</code>、<code>rtlsdr.dll</code> 等工具，'
@@ -391,7 +391,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v3.2.6  ·  2026-11')
+        ver = QLabel('v3.2.7  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)

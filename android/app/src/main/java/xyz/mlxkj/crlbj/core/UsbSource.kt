@@ -78,6 +78,24 @@ class UsbSource(private val context: Context) : Source {
         }
     }
 
+    /**
+     * v3.2.7：探测 RTL 型号（供设置页「检测设备并推荐」）。
+     * 流程：请求权限 → openDevice 拿 fd → native 临时打开读 tuner/增益 → 关闭。
+     * 注意：**设备正在接收时会被占用而失败**；调用方应先停止接收或直接读
+     * `StatusFrame.tunerTypeId`（运行中 native 已填好）。
+     */
+    suspend fun probeTunerModel(): String {
+        requestPermission()
+        val dev = findDevice() ?: throw IOException("未找到 RTL-SDR 设备（先插电视棒）")
+        val usb = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val conn = usb.openDevice(dev) ?: throw IOException("openDevice 失败（设备被占用？）")
+        try {
+            return xyz.mlxkj.crlbj.engine.LbjNative.nativeProbeTuner(conn.fileDescriptor)
+        } finally {
+            conn.close()
+        }
+    }
+
     /** 返回 native 使用的 fd（USB 模式 mode=0，native 内 rtlsdr_open_fd 直接管该 fd） */
     override fun open(): Int {
         val dev = grantedDevice ?: findDevice() ?: throw IOException("未找到 RTL-SDR 设备")

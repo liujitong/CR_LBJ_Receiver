@@ -59,6 +59,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import xyz.mlxkj.crlbj.core.ReceiverSettings
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import xyz.mlxkj.crlbj.core.RtlProfile
+import xyz.mlxkj.crlbj.core.UsbSource
+import androidx.compose.runtime.mutableIntStateOf
 import xyz.mlxkj.crlbj.ui.components.Divider
 import xyz.mlxkj.crlbj.ui.components.LbjTextField
 import xyz.mlxkj.crlbj.ui.components.PageHeader
@@ -135,6 +142,13 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
     var nameText by remember { mutableStateOf("") }
     // 保存成功的轻提示
     var saveNotice by remember { mutableStateOf<String?>(null) }
+    // v3.2.7：RTL 型号识别（参考桌面端 core/usb_direct.py 的 recommendProfile 规则）
+    var tunerName by remember { mutableStateOf<String?>(null) }
+    var tunerTypeId by remember { mutableIntStateOf(-1) }
+    var probeMsg by remember { mutableStateOf<String?>(null) }
+    var probeBusy by remember { mutableStateOf(false) }
+    val probeScope = rememberCoroutineScope()
+    val ctxApp = LocalContext.current
     // 系统返回键也要走同一套「保存询问」，不能绕过（v3.2.6）
     // v3.2.6：三级返回——①子页有未保存草稿→保存询问；②子页→设置菜单；
     // ③设置菜单（首页）→回上一个标签页（不再直接退出 App/回桌面）。
@@ -185,7 +199,7 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
         if (sub == null) {
-            PageHeader(title = "设置", subtitle = "v3.2.6 · 更改自动保存")
+            PageHeader(title = "设置", subtitle = "v3.2.7 · 更改自动保存")
             saveErr?.let {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
@@ -323,10 +337,83 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
                         // ---- 当前数据源的连接参数 + 射频参数（草稿，返回时保存）----
                         SectionCard("连接与射频") {
+                            // v3.2.7：RTL 型号识别 + 按型号推荐（与 PC 端规则一致）。
+                            // 运行中直接读 native 已填的 StatusFrame.tunerTypeId；
+                            // 未运行时点「检测设备」临时打开设备读取。
+                            val liveTuner = vm.status.value?.tunerTypeId ?: -1
+                            val effectiveTuner = if (tunerTypeId >= 0) tunerTypeId else liveTuner
+                            val hasTuner = effectiveTuner >= 0
+                            Row(
+                                Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "RTL 型号：${if (hasTuner) RtlProfile.tunerName(effectiveTuner) else "未检测"}",
+                                        color = p.text, fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    val rec = if (hasTuner) RtlProfile.recommend(effectiveTuner) else null
+                                    Text(
+                                        probeMsg ?: if (rec != null) {
+                                            "按型号推荐：${rec.sampleRate / 1000} kS/s · " +
+                                                "${rec.gainDb} dB · DC ${rec.dcOffsetHz.toInt()} Hz"
+                                        } else {
+                                            "点「检测设备」识别型号，按 PC 端同一套规则推荐参数"
+                                        },
+                                        color = when {
+                                            probeMsg?.startsWith("检测失败") == true -> p.err
+                                            probeMsg != null -> p.accent
+                                            else -> p.textTertiary
+                                        },
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                                if (srcDraft?.isUsb ?: s.isUsb) {
+                                    Text(
+                                        if (probeBusy) "检测中…" else "检测设备",
+                                        color = if (probeBusy) p.textTertiary else p.accent,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable(enabled = !probeBusy) {
+                                                probeBusy = true
+                                                probeMsg = null
+                                                probeScope.launch {
+                                                    try {
+                                                        val json = UsbSource(ctxApp).probeTunerModel()
+                                                        val o = JSONObject(json)
+                                                        if (o.optBoolean("ok")) {
+                                                            val t = o.optInt("tunerType", -1)
+                                                            tunerTypeId = t
+                                                            val rec = RtlProfile.recommend(t)
+                                                            tunerName = rec.tuner
+                                                            srcDraft = (srcDraft ?: s).copy(
+                                                                sampleRate = rec.sampleRate,
+                                                                gainDb = rec.gainDb,
+                                                                dcOffsetHz = rec.dcOffsetHz)
+                                                            probeMsg = "已识别 ${rec.tuner}，" +
+                                                                "已应用推荐参数（点保存生效）"
+                                                        } else {
+                                                            probeMsg = "检测失败：" + o.optString(
+                                                                "error", "设备被占用？先停止接收")
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        probeMsg = "检测失败：" +
+                                                            (e.message ?: "未知错误")
+                                                    } finally {
+                                                        probeBusy = false
+                                                    }
+                                                }
+                                            }
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    )
+                                }
+                            }
                             ChipRow(
                                 options = listOf(
-                                    "usb" to "本机 USB",
-                                    "rtl_tcp" to "rtl_tcp",
+                                    "usb" to "USB 直连",
+                                    "rtl_tcp" to "RTL-TCP",
                                     "owrx" to "OWRX",
                                 ),
                                 selected = d.sourceType,
@@ -636,19 +723,26 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
     // ---- 切换数据源类型：该类型的推荐配置（三种类型都有）----
     recommendType?.let { type ->
-        val (sr, gain, dc) = recommendFor(type)
+        val liveTuner = vm.status.value?.tunerTypeId ?: -1
+        val rec = RtlProfile.recommendFor(
+            type, if (tunerTypeId >= 0) tunerTypeId else liveTuner)
+        val sr = rec.sampleRate
+        val gain = rec.gainDb
+        val dc = rec.dcOffsetHz
         AlertDialog(
             onDismissRequest = { recommendType = null },
             containerColor = p.surface,
             title = {
-                Text("${typeLabelOf(type)} 推荐配置", color = p.text, fontSize = 17.sp)
+                Text("${RtlProfile.typeLabel(type)} 推荐配置", color = p.text, fontSize = 17.sp)
             },
             text = {
                 Text(
-                    "该类型推荐参数：\n" +
+                    "型号 / 类型：${rec.tuner}\n" +
+                        "推荐参数：\n" +
                         "· 采样率 ${sr / 1000} kS/s\n" +
                         "· 增益 $gain dB\n" +
                         "· DC 偏移 ${(dc / 1000).toInt()} kHz\n\n" +
+                        "说明：${rec.note}\n\n" +
                         "是否采用推荐值？\n（采用后仍需点「保存」或返回时保存才会生效）",
                     color = p.textSecondary, fontSize = 13.sp,
                 )
@@ -755,18 +849,6 @@ private fun sourceDirty(a: ReceiverSettings, b: ReceiverSettings): Boolean =
         a.dcOffsetHz != b.dcOffsetHz
 
 /** 各数据源类型的推荐配置：(采样率 Hz, 增益 dB, DC 偏移 Hz) */
-private fun recommendFor(type: String): Triple<Int, Double, Double> = when (type) {
-    "usb" -> Triple(240000, 19.7, 50000.0)     // 手机 OTG 直连：省带宽、避开 DDC 直流
-    "rtl_tcp" -> Triple(960000, 15.7, 50000.0) // 局域网 rtl_tcp：满采样率
-    else -> Triple(960000, 15.7, 0.0)          // OWRX：服务器端已做过 DDC，DC 偏移设 0
-}
-
-private fun typeLabelOf(type: String): String = when (type) {
-    "usb" -> "本机 USB 直连"
-    "rtl_tcp" -> "RTL-TCP 网络源"
-    else -> "OWRX 服务器"
-}
-
 // ------------------------------------------------------------------ 变更路由
 
 /** 连接类字段：变更需要重建 DSP 链路（vm.updateSettings） */
@@ -800,7 +882,7 @@ private fun menuSubtitle(id: String, s: ReceiverSettings): String = when (id) {
     "query" -> (when (s.trainQuerySource) {
         "railgo" -> "仅 RailGo"; "12306" -> "仅 12306"; else -> "RailGo→12306"
     }) + " · 配属表自动更新" + if (s.dataAutoUpdate) "开" else "关"
-    else -> "v3.2.6 · 桌面版与安卓版同版本号"
+    else -> "v3.2.7 · 桌面版与安卓版同版本号"
 }
 
 @Composable

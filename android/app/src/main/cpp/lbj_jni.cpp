@@ -148,4 +148,12 @@ Java_xyz_mlxkj_crlbj_engine_LbjNative_nativeSetParams(JNIEnv* env, jobject thiz,
     if (paramsJson) env->ReleaseStringUTFChars(paramsJson, p);
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_xyz_mlxkj_crlbj_engine_LbjNative_nativeProbeTuner(JNIEnv* env, jobject /*thiz*/,
+                                                       jint fd) {
+    std::string json = lbj::LbjEngine::probeTuner((int)fd);
+    return env->NewStringUTF(json.c_str());
+}
+
+
 } // extern "C"

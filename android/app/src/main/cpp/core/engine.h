@@ -39,6 +39,11 @@ public:
     bool inited() const { return inited_; }
     bool running() const { return running_; }
 
+    // v3.2.7: 探测指定 fd 的 RTL 设备型号与可用增益（临时打开→读取→关闭）。
+    // 返回 JSON: {"ok":true,"tunerType":5,"tuner":"R820T","gains":[...]}
+    // 失败: {"ok":false,"error":"..."}。设备被占用（正在接收）时会失败。
+    static std::string probeTuner(int fd);
+
 private:
     LbjEngine() = default;
 

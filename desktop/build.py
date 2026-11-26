@@ -15,7 +15,7 @@
     desktop/main.py        程序入口
     desktop/cr_lbj/        应用包（core / data / ui / utils + runtime / gui / app）
     desktop/SDR_LBJ.spec   打包配置；desktop/build.py 本脚本
-    文档   docs/           用户手册 / 技术参考 / 架构说明 / 地图与图源 / USB 直连调研
+    文档   docs/           用户手册 / 技术参考 / 架构说明 / 地图与图源 / …（全量清单见 REQUIRED_DOCS）
     产物   dist/           CR-LBJ-Receiver.exe + README.md + docs/（仍在仓库根）
 """
 
@@ -34,10 +34,12 @@ DIST = os.path.join(ROOT, 'dist')
 BUILD = os.path.join(ROOT, 'build')
 EXE_NAME = 'CR-LBJ-Receiver.exe'
 
-# 构建产物中必须存在的文档（相对 dist/docs）。v3.0：高德手册下线，新增地图/查询/安卓/更新记录。
-REQUIRED_DOCS = ['用户手册.md', '技术参考.md', '架构说明.md',
-                 '地图与图源.md', '车次与配属查询.md', '安卓构建与环境.md',
-                 'CHANGELOG.md', '调研-USB直连与设备自适应连接.md']
+# 构建产物中必须存在的文档（相对 dist/docs）。与仓库 docs/ 目录一一对应，
+# 新增/改名文档时同步登记（docs 整目录由 spec 的 copytree 复制进 dist/docs）。
+REQUIRED_DOCS = ['用户手册.md', '技术参考.md', '架构说明.md', '地图与图源.md',
+                 '车次与配属查询.md', 'USB直连与设备自适应.md', '安卓版说明.md',
+                 '安卓构建与环境.md', 'CHANGELOG.md', '验收记录-v3.0.md',
+                 '安卓移植日志.md', '安卓模块划分方案.md', 'NOTICE.md']
 
 
 def log(msg: str) -> None:

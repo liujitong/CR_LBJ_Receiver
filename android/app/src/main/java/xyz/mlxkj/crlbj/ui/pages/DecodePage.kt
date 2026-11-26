@@ -68,6 +68,7 @@ import java.util.Locale
 import kotlin.math.ln
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.produceState
+import xyz.mlxkj.crlbj.core.RtlProfile
 
 /**
  * 解码页：一键开始 + 信号强度（真实 RSSI 历史 + 门限线）+ 当前解码大卡 + 最近列表。
@@ -849,9 +850,4 @@ private fun DecodeDetailSheet(
 }
 
 /** 数据源显示名（与地图页同一套文案） */
-internal fun sourceLabelOf(type: String): String = when (type) {
-    "usb" -> "USB 直连"
-    "rtl_tcp" -> "rtl_tcp"
-    "owrx" -> "OWRX"
-    else -> type
-}
+internal fun sourceLabelOf(type: String): String = RtlProfile.typeLabel(type)

@@ -89,7 +89,7 @@ CMD_SET_AGC = 8                # 设置 AGC (0=off, 1=on)
 # 数据源类型 → 日志/状态栏显示名（界面下拉的完整文案见 SOURCE_TYPE_LABELS）
 SOURCE_TYPE_NAMES = {
     'rtl_usb': '本机 USB 直连',
-    'rtl_usb_tcp': '本机 USB (rtl_tcp 中转)',
+    'rtl_usb_tcp': '本机 USB (RTL-TCP 中转)',
     'rtl_tcp': 'RTL-TCP',
     'owrx': 'OWRX',
 }
@@ -1647,11 +1647,11 @@ class RtlUsbSource(RtlTcpSource):
                     out = (self._proc.stdout.read() or '').strip()
                 except Exception:
                     pass
-                raise RuntimeError(f'rtl_tcp 启动失败（退出码 {self._proc.returncode}）: {out}')
+                raise RuntimeError(f'RTL-TCP 启动失败（退出码 {self._proc.returncode}）: {out}')
             if _port_open('127.0.0.1', port, 0.3):
                 return
             time.sleep(0.2)
-        raise RuntimeError('rtl_tcp 启动超时（8 秒内端口未就绪）')
+        raise RuntimeError('RTL-TCP 启动超时（8 秒内端口未就绪）')
 
     def close(self):
         super().close()
@@ -1701,7 +1701,7 @@ class RtlUsbAutoSource:
             if fb is None:
                 raise
             if self._log:
-                self._log(f'[数据源] USB 直连不可用（{e}），改用 rtl_tcp 中转')
+                self._log(f'[数据源] USB 直连不可用（{e}），改用 RTL-TCP 中转')
             self._fallback = fb
             self.mode = 'tcp'
             fb.open()

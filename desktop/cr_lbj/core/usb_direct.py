@@ -211,7 +211,7 @@ def probeDevice(index: int = 0) -> Dict[str, Any]:
 def recommendProfile(tunerType: int, deviceName: str = '') -> Dict[str, Any]:
     """按 tuner 型号给出射频参数建议。
 
-    依据（三处独立来源互相印证，见 docs/调研-USB直连与设备自适应连接.md）：
+    依据（三处独立来源互相印证，见 docs/USB直连与设备自适应.md）：
       - 采样率 960 kS/s：本项目 DSP 链路（半带 2 级 → 240 kS/s）的甜点，
         再高只会白烧 USB 带宽；
       - 手动增益、关闭 AGC：LBJ 是突发窄带信号，AGC 会把噪声一起抬起来，
