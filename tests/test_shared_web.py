@@ -502,19 +502,19 @@ class DocsVersionTest(unittest.TestCase):
 
     def test_readme_version(self):
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.4', readme, 'README 版本号应为 v3.2.4')
+        self.assertIn('v3.2.5', readme, 'README 版本号应为 v3.2.5')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
-        self.assertNotIn('**版本** v3.2.3', readme)
-        self.assertIn('v3.2.4', readme.split('## 更新记录', 1)[-1],
-                      'README 更新记录表应有 v3.2.4 行')
+        self.assertNotIn('**版本** v3.2.4', readme)
+        self.assertIn('v3.2.5', readme.split('## 更新记录', 1)[-1],
+                      'README 更新记录表应有 v3.2.5 行')
 
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2.4', text, '%s 文首版本号应为 v3.2.4' % name)
+            self.assertIn('v3.2.5', text, '%s 文首版本号应为 v3.2.5' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.4', changelog, 'CHANGELOG 顶部应有 v3.2.4 条目')
+        self.assertIn('## v3.2.5', changelog, 'CHANGELOG 顶部应有 v3.2.5 条目')
 
 
 if __name__ == '__main__':

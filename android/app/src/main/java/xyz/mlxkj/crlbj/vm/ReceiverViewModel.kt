@@ -159,7 +159,9 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 更新设置（设置页保存时调用）：落盘 + 热更新业务参数 + 重建引擎链路 */
-    fun updateSettings(s: ReceiverSettings) {
+    fun updateSettings(s0: ReceiverSettings) {
+        // 把顶层字段回写当前数据源项，保证「多数据源列表」与实际配置一致（v3.2.5）
+        val s = s0.withActiveSnapshot()
         _settings.value = s
         ReceiverSettings.save(getApplication(), s)
         syncBusinessParams(s)
@@ -175,7 +177,8 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
      * 只更新地图/界面类设置（地图页的跟随开关、图层回调等高频路径）：
      * 不重建 DSP 链路，避免「切个底图就断流」。
      */
-    fun updateViewSettings(s: ReceiverSettings) {
+    fun updateViewSettings(s0: ReceiverSettings) {
+        val s = s0.withActiveSnapshot()
         if (s == _settings.value) return
         _settings.value = s
         ReceiverSettings.save(getApplication(), s)
@@ -185,7 +188,8 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
      * 业务类设置（去重窗口/ETA/公里标/查询源/数据更新开关）：
      * 落盘 + 热更新业务参数，不重建 DSP 链路。
      */
-    fun updateBusinessSettings(s: ReceiverSettings) {
+    fun updateBusinessSettings(s0: ReceiverSettings) {
+        val s = s0.withActiveSnapshot()
         if (s == _settings.value) return
         _settings.value = s
         ReceiverSettings.save(getApplication(), s)
@@ -197,6 +201,50 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
             EngineState.RUNNING -> stop()
             else -> start()
         }
+    }
+
+    // ---------------------------------------------- 多数据源（v3.2.5）
+    /**
+     * 切换到第 [index] 条数据源：展开其参数并**重建 DSP 链路**
+     * （连接类参数变了，必须重开引擎；运行中会先停）。
+     */
+    fun selectSource(index: Int) {
+        val cur = _settings.value
+        if (index == cur.activeSource && index in cur.sources.indices) return
+        val next = cur.withActiveSnapshot().selectSource(index)
+        if (next == cur) return
+        updateSettings(next)
+        logf("[数据源] 已切换到「%s」%s", next.currentSource?.name ?: index,
+            if (next.isUsb) "（USB 直连）" else "（${next.host}:${next.port}）")
+    }
+
+    /** 用当前配置新建一条数据源并切换过去。 */
+    fun addSource() {
+        val next = _settings.value.withActiveSnapshot().addSourceFromCurrent()
+        updateSettings(next)
+        logf("[数据源] 已新增「%s」", next.currentSource?.name ?: "")
+    }
+
+    /** 删除第 [index] 条（至少保留一条）。 */
+    fun removeSource(index: Int) {
+        val cur = _settings.value
+        if (cur.sources.size <= 1) return
+        val next = cur.removeSource(index)
+        if (next == cur) return
+        updateSettings(next)
+        logf("[数据源] 已删除第 %d 条，当前「%s」", index + 1,
+            next.currentSource?.name ?: "")
+    }
+
+    /** 重命名第 [index] 条数据源（不重建链路）。 */
+    fun renameSource(index: Int, name: String) {
+        val next = _settings.value.withActiveSnapshot().renameSource(index, name)
+        if (next == _settings.value) return
+        updateViewSettings(next)
+    }
+
+    private fun logf(fmt: String, vararg args: Any?) {
+        runCatching { engine.log(fmt.format(*args)) }
     }
 
     private var watchdog: Job? = null

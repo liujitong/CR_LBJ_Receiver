@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.SettingsInputAntenna
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -49,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
@@ -93,8 +93,8 @@ private val MAP_RAILS = listOf(
 private data class MenuGroup(val id: String, val title: String, val icon: ImageVector)
 
 private val MENU = listOf(
-    MenuGroup("source", "数据源", Icons.Filled.SettingsInputAntenna),
-    MenuGroup("rf", "射频", Icons.Filled.Tune),
+    // v3.2.5：数据源与射频合并为一组（用户要求），并可保存多套数据源随时切换
+    MenuGroup("source", "数据源与射频", Icons.Filled.SettingsInputAntenna),
     MenuGroup("gate", "门控·AFC", Icons.Filled.Sensors),
     MenuGroup("decode", "解码", Icons.Filled.GraphicEq),
     MenuGroup("map", "地图", Icons.Filled.Map),
@@ -150,7 +150,7 @@ fun SettingsPage(vm: ReceiverViewModel) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
         if (sub == null) {
-            PageHeader(title = "设置", subtitle = "v3.2.4 · 更改自动保存")
+            PageHeader(title = "设置", subtitle = "v3.2.5 · 更改自动保存")
             saveErr?.let {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
@@ -189,55 +189,126 @@ fun SettingsPage(vm: ReceiverViewModel) {
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 when (sub) {
-                    // -------------------------------------------------- 数据源
-                    "source" -> SectionCard("数据源") {
-                        ChipRow(
-                            options = listOf("usb" to "本机 USB", "rtl_tcp" to "rtl_tcp", "owrx" to "OWRX"),
-                            selected = s.sourceType,
-                            onPick = { id ->
-                                if (id == "usb" && s.sourceType != "usb") usbPrompt = true
-                                commit(s.copy(sourceType = id))
-                            },
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        if (s.isUsb) {
+                    // ------------------------------------ 数据源与射频（v3.2.5 合并为一组）
+                    // 兼容旧状态里的 "rf" 子页 id（老版本点过「射频」）
+                    "source", "rf" -> Column {
+                        // ---- 多数据源列表：点一下切换（切换会重建 DSP 链路）----
+                        SectionCard("数据源（点击切换）") {
+                            s.sources.forEachIndexed { i, prof ->
+                                val active = i == s.activeSource
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (active) p.accent.copy(alpha = 0.12f)
+                                            else Color.Transparent)
+                                        .let {
+                                            if (active) it
+                                            else it.clickable { vm.selectSource(i) }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            prof.name,
+                                            color = if (active) p.accent else p.text,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (active) FontWeight.SemiBold
+                                            else FontWeight.Normal,
+                                        )
+                                        Text(
+                                            prof.detail,
+                                            color = p.textTertiary, fontSize = 11.sp,
+                                            modifier = Modifier.padding(top = 1.dp),
+                                        )
+                                    }
+                                    if (active) {
+                                        Text("使用中", color = p.accent, fontSize = 11.sp)
+                                    } else {
+                                        Text(
+                                            "切换", color = p.accent, fontSize = 12.sp,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .clickable { vm.selectSource(i) }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                    if (s.sources.size > 1) {
+                                        Text(
+                                            "删除", color = p.textTertiary, fontSize = 11.sp,
+                                            modifier = Modifier
+                                                .padding(start = 6.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .clickable { vm.removeSource(i) }
+                                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                }
+                                if (i != s.sources.lastIndex) Divider()
+                            }
+                            Spacer(Modifier.height(6.dp))
                             Text(
-                                "USB 直连：手机 OTG 接 RTL-SDR 电视棒，设备查找与权限由系统弹窗确认。",
+                                "＋ 把当前配置存为新数据源",
+                                color = p.accent, fontSize = 12.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { vm.addSource() }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
+
+                        // ---- 当前数据源的连接参数 + 射频参数 ----
+                        SectionCard("连接与射频") {
+                            ChipRow(
+                                options = listOf(
+                                    "usb" to "本机 USB",
+                                    "rtl_tcp" to "rtl_tcp",
+                                    "owrx" to "OWRX",
+                                ),
+                                selected = s.sourceType,
+                                onPick = { id ->
+                                    if (id == "usb" && s.sourceType != "usb") usbPrompt = true
+                                    commit(s.copy(sourceType = id))
+                                },
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            if (s.isUsb) {
+                                Text(
+                                    "USB 直连：手机 OTG 接 RTL-SDR 电视棒，设备查找与权限由系统弹窗确认。",
+                                    color = p.textTertiary, fontSize = 11.sp,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                            } else {
+                                Field("主机", s.host) { commit(s.copy(host = it.trim())) }
+                                Field("端口", s.port.toString(), KeyboardType.Number) {
+                                    commit(s.copy(port = it.toIntOrNull() ?: s.port))
+                                }
+                            }
+                            Field("采样率 Hz", s.sampleRate.toString(), KeyboardType.Number) {
+                                commit(s.copy(sampleRate = it.toIntOrNull() ?: s.sampleRate))
+                            }
+                            Field("频率 MHz", fmt(s.freqMhz), KeyboardType.Decimal) {
+                                commit(s.copy(freqMhz = it.toDoubleOrNull() ?: s.freqMhz))
+                            }
+                            Field("增益 dB", fmt(s.gainDb), KeyboardType.Decimal) {
+                                commit(s.copy(gainDb = it.toDoubleOrNull() ?: s.gainDb))
+                            }
+                            Field("PPM 校正", fmt(s.ppm), KeyboardType.Decimal) {
+                                commit(s.copy(ppm = it.toDoubleOrNull() ?: s.ppm))
+                            }
+                            Field("信道带宽 kHz", fmt(s.bwKhz), KeyboardType.Decimal) {
+                                commit(s.copy(bwKhz = it.toDoubleOrNull() ?: s.bwKhz))
+                            }
+                            Field("DC 偏移 Hz", fmt(s.dcOffsetHz), KeyboardType.Decimal) {
+                                commit(s.copy(dcOffsetHz = it.toDoubleOrNull() ?: s.dcOffsetHz))
+                            }
+                            Text(
+                                "USB 直连建议 DC 偏移 50000 Hz（让目标频点落在 DDC 之后），OWRX 保持 0。",
                                 color = p.textTertiary, fontSize = 11.sp,
                             )
-                            Spacer(Modifier.height(6.dp))
-                        } else {
-                            Field("主机", s.host) { commit(s.copy(host = it.trim())) }
-                            Field("端口", s.port.toString(), KeyboardType.Number) {
-                                commit(s.copy(port = it.toIntOrNull() ?: s.port))
-                            }
                         }
-                        Field("采样率 Hz", s.sampleRate.toString(), KeyboardType.Number) {
-                            commit(s.copy(sampleRate = it.toIntOrNull() ?: s.sampleRate))
-                        }
-                    }
-
-                    // ---------------------------------------------------- 射频
-                    "rf" -> SectionCard("射频") {
-                        Field("频率 MHz", fmt(s.freqMhz), KeyboardType.Decimal) {
-                            commit(s.copy(freqMhz = it.toDoubleOrNull() ?: s.freqMhz))
-                        }
-                        Field("增益 dB", fmt(s.gainDb), KeyboardType.Decimal) {
-                            commit(s.copy(gainDb = it.toDoubleOrNull() ?: s.gainDb))
-                        }
-                        Field("PPM 校正", fmt(s.ppm), KeyboardType.Decimal) {
-                            commit(s.copy(ppm = it.toDoubleOrNull() ?: s.ppm))
-                        }
-                        Field("信道带宽 kHz", fmt(s.bwKhz), KeyboardType.Decimal) {
-                            commit(s.copy(bwKhz = it.toDoubleOrNull() ?: s.bwKhz))
-                        }
-                        Field("DC 偏移 Hz", fmt(s.dcOffsetHz), KeyboardType.Decimal) {
-                            commit(s.copy(dcOffsetHz = it.toDoubleOrNull() ?: s.dcOffsetHz))
-                        }
-                        Text(
-                            "USB 直连建议 DC 偏移 50000 Hz（让目标频点落在 DDC 之后），OWRX 保持 0。",
-                            color = p.textTertiary, fontSize = 11.sp,
-                        )
                     }
 
                     // ----------------------------------------------- 门控与 AFC
@@ -422,9 +493,9 @@ fun SettingsPage(vm: ReceiverViewModel) {
 
                     // ----------------------------------------------------- 关于
                     else -> SectionCard("关于") {
-                        Text("CR 列车预警器 · Android v3.2.4", color = p.text, fontSize = 13.sp)
+                        Text("CR 列车预警器 · Android v3.2.5", color = p.text, fontSize = 13.sp)
                         Text(
-                            "桌面版与安卓版 v3.2.4 同版本号；地图页与桌面端共用 " +
+                            "桌面版与安卓版 v3.2.5 同版本号；地图页与桌面端共用 " +
                                 "shared/web/railmap.html，数据共用 shared/data/*。",
                             color = p.textTertiary, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 4.dp),
@@ -526,7 +597,7 @@ private fun menuSubtitle(id: String, s: ReceiverSettings): String = when (id) {
     "query" -> (when (s.trainQuerySource) {
         "railgo" -> "仅 RailGo"; "12306" -> "仅 12306"; else -> "RailGo→12306"
     }) + " · 配属表自动更新" + if (s.dataAutoUpdate) "开" else "关"
-    else -> "v3.2.4 · 桌面版与安卓版同版本号"
+    else -> "v3.2.5 · 桌面版与安卓版同版本号"
 }
 
 @Composable

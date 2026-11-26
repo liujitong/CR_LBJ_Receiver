@@ -38,6 +38,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -70,7 +80,6 @@ import xyz.mlxkj.crlbj.core.TileCache
 import xyz.mlxkj.crlbj.data.LocoRoster
 import xyz.mlxkj.crlbj.data.TrainInfoClient
 import xyz.mlxkj.crlbj.engine.DecodeEvent
-import xyz.mlxkj.crlbj.ui.components.FloatPill
 import xyz.mlxkj.crlbj.ui.components.SectionCard
 import xyz.mlxkj.crlbj.ui.components.StatusCapsule
 import xyz.mlxkj.crlbj.ui.theme.Dim
@@ -420,11 +429,15 @@ fun MapPage(vm: ReceiverViewModel) {
                         WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
                 )
         ) {
-        // ---- 左上角状态胶囊（地图页无重顶栏，胶囊浮在图上）----
-        Box(
+        // ---- 右上角：数据源状态胶囊 + 工具组（v3.2.5 统一收拢到一处）----
+        //  跟随 / 图层 / 回中心 / 缓存本区域 全部收进同一张紧凑工具卡；
+        //  「转到自己位置」单独做右下角定位 FAB（地图 App 的常见位置）。
+        Column(
             Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 14.dp, start = 12.dp)
+                .align(Alignment.TopEnd)
+                .padding(top = 12.dp, end = 12.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             StatusCapsule(
                 sourceLabel = sourceLabel(settings),
@@ -432,43 +445,60 @@ fun MapPage(vm: ReceiverViewModel) {
                 lastEventTs = events.firstOrNull()?.timestamp,
                 onToggle = { vm.toggleStartStop() },
             )
-        }
-
-        // ---- 右上角浮动胶囊 ----
-        Column(
-            Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 76.dp, end = 12.dp),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FloatPill(
-                text = if (settings.mapFollow) "跟随中" else "跟随",
-                active = settings.mapFollow,
-                onClick = {
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(p.surface.copy(alpha = 0.92f))
+                    .border(1.dp, p.border, RoundedCornerShape(12.dp))
+                    .padding(vertical = 4.dp),
+            ) {
+                MapToolItem(
+                    icon = Icons.Filled.GpsFixed,
+                    label = if (settings.mapFollow) "跟随中" else "跟随",
+                    active = settings.mapFollow,
+                ) {
                     val next = !settings.mapFollow
                     vm.updateViewSettings(settings.copy(mapFollow = next))
                     web?.evaluateJavascript("window.LBJ&&window.LBJ.setFollow($next)", null)
-                },
-            )
-            FloatPill(
-                text = "图层",
-                active = false,
-                onClick = { sheet = true },
-            )
-            FloatPill(
-                text = "回中心",
-                active = false,
-                onClick = {
+                }
+                MapToolItem(icon = Icons.Filled.Layers, label = "图层", active = false) {
+                    sheet = true
+                }
+                MapToolItem(icon = Icons.Filled.CenterFocusStrong, label = "回中心",
+                    active = false) {
                     web?.evaluateJavascript(
                         "window.LBJ&&window.LBJ.centerTo('${settings.mapCenterName}')", null)
                     vm.updateViewSettings(settings.copy(mapFollow = false))
-                },
-            )
-            FloatPill(
-                text = "转到自己位置",
-                active = false,
-                onClick = {
+                }
+                MapToolItem(
+                    icon = Icons.Filled.CloudDownload,
+                    label = if (cacheProgress != null) {
+                        val (d, t) = cacheProgress!!
+                        "缓存 $d/$t"
+                    } else {
+                        "缓存本区域"
+                    },
+                    active = cacheProgress != null,
+                ) {
+                    // 页面「缓存本区域」按钮在被隐藏的 #panel 里，用 JS 代点触发同一逻辑
+                    web?.evaluateJavascript(
+                        "(function(){var b=document.getElementById('btnCache');" +
+                            "if(b){b.click();return 'ok'}return 'no-btn'})()",
+                    ) { r -> Log.i(TAG, "cacheArea: $r") }
+                }
+            }
+        }
+
+        // ---- 右下角：转到自己位置（地图 App 常见的定位 FAB）----
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                // 避开底部悬浮 Dock（否则定位按钮被 Dock 压住/贴边）
+                .padding(end = 16.dp, bottom = Dim.dockSpace + 8.dp)
+                .size(54.dp)
+                .clip(CircleShape)
+                .background(p.accent.copy(alpha = 0.95f))
+                .clickable {
                     val g = gps ?: readLastGps(ctx).also { gps = it }
                     when {
                         g != null -> centerToGps(g)
@@ -485,17 +515,12 @@ fun MapPage(vm: ReceiverViewModel) {
                         }
                     }
                 },
-            )
-            FloatPill(
-                text = "缓存本区域",
-                active = cacheProgress != null,
-                onClick = {
-                    // 页面「缓存本区域」按钮在被隐藏的 #panel 里，用 JS 代点触发同一逻辑
-                    web?.evaluateJavascript(
-                        "(function(){var b=document.getElementById('btnCache');" +
-                            "if(b){b.click();return 'ok'}return 'no-btn'})()",
-                    ) { r -> Log.i(TAG, "cacheArea: $r") }
-                },
+        ) {
+            Icon(
+                Icons.Filled.MyLocation,
+                contentDescription = "转到自己位置",
+                tint = p.onAccent,
+                modifier = Modifier.align(Alignment.Center).size(26.dp),
             )
         }
 
@@ -990,6 +1015,39 @@ private fun pushCacheStats(ctx: Context, w: WebView) {
     w.post {
         w.evaluateJavascript(
             "window.LBJ&&window.LBJ.cacheStats({\"count\":$count,\"bytes\":$bytes})", null)
+    }
+}
+
+/**
+ * 地图右上角「工具卡」里的一行：图标 + 短文字，点击执行。
+ *
+ * v3.2.5：原先 5 个独立浮动胶囊（跟随/图层/回中心/转到自己位置/缓存本区域）
+ * 散在右上角，既挡地图又难扫读。现在收成一张紧凑卡片，只保留 4 个常用项，
+ * 「转到自己位置」独立成右下角的大定位按钮（地图 App 的通行布局）。
+ */
+@Composable
+private fun MapToolItem(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val p = pal()
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (active) p.accent else p.textSecondary,
+            modifier = Modifier.size(17.dp),
+        )
+        Spacer(Modifier.width(7.dp))
+        Text(label, color = if (active) p.accent else p.text, fontSize = 12.sp)
     }
 }
 

@@ -58,9 +58,9 @@ android {
         targetSdk = 35
         // 用户指定 NDK r27
         ndkVersion = "27.2.12479018"
-        // v3.2.4：桌面二级窗口自适应修复；versionCode 324
-        versionCode = 324
-        versionName = "3.2.4"
+        // v3.2.5：安卓多数据源 + 设置页合并 + 瀑布平滑 + 地图工具收拢；versionCode 325
+        versionCode = 325
+        versionName = "3.2.5"
     }
 
     signingConfigs {

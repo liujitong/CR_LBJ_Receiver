@@ -1,6 +1,12 @@
 package xyz.mlxkj.crlbj.ui.pages
 
 import androidx.compose.foundation.Canvas
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -86,7 +92,7 @@ fun DecodePage(
     val rssi = remember { ArrayDeque<Float>(240) }
     var rssiSnapshot by remember { mutableStateOf(FloatArray(0)) }
     // 频谱瀑布数据：每帧 32 个 bin 存一行（最多 80 行 ≈ 12s），弹层关掉时只留内存不渲染
-    val spectrumRows = remember { ArrayDeque<FloatArray>(80) }
+    val spectrumRows = remember { ArrayDeque<FloatArray>(140) }
     var spectrumSnapshot by remember { mutableStateOf<List<FloatArray>>(emptyList()) }
     LaunchedEffect(Unit) {
         var lastSeq = -1
@@ -99,7 +105,7 @@ fun DecodePage(
                 rssiSnapshot = rssi.toFloatArray()
                 if (f.spectrum.isNotEmpty()) {
                     spectrumRows.addLast(f.spectrum.copyOf())
-                    while (spectrumRows.size > 80) spectrumRows.removeFirst()
+                    while (spectrumRows.size > 140) spectrumRows.removeFirst()
                     spectrumSnapshot = spectrumRows.toList()
                 }
             }
@@ -349,33 +355,28 @@ private fun SignalWaterfallSheet(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(if (useSpectrum) 160.dp else 140.dp)
+                    .height(if (useSpectrum) 176.dp else 140.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(p.bg)
                     .border(1.dp, p.border, RoundedCornerShape(8.dp)),
             ) {
-                Canvas(Modifier.fillMaxSize().padding(4.dp)) {
-                    if (useSpectrum) {
-                        // 旧帧在上、新帧在下；颜色 = 相对能量热力
-                        val rows = spectrum.takeLast(64)
-                        val mn = rows.minOf { r -> r.min() }
-                        val mx = rows.maxOf { r -> r.max() }
-                        val span = (mx - mn).coerceAtLeast(0.001f)
-                        val rowH = size.height / rows.size
-                        val bins = rows.first().size
-                        val colW = size.width / bins
-                        rows.forEachIndexed { ri, row ->
-                            val y = ri * rowH
-                            row.forEachIndexed { bi, v ->
-                                val t = ((v - mn) / span).coerceIn(0f, 1f)
-                                drawRect(
-                                    heatColor(t, p.bg, p.spectrum, p.warn, p.accent),
-                                    topLeft = Offset(bi * colW, y),
-                                    size = Size(colW + 0.5f, rowH + 0.5f),
-                                )
-                            }
-                        }
-                    } else {
+                if (useSpectrum) {
+                    // v3.2.5：频谱只有 32 bin，逐 bin 画矩形会是一块块马赛克。
+                    // 这里先做**横向线性插值 + smoothstep 色阶**生成位图，再用
+                    // FilterQuality.Medium 平滑拉伸到全宽 → 看起来是连续瀑布。
+                    val waterfall = remember(spectrum, p.bg, p.spectrum, p.warn, p.accent) {
+                        buildWaterfallBitmap(
+                            spectrum.takeLast(140), p.bg, p.spectrum, p.warn, p.accent)
+                    }
+                    Image(
+                        bitmap = waterfall,
+                        contentDescription = "信号瀑布",
+                        modifier = Modifier.fillMaxSize().padding(3.dp),
+                        contentScale = ContentScale.FillBounds,
+                        filterQuality = FilterQuality.Medium,
+                    )
+                } else {
+                    Canvas(Modifier.fillMaxSize().padding(4.dp)) {
                         // RSSI 色条：低于门限用蓝灰，高门限用 CR 红/绿
                         val n = rssi.size
                         fun dbToY(db: Float): Float =
@@ -464,6 +465,63 @@ private fun heatColor(
     t < 0.35f -> lerp(low, mid, t / 0.35f)
     t < 0.7f -> lerp(mid, high, (t - 0.35f) / 0.35f)
     else -> lerp(high, top, (t - 0.7f) / 0.3f)
+}
+
+/**
+ * 频谱帧序列 → 平滑瀑布位图（v3.2.5）。
+ *
+ * 为什么不是逐 bin 画矩形：窄带频谱固定 **32 bin**，直接铺满手机宽度时每块
+ * 30px 宽，视觉上就是马赛克。这里做三件事：
+ *  1. **横向线性插值**（每 2 个 bin 之间插 [INTERP] 列），再把位图用
+ *     `FilterQuality.Medium` 放大到全宽，边缘自然过渡；
+ *  2. **smoothstep** 拉伸对比度（弱信号层次更清楚、强信号更亮）；
+ *  3. 一行一帧（旧帧在上、新帧在下），最多 [rows] 帧。
+ *
+ * 返回 `ImageBitmap` 供 `Image(..., filterQuality = Medium)` 直接绘制。
+ */
+private const val WATERFALL_INTERP = 8
+
+private fun buildWaterfallBitmap(
+    rows: List<FloatArray>,
+    low: androidx.compose.ui.graphics.Color,
+    mid: androidx.compose.ui.graphics.Color,
+    high: androidx.compose.ui.graphics.Color,
+    top: androidx.compose.ui.graphics.Color,
+): androidx.compose.ui.graphics.ImageBitmap {
+    val bins = rows.firstOrNull()?.size ?: 0
+    if (bins == 0 || rows.isEmpty()) {
+        val bmp = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        return bmp.asImageBitmap()
+    }
+    // 能量范围（整块瀑布统一，避免逐帧跳色）
+    var mn = Float.MAX_VALUE
+    var mx = -Float.MAX_VALUE
+    for (row in rows) for (v in row) {
+        if (v < mn) mn = v
+        if (v > mx) mx = v
+    }
+    val span = (mx - mn).coerceAtLeast(0.001f)
+    val w = (bins - 1).coerceAtLeast(1) * WATERFALL_INTERP + 1
+    val h = rows.size
+    val pixels = IntArray(w * h)
+    for (y in 0 until h) {
+        val row = rows[y]
+        for (x in 0 until w) {
+            val fx = x.toFloat() / WATERFALL_INTERP
+            val i0 = fx.toInt().coerceIn(0, bins - 1)
+            val i1 = (i0 + 1).coerceAtMost(bins - 1)
+            val f = (fx - i0).coerceIn(0f, 1f)
+            // 横向线性插值
+            val v = row[i0] * (1f - f) + row[i1] * f
+            var t = ((v - mn) / span).coerceIn(0f, 1f)
+            // smoothstep：低端压暗、亮部提亮，画面更有层次
+            t = t * t * (3f - 2f * t)
+            pixels[y * w + x] = heatColor(t, low, mid, high, top).toArgb()
+        }
+    }
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    bmp.setPixels(pixels, 0, w, 0, 0, w, h)
+    return bmp.asImageBitmap()
 }
 
 /** 当前解码大卡：车次大号 + 方向方块 + 速度/公里标/线路/机车/时间 + 自动查询的车次/配属信息 */

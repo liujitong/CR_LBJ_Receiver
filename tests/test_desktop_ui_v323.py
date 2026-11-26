@@ -90,11 +90,15 @@ def _read(*parts: str) -> str:
 
 
 def test_version_is_v321():
+    # 版本断言随当前发布版滚动更新（v3.2.5）；旧版本标题/标签不应残留
+    # （代码注释里的历史小版本说明允许保留，不算残留）
     init = _read('cr_lbj', '__init__.py')
-    assert "__version__ = '3.2.4'" in init
+    assert "__version__ = '3.2.5'" in init
     main = _read('cr_lbj', 'ui', 'windows', 'main_window.py')
-    assert 'v3.2.4' in main
-    assert 'v3.2.0' not in main
+    assert "v3.2.5'" in main
+    assert "kv('版本', 'v3.2.5')" in main
+    assert "v3.2.4'" not in main
+    assert "v3.2.0'" not in main
 
 
 def test_history_tab_removed_and_tool_action_added():

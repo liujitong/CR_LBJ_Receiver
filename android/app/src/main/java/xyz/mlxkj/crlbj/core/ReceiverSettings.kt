@@ -2,7 +2,61 @@ package xyz.mlxkj.crlbj.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.json.JSONArray
 import org.json.JSONObject
+
+/**
+ * 一条可切换的「数据源」配置（v3.2.5 多数据源）。
+ *
+ * 用户可以在设置里保存多套数据源（USB 棒 / 局域网 rtl_tcp / OWRX……），
+ * 点一下即可切换——切换等价于把这一套参数展开到 [ReceiverSettings] 顶层字段，
+ * 引擎与 DSP 链路只认顶层字段，所以切换后会自动重建链路。
+ */
+data class SourceProfile(
+    val name: String = "数据源",
+    /** usb | rtl_tcp | owrx */
+    val type: String = "usb",
+    val host: String = "127.0.0.1",
+    val port: Int = 1234,
+    val sampleRate: Int = 240000,
+    val gainDb: Double = 19.7,
+    val ppm: Double = 1.0,
+    val dcOffsetHz: Double = 50000.0,
+) {
+    val typeLabel: String
+        get() = when (type) {
+            "usb" -> "本机 USB"
+            "owrx" -> "OWRX"
+            else -> "rtl_tcp"
+        }
+
+    /** 列表里的一行副标题：USB 不显示主机端口 */
+    val detail: String
+        get() = if (type == "usb") {
+            "%s · %d kS/s".format(typeLabel, sampleRate / 1000)
+        } else {
+            "%s · %s:%d".format(typeLabel, host, port)
+        }
+
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("name", name); put("type", type); put("host", host); put("port", port)
+        put("sampleRate", sampleRate); put("gainDb", gainDb)
+        put("ppm", ppm); put("dcOffsetHz", dcOffsetHz)
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): SourceProfile = SourceProfile(
+            name = o.optString("name", "数据源"),
+            type = o.optString("type", "usb"),
+            host = o.optString("host", "127.0.0.1"),
+            port = o.optInt("port", 1234),
+            sampleRate = o.optInt("sampleRate", 240000),
+            gainDb = o.optDouble("gainDb", 19.7),
+            ppm = o.optDouble("ppm", 1.0),
+            dcOffsetHz = o.optDouble("dcOffsetHz", 50000.0),
+        )
+    }
+}
 
 /**
  * 接收设置（字段名与桌面版 lbj_config.json 同名，M3 设置页逐组接入编辑）。
@@ -60,8 +114,78 @@ data class ReceiverSettings(
     val trainQuerySource: String = "auto",
     /** 第三方数据（机车配属号段表）自动更新 */
     val dataAutoUpdate: Boolean = true,
+    // ---- 多数据源（v3.2.5）：可保存多套配置，点一下切换 ----
+    /** 已保存的数据源列表（至少一条） */
+    val sources: List<SourceProfile> = DEFAULT_SOURCES,
+    /** 当前使用第几条（0-based）；顶层 sourceType/host/... 是其展开值 */
+    val activeSource: Int = 0,
 ) {
     val isUsb: Boolean get() = sourceType == "usb"
+
+    /** 当前生效的数据源配置（越界时回退 0） */
+    val currentSource: SourceProfile?
+        get() = sources.getOrNull(activeSource)
+
+    /**
+     * 把顶层字段写回 [sources] 的当前项（编辑字段后保持列表与实际一致）。
+     * 列表为空时原样返回。
+     */
+    fun withActiveSnapshot(): ReceiverSettings {
+        if (sources.isEmpty()) return this
+        val idx = activeSource.coerceIn(0, sources.size - 1)
+        val updated = sources[idx].copy(
+            type = sourceType, host = host, port = port, sampleRate = sampleRate,
+            gainDb = gainDb, ppm = ppm, dcOffsetHz = dcOffsetHz,
+        )
+        return copy(
+            sources = sources.toMutableList().also { it[idx] = updated },
+            activeSource = idx,
+        )
+    }
+
+    /** 切换到第 [index] 条数据源：把它的参数展开到顶层字段。 */
+    fun selectSource(index: Int): ReceiverSettings {
+        val prof = sources.getOrNull(index) ?: return this
+        return copy(
+            activeSource = index, sourceType = prof.type,
+            host = prof.host, port = prof.port, sampleRate = prof.sampleRate,
+            gainDb = prof.gainDb, ppm = prof.ppm, dcOffsetHz = prof.dcOffsetHz,
+        )
+    }
+
+    /** 用当前顶层配置新建一条数据源并激活（原名可自定义）。 */
+    fun addSourceFromCurrent(name: String = ""): ReceiverSettings {
+        val base = withActiveSnapshot()
+        val idx = base.sources.size
+        val prof = SourceProfile(
+            name = name.ifBlank { "数据源 ${idx + 1}" },
+            type = sourceType, host = host, port = port, sampleRate = sampleRate,
+            gainDb = gainDb, ppm = ppm, dcOffsetHz = dcOffsetHz,
+        )
+        return base.copy(sources = base.sources + prof, activeSource = idx)
+    }
+
+    /** 删除第 [index] 条（至少保留一条）；删的是当前项就切到第一条。 */
+    fun removeSource(index: Int): ReceiverSettings {
+        if (sources.size <= 1 || index !in sources.indices) return this
+        val snapped = withActiveSnapshot()
+        val list = snapped.sources.toMutableList().also { it.removeAt(index) }
+        val nextActive = when {
+            snapped.activeSource == index -> 0
+            snapped.activeSource > index -> snapped.activeSource - 1
+            else -> snapped.activeSource
+        }
+        return snapped.copy(sources = list).selectSource(nextActive)
+    }
+
+    /** 重命名第 [index] 条数据源。 */
+    fun renameSource(index: Int, name: String): ReceiverSettings {
+        val n = name.trim()
+        if (n.isEmpty() || index !in sources.indices) return this
+        val list = sources.toMutableList()
+        list[index] = list[index].copy(name = n)
+        return copy(sources = list)
+    }
 
     /** 硬件实际调谐频率 = 目标 − DC 偏移（USB 模式扣 50k 让 DDC 落在目标频点） */
     val hwFreqHz: Long get() = (freqMhz * 1e6).toLong() - dcOffsetHz.toLong()
@@ -89,6 +213,16 @@ data class ReceiverSettings(
         /** 现行底图 id 全集（与 railmap.html BASE_SOURCES 一致）；旧配置里的废弃 id 读取时回退默认 */
         val KNOWN_BASES = setOf("amap", "amap_img", "baidu", "baidu_sat", "osm", "tdt_vec", "tdt_img")
 
+        /** 默认多数据源（v3.2.5）：USB 直连 / 本地 rtl_tcp / OWRX，可在设置里增删切换 */
+        val DEFAULT_SOURCES = listOf(
+            SourceProfile("本机 USB 直连", "usb", sampleRate = 240000,
+                gainDb = 19.7, ppm = 1.0, dcOffsetHz = 50000.0),
+            SourceProfile("本地 rtl_tcp", "rtl_tcp", host = "127.0.0.1", port = 1234,
+                sampleRate = 960000, gainDb = 15.7, ppm = 1.0, dcOffsetHz = 50000.0),
+            SourceProfile("OWRX 服务器", "owrx", host = "127.0.0.1", port = 8073,
+                sampleRate = 960000, gainDb = 15.7, ppm = 1.0, dcOffsetHz = 0.0),
+        )
+
         /** USB 直连推荐参数（桌面版 rtl_usb 档位） */
         val USB_DEFAULTS = ReceiverSettings(
             sourceType = "usb", sampleRate = 240000, gainDb = 19.7,
@@ -99,6 +233,9 @@ data class ReceiverSettings(
         fun load(ctx: Context): ReceiverSettings {
             val sp: SharedPreferences = ctx.getSharedPreferences("lbj", Context.MODE_PRIVATE)
             val d = OWRX_DEFAULTS
+            // v3.2.5：没有 sources 键 = 从旧版本升级上来，稍后用当前配置生成第一条
+            val hasSources = sp.contains("sources")
+            val loadedSources = parseSources(sp.getString("sources", null), d)
             val loaded = ReceiverSettings(
                 sourceType = sp.getString("sourceType", d.sourceType) ?: d.sourceType,
                 host = sp.getString("host", d.host) ?: d.host,
@@ -139,14 +276,49 @@ data class ReceiverSettings(
                 trainQuerySource = sp.getString("trainQuerySource", d.trainQuerySource)
                     ?: d.trainQuerySource,
                 dataAutoUpdate = sp.getBoolean("dataAutoUpdate", d.dataAutoUpdate),
+                sources = loadedSources,
+                activeSource = sp.getInt("activeSource", 0)
+                    .coerceIn(0, maxOf(0, loadedSources.size - 1)),
             )
             // USB 数据源不使用 host/port：把旧版本残留的网络服务器地址归一化回默认值，
             // 避免旧地址继续出现在启动日志/设置页里（也顺带做隐私清理）。
-            return if (loaded.isUsb && loaded.host != d.host) {
+            val normalized = if (loaded.isUsb && loaded.host != d.host) {
                 loaded.copy(host = d.host, port = d.port)
             } else {
                 loaded
             }
+            // 旧配置升级：没有多数据源列表时，用当前配置生成第一条（激活项），
+            // 另附两种其它类型的参考项，用户可再增删。避免出现「列表说 USB 240k、
+            // 下面字段却是 960k」的错位。
+            return if (hasSources) normalized else normalized.copy(
+                sources = legacySources(normalized), activeSource = 0)
+        }
+
+        /** 旧版配置升级成多数据源列表：当前配置放第一条，其余类型给默认参考项。 */
+        private fun legacySources(s: ReceiverSettings): List<SourceProfile> {
+            val nm = when (s.sourceType) {
+                "usb" -> "本机 USB 直连"
+                "owrx" -> "OWRX 服务器"
+                else -> "本地 rtl_tcp"
+            }
+            val cur = SourceProfile(
+                name = nm, type = s.sourceType, host = s.host, port = s.port,
+                sampleRate = s.sampleRate, gainDb = s.gainDb,
+                ppm = s.ppm, dcOffsetHz = s.dcOffsetHz)
+            return listOf(cur) + DEFAULT_SOURCES.filter { it.type != s.sourceType }
+        }
+
+        /** 解析数据源列表 JSON；缺失/损坏/为空时回退默认三档。 */
+        fun parseSources(json: String?, d: ReceiverSettings = OWRX_DEFAULTS): List<SourceProfile> {
+            if (json.isNullOrBlank()) return d.sources
+            return runCatching {
+                val arr = JSONArray(json)
+                val out = ArrayList<SourceProfile>(arr.length())
+                for (i in 0 until arr.length()) {
+                    out.add(SourceProfile.fromJson(arr.getJSONObject(i)))
+                }
+                out.ifEmpty { d.sources }
+            }.getOrDefault(d.sources)
         }
 
         fun save(ctx: Context, s: ReceiverSettings) {
@@ -154,6 +326,12 @@ data class ReceiverSettings(
             e.putString("sourceType", s.sourceType)
             e.putString("host", s.host)
             e.putInt("port", s.port)
+            // 多数据源列表（v3.2.5）：JSON 数组落盘；写之前先把顶层字段回写当前项
+            val snapped = s.withActiveSnapshot()
+            val arr = JSONArray()
+            snapped.sources.forEach { arr.put(it.toJson()) }
+            e.putString("sources", arr.toString())
+            e.putInt("activeSource", snapped.activeSource)
             e.putLong("freqMhz", s.freqMhz.toRawBits())
             e.putInt("sampleRate", s.sampleRate)
             e.putLong("gainDb", s.gainDb.toRawBits())
