@@ -360,11 +360,10 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearTileCache() {
-        android.util.Log.i("TileCache", "clearTileCache called")
         viewModelScope.launch(Dispatchers.IO) {
-            val cache = TileCache.get(getApplication())
-            cache.clear()
-            _tileCacheStats.value = cache.stats()
+            TileCache.get(getApplication()).clear()
+            // clear 会销毁旧实例；重新打开取统计，避免 closed cache 返回旧 size
+            _tileCacheStats.value = TileCache.get(getApplication()).stats()
             android.util.Log.i("TileCache", "cleared, stats=${_tileCacheStats.value}")
         }
     }
