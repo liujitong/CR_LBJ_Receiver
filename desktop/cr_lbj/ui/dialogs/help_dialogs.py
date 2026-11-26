@@ -386,7 +386,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v3.1.0  ·  2026-11')
+        ver = QLabel('v3.2.0  ·  2026-11')
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)
@@ -400,12 +400,25 @@ class AboutDialog(QDialog):
             '方向、速度等报文信息，并支持 ETA 到达时间估算。</p>'
             '<p>机车参数经中国中车官网、维基百科等公开资料核对。</p>'
             '<p style="margin-top: 10px;">参考 Sdr-Is-Fun 等 GitHub 上众多 LBJ 解码相关代码，'
-            '并使用 PySide6 等技术构建 GUI 界面。</p>'
-            '<p>特别鸣谢 <b>BI7AIG</b> 对 OWRX 测试提供的帮助。</p>'
+            '并使用 PySide6、Leaflet、OpenRailwayMap 等技术构建界面与地图。</p>'
+            '<p style="margin-top: 12px;"><b>开源致谢</b></p>'
+            '<p>· <b>LBJ_Console</b>（<a href="https://github.com/undef-i/LBJ_Console">'
+            'github.com/undef-i/LBJ_Console</a>，作者 <b>undef-i</b>，GPL-3.0）：'
+            '本项目的<b>机车配属号段表</b>（<code>loco_roster.csv</code>，一万六千余行）与'
+            '<b>机车类型代号表</b>（<code>loco_type_info.csv</code>）直接取自该项目'
+            '（<code>resources</code> 分支），安卓端界面骨架与地图图源思路亦参考其实现，'
+            '特此致谢。</p>'
+            '<p>· <b>OpenStreetMap</b> 贡献者（ODbL）：底图与铁路数据基础；'
+            '<b>OpenRailwayMap</b>（CC-BY-SA）：铁路图层瓦片；'
+            '<b>Leaflet</b>（BSD-2-Clause）：地图渲染引擎；'
+            '<b>RailGo</b> / 中国铁路 12306：车次时刻表查询。</p>'
+            '<p>· 天地图（国家地理信息公共服务平台）、高德地图、百度地图：底图瓦片服务。</p>'
+            '<p style="margin-top: 10px;">特别鸣谢 <b>BI7AIG</b> 对 OWRX 测试提供的帮助。</p>'
             '<p style="margin-top: 12px;"><b>作者：BG2GBQ</b></p>'
         )
         info.setWordWrap(True)
         info.setStyleSheet('font-size: 13px; line-height: 1.6;')
+        info.setOpenExternalLinks(True)
         layout.addWidget(info)
 
         layout.addWidget(self._sep())

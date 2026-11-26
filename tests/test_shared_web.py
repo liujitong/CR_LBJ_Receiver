@@ -244,7 +244,7 @@ class MapPageStructureTest(unittest.TestCase):
         self.assertIn("'gcj'", self.text)
         # 偏移坐标系底图下不叠 WGS-84 铁路图层
         self.assertIn('isOffsetBase()', self.text)
-        self.assertIn('铁路图层已关闭', self.text)
+        self.assertIn('铁路图层已暂停', self.text)
 
     # ---------------- 铁路图层 ----------------
     def test_orm_urls_and_styles(self):
@@ -331,9 +331,70 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertIn('bdimg.com', host)
         self.assertIn('map.baidu.com', host)
         self.assertIn('tdtReferer', host)
+        # v3.2：ORM 官方瓦片缺 Referer 会 403，必须注入
+        self.assertIn('openrailwaymap.org', host)
+        self.assertIn('ORM_REFERER', host)
+        self.assertIn("https://www.openrailwaymap.org/", host)
+        # v3.2 踩过的坑：setHttpHeader 的名字必须是 bytes，传 str 静默失效
+        self.assertIn("b'Referer'", host,
+                      'setHttpHeader 的 header 名必须用 bytes，否则 Referer 不生效')
         ext = read_ui('config_ext.py')
         self.assertIn("'tdtKey'", ext)
         self.assertIn("'tdtReferer'", ext)
+
+    def test_tile_stats_split_by_layer(self):
+        """v3.2：底图/铁路瓦片统计必须分离，否则铁路全挂会把底图误判成不可达。"""
+        html = read_html()
+        for name in ('baseTileOk', 'baseTileFail', 'railTileOk', 'railTileFail'):
+            self.assertIn(name, html, '缺少分图层统计变量 %s' % name)
+        self.assertIn("tileHooks(baseLayer, 'base')", html)
+        self.assertIn("tileHooks(railLayer, 'rail')", html)
+        # 全屏「底图不可达」判定必须只看底图
+        self.assertIn('baseTileFail', html)
+        self.assertIn('reallyDead', html)
+        self.assertNotIn('tilesFailed++', html,
+                         '不应再有全局 tilesFailed 计数（会被铁路失败污染）')
+        self.assertIn('railTilesTotal', html, 'status() 应暴露铁路瓦片统计')
+
+    def test_orm_referer_in_android_cache(self):
+        base = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'java',
+                            'xyz', 'mlxkj', 'crlbj')
+        cache = read_text(os.path.join(base, 'core', 'TileCache.kt'))
+        self.assertIn('https://www.openrailwaymap.org/', cache,
+                      '安卓代拉 ORM 瓦片必须带 Referer')
+
+    def test_train_info_display_contract(self):
+        """v3.2：车次/机车信息展示（等级/担当局/担当段/配属段/车型/配属/制造厂）。"""
+        html = read_html()
+        self.assertIn('setTrainInfo', html, '页面应提供 LBJ.setTrainInfo')
+        for field in ('grade', 'bureau', 'section', 'owner', 'model',
+                      'locoDepot', 'locoMaker', 'from', 'to'):
+            self.assertIn(field, html, 'info 字段契约缺 %s' % field)
+        self.assertIn('车次信息', html)
+        self.assertIn('机车配属', html)
+        # 桌面：查询服务 + 面板两行 + 地图补推
+        lookup = read_ui('info_lookup.py')
+        self.assertIn('class TrainInfoService', lookup)
+        self.assertIn('train_info', lookup)
+        self.assertIn('loco_roster', lookup)
+        self.assertIn("'section'", lookup, 'runner → section 映射')
+        panel = read_text(os.path.join(ROOT, 'desktop', 'cr_lbj', 'ui',
+                                       'components', 'info_panels.py'))
+        self.assertIn('trainInfo', panel)
+        self.assertIn('locoDepot', panel)
+        self.assertIn('def setInfo', panel)
+        mp = read_ui('map_panel.py')
+        self.assertIn('def setTrainInfo', mp)
+        host = read_ui('map_host.py')
+        self.assertIn('def set_train_info', host)
+        # 安卓：payload 带 info + 解码页展示担当段
+        base = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'java',
+                            'xyz', 'mlxkj', 'crlbj')
+        mappage = read_text(os.path.join(base, 'ui', 'pages', 'MapPage.kt'))
+        self.assertIn('trainInfoMap', mappage)
+        self.assertIn('locoDepot', mappage)
+        decode = read_text(os.path.join(base, 'ui', 'pages', 'DecodePage.kt'))
+        self.assertIn('ti.runner', decode, '安卓解码页应展示担当段')
 
     def test_android_tile_cache_host(self):
         # 安卓侧：原生代拉 + DiskLruCache + LBJHost 桥（v3.1）
@@ -391,21 +452,22 @@ class MapPageSyntaxTest(unittest.TestCase):
 
 
 class DocsVersionTest(unittest.TestCase):
-    """v3.1 发版时文档版本号必须同步（避免文档还停在 v3.0）。"""
+    """v3.2 发版时文档版本号必须同步（避免文档还停在 v3.1）。"""
 
     def test_readme_version(self):
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.1.0', readme, 'README 版本号应为 v3.1.0')
+        self.assertIn('v3.2.0', readme, 'README 版本号应为 v3.2.0')
         self.assertNotIn('**版本** v3.0.0', readme)
-        self.assertIn('v3.1.0', readme.split('## 更新记录', 1)[-1],
-                      'README 更新记录表应有 v3.1.0 行')
+        self.assertNotIn('**版本** v3.1.0', readme)
+        self.assertIn('v3.2.0', readme.split('## 更新记录', 1)[-1],
+                      'README 更新记录表应有 v3.2.0 行')
 
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.1', text, '%s 文首版本号应为 v3.1' % name)
+            self.assertIn('v3.2', text, '%s 文首版本号应为 v3.2' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.1.0', changelog, 'CHANGELOG 顶部应有 v3.1.0 条目')
+        self.assertIn('## v3.2.0', changelog, 'CHANGELOG 顶部应有 v3.2.0 条目')
 
 
 if __name__ == '__main__':

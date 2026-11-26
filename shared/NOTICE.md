@@ -1,4 +1,4 @@
-# 第三方资源与授权说明（v3.1）
+# 第三方资源与授权说明（v3.2）
 
 本仓库 `shared/` 目录存放**桌面端与安卓端共用**的地图页与数据文件。以下逐项说明来源与授权，
 分发（尤其是打包成 exe / apk 对外发布）时请保留本文件与各项目自带的 LICENSE。
@@ -12,12 +12,17 @@
 
 ## 2. 机车配属号段表 —— `shared/data/loco_roster.csv`
 
-- 来源：项目 **LBJ_Console**（<https://github.com/undef-i/LBJ_Console>）的 `resources` 分支
-  根目录 `loco_info.csv`，共 16622 行，未做字段改动（仅在文件头补了 4 行注释说明来源与格式）。
+- 来源：项目 **LBJ_Console**（<https://github.com/undef-i/LBJ_Console>，作者 **undef-i**）
+  的 `resources` 分支根目录 `loco_info.csv`，共 16622 行，未做字段改动
+  （仅在文件头补了 4 行注释说明来源与格式）。
 - 授权：**GPL-3.0**（该仓库 LICENSE 为 GPLv3）。本仓库同为 GPL-3.0，兼容。
 - 字段：`机车型号,起号,止号,配属单位(路局/机务段),备注,制造厂`
 - 已知数据缺口：3 行配属为空（原表即缺），界面显示为「原表未标注配属」，不做臆测填充。
 - 更新方式：替换该 CSV 后运行 `python tools/gen_shared_data.py` 重新校验。
+- **致谢**：本项目的「机车配属查询」、地图弹窗与解码页的「配属单位」全部建立在该表之上；
+  此外安卓端五页导航 + 悬浮玻璃 Dock 的界面骨架、OSM + OpenRailwayMap 的地图图源组合、
+  本地矢量铁路层（本项目 `rail_local.geojson`）的离线兜底思路，均参考 LBJ_Console 的实现。
+  感谢 undef-i 及其贡献者以 GPL-3.0 开放这些数据与代码。
 
 ## 3. 机车类型代号表 —— `shared/data/loco_types.csv`
 
@@ -47,7 +52,7 @@ v3.1 按用户要求只保留 4 类底图（高德/百度/OSM/天地图），其
 | 百度地图（街道/卫星，免 Key 公开瓦片） | 底图 | BD-09 + 百度自有墨卡托 | © 百度地图；公开瓦片为 Web 服务，正式分发/商用请按百度地图开放平台条款申请 |
 | 天地图（需自备 tk + Referer 白名单） | 底图 | CGCS2000（工程上等同 WGS-84） | 国家地理信息公共服务平台，需注册并按条款使用 |
 | OpenStreetMap 标准瓦片 | 底图 | WGS-84 | 数据 © OpenStreetMap contributors（ODbL）；瓦片服务有使用政策 |
-| **OpenRailwayMap** | **铁路图层** | WGS-84 | 数据 © OpenStreetMap contributors（ODbL），渲染 © OpenRailwayMap（CC-BY-SA）；官方瓦片为**非商业公益服务**，要求应用公开免费、须发唯一 User-Agent、禁止预取与伪造 Referer，官方可无预警封禁 |
+| **OpenRailwayMap** | **铁路图层** | WGS-84 | 数据 © OpenStreetMap contributors（ODbL），渲染 © OpenRailwayMap（CC-BY-SA）；官方瓦片为**非商业公益服务**，要求应用公开免费、须发唯一 User-Agent、并按官方要求携带 `Referer: https://www.openrailwaymap.org/`（v3.2 起两端宿主已内置），禁止伪造第三方 Referer、预取与批量抓取，官方可无预警封禁 |
 | 本地铁路线 `rail_local.geojson`（可选，不随仓库分发） | 铁路图层离线兜底 | WGS-84 | 用户自建（Geofabrik/OSM 提取，ODbL），见 `docs/地图与图源.md` |
 
 > ⚠️ OpenRailwayMap 官方瓦片服务器在中国大陆常被 TLS 阻断，且其条款要求「公开免费的应用」。

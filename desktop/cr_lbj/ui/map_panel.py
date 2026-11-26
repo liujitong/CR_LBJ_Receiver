@@ -56,8 +56,8 @@ def _sx(v: float) -> int:
 # ---------------------------------------------------------------------------
 # 瓦片失败提示门限
 # ---------------------------------------------------------------------------
-#: 瓦片全失败的门限（连续失败这么多次才提示「换一张底图」）
-_TILE_FAIL_HINT = 8
+#: 瓦片全失败的门限（失败样本达到这么多次才可能提示「换一张底图」）
+_TILE_FAIL_HINT = 6
 
 
 class MapPanel(QWidget):
@@ -402,7 +402,7 @@ class MapPanel(QWidget):
     # ------------------------------------------------------------------
     # 数据更新
     # ------------------------------------------------------------------
-    def updateTrain(self, d: dict):
+    def updateTrain(self, d: dict, info: Optional[dict] = None):
         lat = d.get('latitude')
         lon = d.get('longitude')
         if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
@@ -432,6 +432,14 @@ class MapPanel(QWidget):
             'category': d.get('category', '----'),
             'ts': ts,
         })
+        # 车次/机车信息（等级/担当局/配属段/车型/制造厂）：合并而非覆盖，
+        # 因为车次查询是异步的、可能比位置帧晚到。
+        merged = dict(item.get('info') or {})
+        for k, v in (info or {}).items():
+            if v:
+                merged[k] = v
+        if merged:
+            item['info'] = merged
         # 清理 15 分钟未更新的列车（用本条报文时间做基准，掉线时不至于全清）
         cutoff = ts - 900
         for k in [k for k, v in self._trains.items() if v.get('ts', 0) < cutoff]:
@@ -470,6 +478,30 @@ class MapPanel(QWidget):
         tid = max(self._trains.values(), key=lambda x: x.get('ts', 0))['id']
         if self.host.ready:
             self.host.focus(tid)
+
+    def setTrainInfo(self, train_or_id, info: dict):
+        """补充某趟车的车次/机车信息（车次查询异步回来后调用）。
+
+        同时写进本地缓存并把整份 payload 重推一次，保证刷新/重开页面后不丢。
+        """
+        key = str(train_or_id or '').strip()
+        if not key or not isinstance(info, dict) or not info:
+            return
+        hit = False
+        for tid, item in self._trains.items():
+            if tid == key or str(item.get('train') or '') == key:
+                merged = dict(item.get('info') or {})
+                for k, v in info.items():
+                    if v:
+                        merged[k] = v
+                if merged:
+                    item['info'] = merged
+                    hit = True
+        if not hit:
+            return
+        if self.host.ready:
+            self.host.set_train_info(key, {k: v for k, v in info.items() if v})
+            self._push(force=True)
 
     def clear(self):
         self._trains.clear()
@@ -568,15 +600,18 @@ class MapPanel(QWidget):
             self._syncNightBtn()
         # ③ 图层：页面内被用户改过就回写配置；坐标不混叠导致的自动关图层不算
         self._syncLayersFromPage(st)
-        # ④ 瓦片：全失败时给一句「换一张」，不弹窗
+        # ④ 瓦片：底图真的不可达时才给一句「换一张」，不弹窗
         try:
             total = int(st.get('tilesTotal') or 0)
             failed = int(st.get('tilesFailed') or 0)
         except (TypeError, ValueError):
             total, failed = 0, 0
-        # total 是**成功**张数：一张都没成功且失败很多，就是底图不可达
-        bad = bool(failed > _TILE_FAIL_HINT
-                   and (total == 0 or failed >= total * 0.9))
+        # 页面 status() 的 tilesTotal/tilesFailed **只统计底图**（v3.2 起铁路单独统计），
+        # 所以这里不会被 ORM 403 带偏。
+        # total 是**成功**张数，加载中 total 可能很小：要求失败≥6 且失败率 ≥95%
+        # （failed >= total*19）才算不可达，避免「明明可达却被判不可达」。
+        bad = bool(failed >= _TILE_FAIL_HINT
+                   and (total == 0 or failed >= total * 19))
         if bad != self._tile_bad:
             self._tile_bad = bad
             self._refreshCoordLabel()

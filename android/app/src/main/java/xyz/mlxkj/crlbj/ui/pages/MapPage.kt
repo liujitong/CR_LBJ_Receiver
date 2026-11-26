@@ -62,6 +62,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import xyz.mlxkj.crlbj.core.ReceiverSettings
 import xyz.mlxkj.crlbj.core.TileCache
+import xyz.mlxkj.crlbj.data.LocoRoster
+import xyz.mlxkj.crlbj.data.TrainInfoClient
 import xyz.mlxkj.crlbj.engine.DecodeEvent
 import xyz.mlxkj.crlbj.ui.components.FloatPill
 import xyz.mlxkj.crlbj.ui.components.SectionCard
@@ -94,6 +96,9 @@ fun MapPage(vm: ReceiverViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val events by vm.events.collectAsStateWithLifecycle()
     val running by vm.running.collectAsStateWithLifecycle()
+    // v3.2：车次/机车查询结果（解码页自动查询的同一份缓存），带进地图标记与弹窗
+    val trainInfos by vm.trainInfos.collectAsStateWithLifecycle()
+    val locoInfos by vm.locoInfos.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val p = pal()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -102,7 +107,10 @@ fun MapPage(vm: ReceiverViewModel) {
     var cacheProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     // 带坐标的最新一条（按车次去重，最多 24 列，地图上不挤）
-    val trains = remember(events) { collectTrains(events) }
+    // 车次/配属信息一并带进 payload（异步查询回来后自动重推，标记与弹窗即时更新）
+    val trains = remember(events, trainInfos, locoInfos) {
+        collectTrains(events, trainInfos, locoInfos)
+    }
     val newest = trains.firstOrNull()
 
     var web by remember { mutableStateOf<WebView?>(null) }
@@ -237,12 +245,16 @@ fun MapPage(vm: ReceiverViewModel) {
                     if (st.locked && vm.settings.value.mapFollow) {
                         vm.updateViewSettings(vm.settings.value.copy(mapFollow = false))
                     }
-                    // 瓦片连续失败就提示换图源。注意 tilesTotal 只统计**成功**的
-                    // tileload，网络全断时 total=0、failed 却在涨，所以不能要求 total>0。
-                    val failed = st.tilesFailed > 8 &&
-                        (st.tilesTotal == 0 || st.tilesFailed > st.tilesTotal * 0.9)
+                    // 底图瓦片「真的不可达」才提示换图源。注意：
+                    //  · 页面 status() 的 tilesTotal/tilesFailed **只统计底图**，
+                    //    铁路图层（ORM 需 Referer）失败不再污染判定；
+                    //  · tilesTotal 只统计成功的 tileload，网络全断时 total=0、
+                    //    failed 仍在涨，所以不能要求 total>0；
+                    //  · 有成功瓦片时要求失败率 ≥95% 才算不可达，避免偶尔几张失败误判。
+                    val failed = st.tilesFailed >= 6 &&
+                        (st.tilesTotal == 0 || st.tilesFailed >= st.tilesTotal * 19)
                     if (failed != tileFail) {
-                        Log.i(TAG, "瓦片失败状态变化: $failed (total=${st.tilesTotal} failed=${st.tilesFailed})")
+                        Log.i(TAG, "底图不可达状态变化: $failed (total=${st.tilesTotal} failed=${st.tilesFailed})")
                     }
                     tileFail = failed
                 }
@@ -674,6 +686,7 @@ private val FALLBACK_LAYERS = listOf(
     LayerOption("orm_signals", "ORM 信号", "wgs", "rail"),
     LayerOption("orm_electrified", "ORM 电气化", "wgs", "rail"),
     LayerOption("orm_gauge", "ORM 轨距", "wgs", "rail"),
+    LayerOption("rail_local", "本地铁路线（GeoJSON）", "wgs", "rail"),
 )
 
 private fun parseLayers(json: String?): List<LayerOption> {
@@ -965,6 +978,10 @@ private fun updateJs(trains: List<TrainPoint>, s: ReceiverSettings): String {
             put("category", t.category)
             put("time", t.time)
             put("ts", t.ts)
+            // v3.2：车次等级/担当局/担当段/配属段/车型 + 机车配属/制造厂
+            val info = JSONObject()
+            t.info.forEach { (k, v) -> if (v.isNotBlank()) info.put(k, v) }
+            if (info.length() > 0) put("info", info)
         })
     }
     val payload = JSONObject().apply {
@@ -992,9 +1009,49 @@ data class TrainPoint(
     val category: String,
     val time: String,
     val ts: Double,
+    /** 车次/机车查询信息（grade/bureau/section/owner/model/locoDepot/locoMaker…） */
+    val info: Map<String, String> = emptyMap(),
 )
 
-private fun collectTrains(events: List<DecodeEvent>): List<TrainPoint> {
+/**
+ * 车次/机车信息 → 页面 info 字段（与 shared/web/railmap.html 的 `infoRows` 契约一致）。
+ *
+ * 车次：TrainInfoClient.TrainInfo（category=等级、bureau=担当局、runner=担当段、
+ * carOwner=配属段、car=车型）；机车：LocoRoster.Lookup（depot=配属单位、maker=制造厂）。
+ * 查询失败/未命中时返回空 map，页面只少几行信息，不影响标记。
+ */
+internal fun trainInfoMap(
+    trainInfo: TrainInfoClient.TrainInfo?,
+    locoInfo: LocoRoster.Lookup?,
+): Map<String, String> {
+    val out = LinkedHashMap<String, String>()
+    trainInfo?.let { ti ->
+        if (!ti.ok) return@let
+        fun pick(src: String, dst: String) {
+            if (src.isNotBlank()) out[dst] = src.trim()
+        }
+        pick(ti.category, "grade")
+        pick(ti.bureau, "bureau")
+        pick(ti.runner, "section")
+        pick(ti.carOwner, "owner")
+        pick(ti.car, "model")
+        pick(ti.start, "from")
+        pick(ti.end, "to")
+    }
+    locoInfo?.let { li ->
+        if (!li.ok) return@let
+        if (li.depot.isNotBlank()) out["locoDepot"] = li.depot.trim()
+        if (li.maker.isNotBlank()) out["locoMaker"] = li.maker.trim()
+        if (li.model.isNotBlank()) out["locoModel"] = li.model.trim()
+    }
+    return out
+}
+
+private fun collectTrains(
+    events: List<DecodeEvent>,
+    trainInfos: Map<String, TrainInfoClient.TrainInfo> = emptyMap(),
+    locoInfos: Map<String, LocoRoster.Lookup> = emptyMap(),
+): List<TrainPoint> {
     val seen = HashSet<String>()
     val out = ArrayList<TrainPoint>(24)
     for (e in events) {
@@ -1003,6 +1060,8 @@ private fun collectTrains(events: List<DecodeEvent>): List<TrainPoint> {
         // 地图 id 与页面一致：优先 baseTrain（同车次换端不新增标记）
         val id = e.baseTrain.ifEmpty { e.train }.ifEmpty { e.uid }
         if (id.isEmpty() || !seen.add(id)) continue
+        val ti = trainInfos[TrainInfoClient.normalizeTrain(e.train)]
+        val li = locoInfos[ReceiverViewModel.locoKey(e.loco, e.locoCode)]
         out.add(
             TrainPoint(
                 id = id,
@@ -1017,6 +1076,7 @@ private fun collectTrains(events: List<DecodeEvent>): List<TrainPoint> {
                 category = e.category,
                 time = e.timeStr,
                 ts = e.timestamp,
+                info = trainInfoMap(ti, li),
             )
         )
         if (out.size >= 24) break

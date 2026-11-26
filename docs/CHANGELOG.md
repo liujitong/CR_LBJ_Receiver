@@ -6,8 +6,112 @@
 - **小版本**：`v3.x`——功能更新，**桌面与安卓同时升**。
 - **最小版本**：`v3.x.y`——只改了一个端才编最小版本号，改哪个端就编哪个端的号。
 
-桌面端与安卓端**共用同一个版本号**（本版两端都是 `v3.1.0`），因为 v3 的目标就是
+桌面端与安卓端**共用同一个版本号**（本版两端都是 `v3.2.0`），因为 v3 的目标就是
 "一次发布、两端同步"。
+
+---
+
+## v3.2.0 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.2.0`，安卓 `versionName = 3.2.0` / `versionCode = 320`。
+> 主题：**修复地图「可达却判不可达」误判与 ORM 铁路图层叠加（Referer）、双端展示车次·机车信息、致谢正式化。**
+
+### 一、地图（误判修复 / ORM Referer 修复 / 失败判定规则）
+
+#### 1. 修复「可达却判不可达」误判
+
+- **根因**：`shared/web/railmap.html` 的瓦片统计原先底图与铁路共用一个计数器
+  （`tilesTotal` / `tilesFailed`）。OpenRailwayMap 官方瓦片缺 Referer 时整层 403，
+  这些 `tileerror` 把计数器顶高，页面据此把**本可正常显示**的底图误判成「底图不可达」，
+  弹出全屏换图提示，桌面坐标栏也变红「底图不可达，换一张」。
+- **修复**：统计**按图层分离**为 `baseTileOk` / `baseTileFail`（底图）与
+  `railTileOk` / `railTileFail`（铁路）；`tilesTotal()` / `tilesFailed()` 保留旧名但
+  **只返回底图**统计（宿主兼容）。`LBJ.status()` 新增 `railTilesTotal` / `railTilesFailed`，
+  原 `tilesTotal` / `tilesFailed` 只统计底图。
+- **失败判定规则（现在）**：
+  - 全屏「底图不可达」提示只在**底图**满足 `baseTileFail >= 6` 且
+    （`baseTileOk === 0` 或 `baseTileFail >= baseTileOk * 19`，即失败率 ≥ 95%）时出现；
+  - 铁路瓦片失败只弹一次小字 toast（`warnRailFail()`，失败 ≥ 4 张触发）并写状态行
+    「铁路 N/失败 M」，**不再影响底图判定**；
+  - 桌面坐标栏「底图不可达，换一张」仍按 `failed > 8` 且（`total == 0` 或
+    `failed >= total × 0.9`）判定（`map_panel._TILE_FAIL_HINT`），但输入已是**纯底图**统计；
+  - 安卓 `MapPage` 同步改为 `tilesFailed >= 6` 且（`tilesTotal == 0` 或
+    `tilesFailed >= tilesTotal * 19`）。
+
+#### 2. 修复 ORM 铁路图层叠加（关键）
+
+- **根因**：OpenRailwayMap 官方瓦片要求请求带合法 `Referer: https://www.openrailwaymap.org/`；
+  **只带浏览器 UA 仍返回 403**，而两端地图页都以 `file://` 加载，页面自身没有 Referer
+  → 铁路图层全部失败，并连带触发上面的误判。
+- **桌面**：`desktop/cr_lbj/ui/map_host.py` 的 `_TdtRefererInterceptor` 对
+  `*.openrailwaymap.org` 注入 `ORM_REFERER = 'https://www.openrailwaymap.org/'`。
+  **坑**：PySide6 的 `QWebEngineUrlRequestInfo.setHttpHeader` 的 **header 名和值都必须是
+  `bytes`**（`info.setHttpHeader(b'Referer', ...encode('utf-8'))`）；传 `str` 不报错也不生效，
+  请求照旧无 Referer → 403（排错章节已写明）。
+- **安卓**：`android/.../core/TileCache.kt` 的 `refererFor(host, tdtReferer)` 对
+  `*.openrailwaymap.org` 返回同一 Referer（`host.endsWith("openrailwaymap.org") -> "https://www.openrailwaymap.org/"`），
+  由原生代拉 `HttpURLConnection.setRequestProperty("Referer", …)` 补上。
+- **实测**：桌面 OSM 底图 + ORM 标准图层 **16/16 瓦片全部成功**（修复前整层 403）。
+
+#### 3. 失败降级
+
+- 铁路瓦片仍失败时页面状态行显示「铁路 ok/失败」；全部失败（`railTileFail > 4 &&
+  railTileOk === 0`）时提示「铁路图层不可用：需要合法 Referer（v3.2 起客户端已内置），
+  可改用本地铁路线（GeoJSON）」，底图照常显示。
+
+#### 4. 铁路图层自动暂停状态（`railWanted` / `railAutoOff`）
+
+- 切到高德/百度（偏移坐标系）时页面把铁路图层自动置 `off`，提示改为「**铁路图层已暂停**」；
+  页面用 `railWanted` / `railAutoOff` 记住「用户想要的样式」，`notifyHost()` 上报
+  `railWanted` 而不是 `off`，避免宿主把自动暂停误当成用户选择关闭；切回 OSM / 天地图时
+  自动恢复原样式。
+
+### 二、信息展示（双端车次·机车·担当路局）
+
+- **共享页面 `shared/web/railmap.html`**：
+  - 标记副标题新增**车次等级**（`markerSub()` 追加 `info.grade`）；
+  - 点击弹窗新增四行：**车次信息**（等级 · 担当局 · 担当段）、**车底**（配属段 · 车型）、
+    **区间**（始发 → 终到）、**机车配属**（配属单位 · 制造厂），由 `infoRows()` 生成；
+  - 新 API `LBJ.setTrainInfo(idOrTrain, info)`：宿主异步查询到信息后补进标记，**不改变位置**；
+    参数可传对象或 JSON 字符串，返回命中的标记数；`update()` 的 `trains[]` 元素也支持
+    `info` 对象，后到的非空字段与旧值浅合并；
+  - `info` 字段契约：`grade` 等级 / `bureau` 担当局 / `section` 担当段 / `owner` 配属段 /
+    `model` 车型 / `from`·`to` 始发终到 / `locoDepot` 机车配属单位 / `locoMaker` 制造厂 /
+    `locoModel` 机车型号。
+- **桌面**：
+  - 新增 `desktop/cr_lbj/ui/info_lookup.py`：`TrainInfoService`（车次走 `train_info.query`
+    后台线程查询并按车次缓存，信号 `infoReady`；机车走本地 `loco_roster.lookup_loco`
+    同步查询，毫秒级）与 `merge_info()`；
+  - 主窗口解码后由 `_decode_info()` 组装 `info` → 地图标记 + 右侧「车次信息」面板；
+  - `TrainInfoPanel` 新增「车次信息」「机车配属」两行（共 13 字段）与 `setInfo()`；
+  - `MapPanel.setTrainInfo()` 在后台查询结果晚到时补推；`MapHost.set_train_info()` 落到
+    `window.LBJ.setTrainInfo`。
+- **安卓**：
+  - `MapPage` 把 `vm.trainInfos` / `vm.locoInfos`（解码页自动查询的同一份缓存）
+    组装成 `info` 带进地图 payload，标记与点击弹窗即时显示；
+  - `DecodePage` 当前解码卡新增「担当段 `runner`」与「区间」两行，机车配属行显示
+    **机车型号 + 配属单位 + 制造厂**（`li.model` / `li.depot` / `li.maker`）。
+
+### 三、致谢
+
+- `README.md`「致谢」章节重写：正式致谢 **LBJ_Console**（作者 **undef-i**，GPL-3.0），
+  逐项列出使用内容——`loco_roster.csv` 配属号段表、`loco_type_info.csv` 代号表、
+  安卓界面骨架、OSM + OpenRailwayMap 图源方案、本地矢量铁路层思路；并补充 RailGo、
+  OSM / ORM / Leaflet / 天地图 / 高德 / 百度等数据与服务致谢。
+- `shared/NOTICE.md` 第 2 节补致谢段（数据、界面骨架、图源方案、离线铁路层思路）。
+- 桌面「关于」对话框新增「开源致谢」段；安卓「关于」页新增致谢段。
+
+### 四、测试与验证
+
+- 文档同步：`README.md`、`docs/CHANGELOG.md`、`docs/地图与图源.md`、`docs/技术参考.md`、
+  `docs/用户手册.md`、`docs/安卓版说明.md`、`docs/架构说明.md`、`shared/NOTICE.md`
+  版本号与内容更新到 v3.2。
+- 自动化：`D:\Python\Python314\python.exe -m pytest tests -q` → **90 passed**（含新增的
+  v3.2 契约测试：ORM Referer、瓦片分图层统计、车次·机车信息展示）。
+- 地图实测：桌面 OSM 底图 + ORM 标准图层 16/16 瓦片成功；铁路层失败不再触发
+  「底图不可达」全屏提示。
+- `LBJ.status()` 字段核对：`tilesTotal` / `tilesFailed` 只含底图，
+  `railTilesTotal` / `railTilesFailed` 为铁路层计数。
 
 ---
 

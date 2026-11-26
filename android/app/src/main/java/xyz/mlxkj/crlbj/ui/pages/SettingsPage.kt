@@ -86,6 +86,7 @@ private val MAP_RAILS = listOf(
     "orm_signals" to "ORM 信号",
     "orm_electrified" to "ORM 电气化",
     "orm_gauge" to "ORM 轨距",
+    "rail_local" to "本地铁路线（GeoJSON）",
 )
 
 /** 菜单式设置：每项进入独立子页（顶部返回） */
@@ -421,9 +422,9 @@ fun SettingsPage(vm: ReceiverViewModel) {
 
                     // ----------------------------------------------------- 关于
                     else -> SectionCard("关于") {
-                        Text("CR 列车预警器 · Android v3.1.0", color = p.text, fontSize = 13.sp)
+                        Text("CR 列车预警器 · Android v3.2.0", color = p.text, fontSize = 13.sp)
                         Text(
-                            "桌面版与安卓版 v3.1.0 同时发版；地图页与桌面端共用 " +
+                            "桌面版与安卓版 v3.2.0 同时发版；地图页与桌面端共用 " +
                                 "shared/web/railmap.html，数据共用 shared/data/*。",
                             color = p.textTertiary, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 4.dp),
@@ -432,6 +433,22 @@ fun SettingsPage(vm: ReceiverViewModel) {
                             "配属号段表来源 LBJ_Console（GPL-3.0）；参数表来源 trainfanz.com 公开资料。",
                             color = p.textTertiary, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 6.dp),
+                        )
+                        Text(
+                            "开源致谢",
+                            color = p.text, fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                        Text(
+                            "· LBJ_Console（github.com/undef-i/LBJ_Console，作者 undef-i，GPL-3.0）：" +
+                                "机车配属号段表、机车类型代号表取自该项目 resources 分支；" +
+                                "界面骨架与地图图源方案亦参考其实现，特此致谢。\n" +
+                                "· OpenStreetMap 贡献者（ODbL）、OpenRailwayMap（CC-BY-SA）、" +
+                                "Leaflet（BSD-2-Clause）：地图与铁路图层。\n" +
+                                "· RailGo / 中国铁路 12306：车次时刻表查询。\n" +
+                                "· 天地图、高德地图、百度地图：底图瓦片服务。",
+                            color = p.textTertiary, fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
                 }

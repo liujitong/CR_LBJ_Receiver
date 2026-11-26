@@ -150,6 +150,8 @@
         LBJ.applyConfig(cfg) / setBase(id) / setRailway(b) / setRailStyle(id)
         LBJ.railOpacity(v) / status() / layers()
         LBJ.centerLatLng(lat, lng[, zoom])   转到本机位置（WGS-84 入参）
+        LBJ.setTrainInfo(idOrTrain, info)    补充车次/机车信息（等级/担当局/配属段/车型/
+                                              机车配属/制造厂），显示在标记与弹窗里
         LBJ.onCacheProgress(done, total)     宿主回调：缓存进度
         LBJ.cacheStats(json)                 宿主回调：{count, bytes}
       离线缓存：宿主侧代拉瓦片并落盘；本页通过
@@ -471,9 +473,21 @@
 
   /* ---------------- 4. 地图与图层 ---------------- */
   var map = null;
-  var baseLayer = null, railLayer = null, tilesTotal = 0, tilesFailed = 0;
+  // 瓦片统计必须**按图层分开**：以前底图与铁路共用一个计数器，
+  // 只要铁路瓦片（ORM 需要 Referer，缺了会 403）失败，就会把底图误判成「不可达」。
+  var baseLayer = null, railLayer = null;
+  var baseTileOk = 0, baseTileFail = 0;
+  var railTileOk = 0, railTileFail = 0;
+  var railFailWarned = false;
+  // 兼容旧调用（宿主 status() 读 tilesTotal/tilesFailed）：只反映底图
+  function tilesTotal() { return baseTileOk; }
+  function tilesFailed() { return baseTileFail; }
   var userTouched = false, follow = CONFIG.follow !== false, night = CONFIG.night !== false;
   var railUserOff = false;   // 用户手动把铁路图层关掉了：换底图时不要自作主张再打开
+  // 偏移底图（高德/百度）会自动暂停铁路图层；这两个变量记住「用户想要的图层」，
+  // 让 notifyHost 不把暂停状态落盘，并在切回 WGS-84 底图时自动恢复。
+  var railWanted = 'orm_standard';
+  var railAutoOff = false;
   var lastFocusId = null, lastAuto = null;
   var centerApplied = false;   // 默认中心只应用一次，之后由跟随/用户操作决定视图
 
@@ -509,10 +523,26 @@
   }
   function currentZoom() { return map ? map.getZoom() : (CONFIG.zoom || 11); }
 
-  function tileHooks(layer) {
-    layer.on('tileerror', function () { tilesFailed++; scheduleStatus(); });
-    layer.on('tileload', function () { tilesTotal++; scheduleStatus(); });
+  // 瓦片事件分图层统计：底图失败才算「底图不可达」，铁路失败只影响铁路提示。
+  function tileHooks(layer, kind) {
+    var isRail = (kind === 'rail');
+    layer.on('tileerror', function () {
+      if (isRail) { railTileFail++; warnRailFail(); } else { baseTileFail++; }
+      scheduleStatus();
+    });
+    layer.on('tileload', function () {
+      if (isRail) railTileOk++; else baseTileOk++;
+      scheduleStatus();
+    });
     return layer;
+  }
+  // 铁路瓦片失败：只提示一次，不误伤底图判定（ORM 需 Referer，缺 Referer 会 403）
+  function warnRailFail() {
+    if (railFailWarned) return;
+    if (railTileFail < 4) return;
+    railFailWarned = true;
+    toast('<b>铁路图层瓦片加载失败</b>：OpenRailwayMap 需要合法 Referer，' +
+          '请确认客户端版本（v3.2 起已内置）。也可改用「本地铁路线（GeoJSON）」。', 7000);
   }
 
   function buildBase() {
@@ -531,12 +561,13 @@
     // 百度瓦片编号与 Leaflet 索引不同，用专用子类换算
     baseLayer = isBaiduBase() ? new BaiduTileLayer(url, opts) : L.tileLayer(url, opts);
     baseLayer.addTo(map);
-    tileHooks(baseLayer);
+    tileHooks(baseLayer, 'base');
     applyNightFallback();
   }
 
   function buildRail() {
     if (railLayer) { map.removeLayer(railLayer); railLayer = null; }
+    railTileOk = 0; railTileFail = 0; railFailWarned = false;
     var src = RAIL_SOURCES[railId];
     if (!src) return;
     if (src.file) { buildLocalRail(src); return; }
@@ -549,10 +580,13 @@
       opacity: Math.min(1, Math.max(0.2, CONFIG.railOpacity || 0.85)),
       attribution: ORM_ATTR,
       className: 'lbj-rail',
-      detectRetina: false
+      detectRetina: false,
+      // ORM 官方瓦片对 UA 与 Referer 有要求：宿主（桌面/安卓）会在请求层补
+      // Referer: https://www.openrailwaymap.org/，页面这边保持常规浏览器标识。
+      crossOrigin: false
     });
     railLayer.addTo(map);
-    tileHooks(railLayer);
+    tileHooks(railLayer, 'rail');
   }
 
   // 离线兜底：读取同目录 rail_local.geojson（用户自建，见 docs/地图与图源.md）
@@ -601,9 +635,7 @@
     var col = (CONFIG.colors || {})[
       d.direction === '上行' ? 'up' : (d.direction === '下行' ? 'down' : 'unknown')] || '#888';
     var title = escapeHtml(d.train || d.id || '----');
-    var sub = [];
-    if (d.speed && d.speed !== '---') sub.push(d.speed + ' km/h');
-    if (d.km && d.km !== '---.-') sub.push('K' + d.km);
+    var sub = markerSub(d);
     var cls = 'lbj-marker' + (sel ? ' sel' : '') + (mini ? ' mini' : '');
     return '<div class="' + cls + '"><span class="tag" style="background:' + col + '">' +
       title + '</span>' + (sub.length ? '<span class="sub">' + escapeHtml(sub.join(' · ')) + '</span>' : '') +
@@ -614,6 +646,34 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
     });
+  }
+
+  // 车次/机车信息（宿主异步查询后随 update 或 setTrainInfo 送来）：
+  //   grade 等级 · bureau 担当局 · section 担当段/客运段 · owner 配属段/车辆段
+  //   model 车型 · locoDepot 机车配属单位 · locoMaker 制造厂 · from/to 始发终到
+  function infoRows(d) {
+    var info = (d && d.info) || {};
+    var rows = [];
+    var grade = info.grade || '';
+    var line1 = [grade, info.bureau, info.section].filter(Boolean).join(' · ');
+    if (line1) rows.push(['车次信息', line1]);
+    var owner = info.owner || '';
+    var line2 = [owner, info.model].filter(Boolean).join(' · ');
+    if (line2) rows.push(['车底', line2]);
+    if (info.from || info.to) {
+      rows.push(['区间', (info.from || '?') + ' → ' + (info.to || '?')]);
+    }
+    var locoLine = [info.locoDepot, info.locoMaker].filter(Boolean).join(' · ');
+    if (locoLine) rows.push(['机车配属', locoLine]);
+    return rows;
+  }
+  function markerSub(d) {
+    var bits = [];
+    if (d.speed && d.speed !== '---') bits.push(d.speed + ' km/h');
+    if (d.km && d.km !== '---.-') bits.push('K' + d.km);
+    var info = d.info || {};
+    if (info.grade) bits.push(info.grade);
+    return bits;
   }
 
   function upsertTrain(d) {
@@ -635,12 +695,22 @@
       st = state[id] = { marker: mk, line: null, data: d, trail: [], ts: 0 };
       mk.addTo(map);
     } else {
+      // 位置类字段用新数据，info 字段做浅合并（后到的车次查询结果不会被空值覆盖）
+      var merged = d;
+      if (st.data && st.data.info) {
+        merged = {};
+        for (var k in d) if (Object.prototype.hasOwnProperty.call(d, k)) merged[k] = d[k];
+        var info = {};
+        for (var k1 in st.data.info) info[k1] = st.data.info[k1];
+        for (var k2 in (d.info || {})) info[k2] = d.info[k2];
+        merged.info = info;
+      }
       st.marker.setLatLng(pos);
       st.marker.setIcon(L.divIcon({
-        className: '', html: markerHtml(d, lastFocusId === id, false),
+        className: '', html: markerHtml(merged, lastFocusId === id, false),
         iconSize: [0, 0], iconAnchor: [0, 0]
       }));
-      st.data = d;
+      st.data = merged;
     }
 
     // 轨迹抽稀：位移 > 6m 或距上一点 > 3s 才记
@@ -682,9 +752,11 @@
       ['公里标', 'K' + (d.km || d.position || '---.-')],
       ['线路', d.route || '----'],
       ['机车', d.loco || '----'],
-      ['类别', d.category || '----'],
-      ['收到', d.time || '----']
+      ['类别', d.category || '----']
     ];
+    // 车次等级 / 担当路局 / 担当段 / 配属段 / 车型 / 机车配属 / 制造厂
+    rows = rows.concat(infoRows(d));
+    rows.push(['收到', d.time || '----']);
     if (span) rows.push(['轨迹里程', span]);
     rows.push(['坐标', Number(d.lat).toFixed(5) + ', ' + Number(d.lon).toFixed(5)]);
     var html = '<div style="font-size:12px;line-height:1.9">' +
@@ -732,7 +804,11 @@
 
   var _hostLast = '';
   function notifyHost() {
-    var payload = { base: baseId, rail: railId, railOpacity: CONFIG.railOpacity, night: night };
+    // 自动暂停（偏移底图）时上报「用户想要的图层」，避免把 rail=off 写进配置，
+    // 否则切回 OSM/天地图后铁路图层永远恢复不了。
+    var reportedRail = railAutoOff ? (railWanted || 'orm_standard') : railId;
+    var payload = { base: baseId, rail: reportedRail,
+                    railOpacity: CONFIG.railOpacity, night: night };
     var sig = payload.base + '|' + payload.rail + '|' + payload.railOpacity + '|' + payload.night;
     if (sig === _hostLast) return;          // 只有组合真的变了才通知宿主
     _hostLast = sig;
@@ -749,14 +825,24 @@
     document.getElementById('panelSum').textContent =
       src.name + (rail.url ? ' + ORM' : '');
     var st = document.getElementById('statusLine');
-    st.innerHTML = '底图 <b class="' + (tilesFailed > 0 ? 'bad' : '') + '">' + escapeHtml(src.name) + '</b>' +
-      ' · 瓦片 ' + tilesTotal + (tilesFailed ? '<span class="bad">，失败 ' + tilesFailed + '</span>' : '') +
+    var railBit = '';
+    if (rail.url || rail.file) {
+      railBit = ' · 铁路 ' + railTileOk + (railTileFail ? '<span class="bad">/' + railTileFail + ' 失败</span>' : '');
+    }
+    st.innerHTML = '底图 <b class="' + (baseTileFail > 0 ? 'bad' : '') + '">' + escapeHtml(src.name) + '</b>' +
+      ' · 瓦片 ' + baseTileOk + (baseTileFail ? '<span class="bad">，失败 ' + baseTileFail + '</span>' : '') +
+      railBit +
       '<br>铁路 ' + escapeHtml(rail.name || '—') + ' · 坐标 ' +
       (coordMode() === 'bd' ? 'BD-09（已纠偏标记）' :
        (coordMode() === 'gcj' ? 'GCJ-02（已纠偏标记）' : 'WGS-84'));
     var hint = document.getElementById('hintLine');
-    if (tilesFailed > 4 && tilesTotal > 0 && tilesFailed > tilesTotal * 0.9) {
-      hint.innerHTML = '<b>瓦片加载失败</b>：当前网络可能无法访问该底图，换一张（或检查代理）。';
+    // 只有「底图」失败才算不可达；铁路失败单独一行说明，绝不把底图判成不可达
+    if (baseTileFail > 4 && baseTileOk > 0 && baseTileFail > baseTileOk) {
+      hint.innerHTML = '<b>底图瓦片部分失败</b>：' + baseTileOk + ' 张已加载、' +
+        baseTileFail + ' 张失败。若地图显示正常可忽略；持续异常请换一张底图。';
+    } else if (railTileFail > 4 && railTileOk === 0) {
+      hint.innerHTML = '<b>铁路图层不可用</b>：OpenRailwayMap 瓦片全部失败' +
+        '（需要合法 Referer，v3.2 起客户端已内置）。可改用「本地铁路线（GeoJSON）」。';
     } else if (isOffsetBase() && railId !== 'off') {
       hint.innerHTML = '<b>坐标不混叠</b>：当前底图为偏移坐标系，已自动关闭 WGS-84 铁路图层。';
     } else if (railId !== 'off') {
@@ -764,8 +850,11 @@
     } else {
       hint.innerHTML = '未叠加铁路图层。';
     }
-    // 一张都没成功（total==0）时也要提示：国内网络下底图域名常被整体阻断
-    showHint(tilesFailed > 8 && (tilesTotal === 0 || tilesFailed >= tilesTotal * 0.9));
+    // 全屏提示只在「底图真的完全不可达」时出现：必须有失败样本、
+    // 且一张都没成功（或失败率 ≥ 95%），避免误判可达的底图。
+    var reallyDead = baseTileFail >= 6 &&
+      (baseTileOk === 0 || baseTileFail >= baseTileOk * 19);
+    showHint(reallyDead);
   }
 
   function showHint(on) {
@@ -864,6 +953,42 @@
       if (opts && typeof opts === 'object') for (var k in opts) d[k] = opts[k];
       api.update({ trains: [d], follow: true });
     },
+    /**
+     * 补充某趟车的车次/机车信息（宿主异步查询回来后调用，不改变位置）。
+     * @param {string} idOrTrain 标记 id 或车次号
+     * @param {object|string} info  {grade,bureau,section,owner,model,locoDepot,locoMaker,from,to}
+     *                              或该对象的 JSON 字符串
+     */
+    setTrainInfo: function (idOrTrain, info) {
+      var key = String(idOrTrain == null ? '' : idOrTrain);
+      if (!key) return 0;
+      if (typeof info === 'string') {
+        try { info = JSON.parse(info); } catch (e) { return 0; }
+      }
+      if (!info || typeof info !== 'object') return 0;
+      var hit = 0;
+      for (var k in state) {
+        if (!state.hasOwnProperty(k)) continue;
+        var st = state[k];
+        var d = st.data || {};
+        if (k === key || String(d.train || '') === key) {
+          var merged = {};
+          for (var k1 in (d.info || {})) merged[k1] = d.info[k1];
+          for (var k2 in info) merged[k2] = info[k2];
+          d.info = merged;
+          st.data = d;
+          if (st.marker) {
+            st.marker.setIcon(L.divIcon({
+              className: '', html: markerHtml(d, lastFocusId === k, false),
+              iconSize: [0, 0], iconAnchor: [0, 0]
+            }));
+          }
+          hit++;
+        }
+      }
+      if (hit) scheduleStatus();
+      return hit;
+    },
     focus: function (id) {
       var st = state[String(id)];
       if (!st) return;
@@ -935,7 +1060,8 @@
       return {
         base: baseId, rail: railId, coord: coordMode(), night: night, follow: follow,
         locked: userTouched, zoom: map ? map.getZoom() : 0,
-        center: [w[1], w[0]], tilesTotal: tilesTotal, tilesFailed: tilesFailed
+        center: [w[1], w[0]], tilesTotal: baseTileOk, tilesFailed: baseTileFail,
+        railTilesTotal: railTileOk, railTilesFailed: railTileFail
       };
     },
     layers: function () {
@@ -971,7 +1097,7 @@
     var wgsCenter = currentCenterWgs();
     var zoom = currentZoom();
     baseId = id;
-    tilesTotal = 0; tilesFailed = 0;
+    baseTileOk = 0; baseTileFail = 0;   // 换底图后重新统计（铁路统计随 buildRail 重置）
     if (needRecreate) {
       createMap(toMap(wgsCenter[0], wgsCenter[1]), zoom);
       buildBase();
@@ -985,18 +1111,33 @@
     // 面板下拉同步：工具栏/程序换的底图，页面内的 <select> 也要跟着变
     var sbNow = document.getElementById('selBase');
     if (sbNow && sbNow.value !== id) sbNow.value = id;
-    // 偏移坐标系底图（高德 GCJ-02 / 百度 BD-09）与 WGS-84 铁路图层不混叠：自动关掉铁路图层
+    // 偏移坐标系底图（高德 GCJ-02 / 百度 BD-09）与 WGS-84 铁路图层不混叠：自动关掉铁路图层。
+    // 注意区分「自动关」与「用户手动关」：
+    //   · 自动关只影响当前显示，**不落盘**（notifyHost 仍上报用户想要的图层）；
+    //   · 切回 WGS-84 底图（OSM/天地图）时自动恢复，用户不用每次手动再开一遍。
     if (isOffsetBase() && railId !== 'off') {
+      railWanted = railId;          // 记住用户想要的铁路图层
+      railAutoOff = true;
       railId = 'off';
       if (railLayer) { map.removeLayer(railLayer); railLayer = null; }
       var sr = document.getElementById('selRail'); if (sr) sr.value = 'off';
-      toast('<b>铁路图层已关闭</b>：' + escapeHtml(BASE_SOURCES[id].name) +
+      toast('<b>铁路图层已暂停</b>：' + escapeHtml(BASE_SOURCES[id].name) +
         ' 为偏移坐标系（' + (coordMode() === 'bd' ? 'BD-09' : 'GCJ-02') +
-        '），与 OpenRailwayMap（WGS-84）叠加会错位。<br>要看铁路图源请换成 OSM / 天地图（WGS-84）底图。', 7000);
-    } else if (!isOffsetBase() && railId === 'off' && !railUserOff && CONFIG.rail && CONFIG.rail !== 'off') {
-      railId = CONFIG.rail;
-      buildRail();
-      var sr2 = document.getElementById('selRail'); if (sr2) sr2.value = railId;
+        '），与 OpenRailwayMap（WGS-84）叠加会错位。<br>换成 OSM / 天地图后会自动恢复。', 7000);
+    } else if (!isOffsetBase()) {
+      var restore = '';
+      if (railAutoOff) {
+        restore = railWanted || 'orm_standard';
+        railAutoOff = false;
+      } else if (railId === 'off' && !railUserOff && CONFIG.rail && CONFIG.rail !== 'off') {
+        restore = CONFIG.rail;
+      }
+      if (restore) {
+        railId = restore;
+        if (RAIL_SOURCES[railId]) railWanted = railId;
+        buildRail();
+        var sr2 = document.getElementById('selRail'); if (sr2) sr2.value = railId;
+      }
     }
     refreshStatus();
   }
@@ -1012,6 +1153,8 @@
     }
     railId = id;
     railUserOff = (id === 'off');
+    railAutoOff = false;
+    if (id !== 'off') railWanted = id;
     buildRail();
     var srNow = document.getElementById('selRail');
     if (srNow && srNow.value !== id) srNow.value = id;

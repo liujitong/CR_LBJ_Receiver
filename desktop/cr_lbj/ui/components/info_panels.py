@@ -17,6 +17,8 @@ class TrainInfoPanel(QWidget):
         ('position', '公里标'), ('loco', '机车'), ('route', '线路'),
         ('category', '类别'), ('etaTime', '到达时间'), ('etaDistanceKm', '距离'),
         ('coord', '经纬度'), ('currentRouteKmText', '本站'),
+        # v3.2：车次/机车查询信息（异步填充，查不到留空）
+        ('trainInfo', '车次信息'), ('locoDepot', '机车配属'),
     ]
 
     def __init__(self):
@@ -69,6 +71,41 @@ class TrainInfoPanel(QWidget):
             dirEl.setStyleSheet(f'color: {CLR("ok")}; font-size: {spx(14)}px; font-weight: bold;')
         else:
             dirEl.setStyleSheet(f'color: {CLR("text")}; font-size: {spx(14)}px; font-weight: bold;')
+
+    def setInfo(self, info: dict, train: str = ''):
+        """填充车次/机车查询信息（v3.2）。
+
+        info 字段见 `cr_lbj/ui/info_lookup.py`：
+        grade 等级 · bureau 担当局 · section 担当段 · owner 配属段 · model 车型 ·
+        locoDepot 机车配属 · locoMaker 制造厂 · locoModel 型号。
+        查不到时保持「—」，绝不显示半截乱码。
+        """
+        info = info or {}
+        bits = [str(info.get('grade') or '').strip()]
+        bureau = str(info.get('bureau') or '').strip()
+        section = str(info.get('section') or '').strip()
+        owner = str(info.get('owner') or '').strip()
+        model = str(info.get('model') or '').strip()
+        duty = ' · '.join(x for x in (bureau, section) if x)
+        if duty:
+            bits.append('担当 ' + duty)
+        if owner:
+            bits.append('配属 ' + owner)
+        if model:
+            bits.append(model)
+        text = ' · '.join(x for x in bits if x)
+        self.labels['trainInfo'].setText(text or '—')
+        loco_bits = []
+        depot = str(info.get('locoDepot') or '').strip()
+        maker = str(info.get('locoMaker') or '').strip()
+        lm = str(info.get('locoModel') or '').strip()
+        if lm:
+            loco_bits.append(lm)
+        if depot:
+            loco_bits.append(depot)
+        if maker:
+            loco_bits.append(maker)
+        self.labels['locoDepot'].setText(' · '.join(loco_bits) or '—')
 
 
 # ===========================================================================

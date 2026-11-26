@@ -11,6 +11,7 @@ from cr_lbj.runtime import *  # noqa: F401,F403
 
 from cr_lbj.ui import config_ext
 from cr_lbj.ui import data_update
+from cr_lbj.ui.info_lookup import TrainInfoService, merge_info
 
 
 class MainWindow(QMainWindow):
@@ -37,7 +38,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.1.0')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.0')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -665,6 +666,10 @@ class MainWindow(QMainWindow):
         self.mapPanel.consoleMessage.connect(self._onMapConsoleLine)
         band1.addWidget(self.mapPanel)
 
+        # v3.2：车次/机车信息查询服务（异步，结果同时进地图标记与「车次信息」面板）
+        self.infoService = TrainInfoService(self)
+        self.infoService.infoReady.connect(self._onTrainInfoReady)
+
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.setUsesScrollButtons(True)
@@ -1166,11 +1171,26 @@ class MainWindow(QMainWindow):
     def _onDecode(self, d: dict):
         self.trainPanel.updateDecode(d)
         self.currentPanel.addRecord(d)
+        # v3.2：车次等级/担当局/配属段 + 机车配属/制造厂（机车本地查、车次异步查）
+        info = self._decode_info(d)
         # 经纬度 -> 地图 (仅长报文包含)
         try:
-            self.mapPanel.updateTrain(d)
+            self.mapPanel.updateTrain(d, info)
         except Exception:
             pass
+        # 车次信息走后台查询，回来后补进地图标记与信息面板
+        try:
+            train = str(d.get('train') or '')
+            if d.get('isDetailed') and train and train != '----':
+                prefer = str(getattr(self.config, 'trainQuerySource', 'auto') or 'auto')
+                self.infoService.lookup(train, prefer)
+        except Exception:
+            pass
+        if info:
+            try:
+                self.trainPanel.setInfo(info, str(d.get('train') or ''))
+            except Exception:
+                pass
         # 无车次信息的报文: 不存入历史数据库
         isInvalid = (d.get('train', '----') in ('----', '', '未知')
                      and d.get('baseTrain', '----') in ('----', ''))
@@ -1181,6 +1201,34 @@ class MainWindow(QMainWindow):
         # 机车信息卡片
         try:
             self.locoPanel.updateLoco(d)
+        except Exception:
+            pass
+
+    def _decode_info(self, d: dict) -> dict:
+        """解码结果 → 地图/面板用的车次·机车信息（v3.2）。
+
+        机车配属走本地号段表（同步、毫秒级）；车次信息优先取查询服务的缓存，
+        没有则由 `_onDecode` 触发后台查询，回来后经 `_onTrainInfoReady` 补充。
+        """
+        try:
+            loco = self.infoService.loco_info(
+                d.get('loco'), d.get('locoCode') or d.get('loco_code'))
+        except Exception:
+            loco = {}
+        try:
+            train = self.infoService.cached(str(d.get('train') or ''))
+        except Exception:
+            train = {}
+        return merge_info(loco, train)
+
+    def _onTrainInfoReady(self, train: str, info: dict):
+        """车次后台查询返回：补进地图标记与「车次信息」面板。"""
+        try:
+            self.mapPanel.setTrainInfo(train, info)
+        except Exception:
+            pass
+        try:
+            self.trainPanel.setInfo(merge_info(info), train)
         except Exception:
             pass
 
@@ -1359,7 +1407,7 @@ class MainWindow(QMainWindow):
            if data_update.auto_enabled(self.config) else '关')
 
         group('界面')
-        kv('版本', 'v3.1.0')
+        kv('版本', 'v3.2.0')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(

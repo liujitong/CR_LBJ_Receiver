@@ -4,7 +4,7 @@
 > 实时解出车次、机车、线路、公里标、速度与经纬度，并在地图上跟着车跑。
 > v3.0 起**桌面端与安卓端同仓库、同版本号、同数据**，一次发布两端同步。
 
-**版本** v3.1.0（2026-11-26） ｜ **平台** Windows 10/11 · Android 8.0+ ｜ **许可** GPL v3 ｜ **作者** BG2GBQ
+**版本** v3.2.0（2026-11-26） ｜ **平台** Windows 10/11 · Android 8.0+ ｜ **许可** GPL v3 ｜ **作者** BG2GBQ
 
 **目录**：[两端功能对照](#两端功能对照) ｜ [桌面端界面](#桌面端界面) ｜ [安卓端](#安卓端) ｜
 [快速开始](#快速开始) ｜ [车次与配属查询](#车次与配属查询) ｜ [地图与图源](#地图与图源) ｜
@@ -20,9 +20,10 @@
 | RTL-SDR 接收（USB 直连 / rtl_tcp / OWRX） | ✅ 直连 + 中转 + 网络 | ✅ OTG 直连（fd 注入）+ rtl_tcp |
 | POCSAG/FFSK 解码、车次/机车/线路/公里标/速度 | ✅ | ✅（C++ 与桌面 1:1，对拍 0 差异） |
 | 长报文经纬度 → 实时地图、轨迹、跟随 | ✅ | ✅ |
-| 地图：OpenRailwayMap 铁路图层 + **7 种底图** + 离线瓦片缓存 | ✅ | ✅（同一份页面 + 原生瓦片缓存） |
+| 地图：OpenRailwayMap 铁路图层（已内置 ORM 所需 Referer）+ **7 种底图** + 离线瓦片缓存 | ✅ | ✅（同一份页面 + 原生瓦片缓存） |
 | 车次查询（RailGo + 12306 兜底） | ✅ 工具菜单 | ✅ 设置页「查询·数据」/ 解码页自动查询 |
 | 机车配属查询（16622 行号段表） | ✅ 工具菜单 / 机车卡 | ✅ 设置页「查询·数据」/ 解码页自动展示 |
+| **车次·机车信息自动展示**（地图弹窗/右侧面板/解码卡） | ✅ | ✅ |
 | 历史记录 / 去重 / CSV 导出 | ✅ SQLite | ✅ Room |
 | 频谱与接收状态 | ✅ 图形/终端 + 仪表板 | ✅ 指标块 |
 | 日/夜主题 | ✅ 即时切换 | ✅ 跟随系统 |
@@ -34,7 +35,8 @@
 
 v2.3 起是**全景式布局**：一屏分三段，所有内容同屏可见；v2.4 换 Fluent Design；
 v3.0 起地图是两端共用的 Leaflet 页面（`shared/web/railmap.html`），v3.1 收敛为
-**7 张底图 + 离线缓存**，默认高德街道（免 Key）。
+**7 张底图 + 离线缓存**（默认高德街道，免 Key）；v3.2 修复 ORM 铁路图层（Referer）与
+瓦片误判，并让标记弹窗/「列车信息」卡片显示车次·机车信息。
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -86,7 +88,7 @@ v3.0 起地图是两端共用的 Leaflet 页面（`shared/web/railmap.html`）�
 1. 装 `app-debug.apk`（自行构建，产物在 `android/app/build/outputs/apk/debug/`）。
 2. OTG 接 RTL-SDR（或用局域网 rtl_tcp），在设置里选数据源与采样率（默认 240 kS/s）。
 3. 回「解码」页点 **开始接收**；首次会申请 USB 权限与通知权限。
-4. 地图页选底图：默认「高德 街道」（免 Key、实测最快）；想看铁路图层就换「OSM」或「天地图」（天地图先在设置里填 tk 与 Referer 域名）；高德/百度是偏移坐标系，切过去会自动关闭铁路图层。
+4. 地图页选底图：默认「高德 街道」（免 Key、实测最快）；想看铁路图层就换「OSM」或「天地图」（天地图先在设置里填 tk 与 Referer 域名）；高德/百度是偏移坐标系，切过去会自动暂停铁路图层。
 
 ---
 
@@ -105,13 +107,19 @@ v3.0 起地图是两端共用的 Leaflet 页面（`shared/web/railmap.html`）�
 - **引擎**：Leaflet 1.9.4（本地化在 `shared/web/vendor/leaflet/`，离线可用、零构建、无 CDN）；
   页面 `shared/web/railmap.html` 桌面与安卓共用。
 - **铁路图层**：OpenRailwayMap（standard / maxspeed / signals / electrified / gauge）。
+  ORM 官方瓦片要求 `Referer: https://www.openrailwaymap.org/`（只带 UA 仍 403），
+  v3.2 起两端宿主在网络层内置，无需用户配置；桌面实测 OSM 底图 + ORM 标准 **16/16 瓦片成功**。
 - **底图（7 张）**：**高德街道/卫星**、**百度街道/卫星**（4 张免 Key，默认**高德街道**）、
   OSM 标准、天地图矢量/影像（CGCS2000，需 tk）。
 - **坐标系**：列车点/轨迹/铁路图层对外一律 WGS-84。高德是 GCJ-02、百度是 BD-09（页面纯 JS
   实现自定义墨卡托 CRS），标记与轨迹按底图自动加偏；偏移坐标系底图与 WGS-84 铁路图层不混叠，
-  切过去会自动关闭铁路图层并提示，换回 OSM/天地图自动恢复。
+  切过去会自动暂停铁路图层并提示，换回 OSM/天地图自动恢复。
 - **可达性**：2026-11-26 本机实测高德/百度 HTTP 200（63~279 ms，真实瓦片）、天地图无 tk 418、
-  OSM 15 s 超时、ORM 403；可达性随网络变化，以现场复测为准（脚本见地图文档）。
+  OSM 15 s 超时；ORM 无 Referer 时 403（v3.2 起宿主补 Referer 后实测 16/16 成功）。
+  可达性随网络变化，以现场复测为准（脚本见地图文档）。
+- **车次·机车信息**：收到长报文后自动查车次（等级/担当局/担当段/配属段/车型/区间）与
+  机车配属（型号/配属单位/制造厂），显示在**地图标记弹窗**、桌面右侧「列车信息」卡片、
+  安卓解码卡；标记副标题带车次等级。异步查询、失败静默，不影响解码。
 - **离线缓存**：页面图层面板「缓存本区域」（当前 zoom~zoom+3）；安卓宿主 DiskLruCache 落盘
   （300 MB，设置页可查占用/清除），桌面降级为图片预取（进浏览器 HTTP 缓存）。
 - 完整清单、天地图 tk 申请与 Referer 白名单、百度 CRS、自建铁路层、排错：
@@ -198,7 +206,7 @@ pwsh -File tools/test.ps1                 # 单元测试（必须走它，见下
 ### 测试
 
 ```bash
-python -m pytest tests -q          # 87 个用例：共享数据/号段匹配/车次查询/车次编排/地图页/自动更新/路径分层
+python -m pytest tests -q          # 90 个用例：共享数据/号段匹配/车次查询/车次编排/地图页/自动更新/路径分层
 python tools/gen_shared_data.py    # 重新生成并校验 shared/data
 ```
 
@@ -237,7 +245,8 @@ CR_LBJ_Receiver/
 
 | 版本 | 要点 |
 |---|---|
-| **v3.1.0** | 桌面工程分目录 `desktop/`；车次编排 2027-01-01 纯自动；地图回退 Leaflet + 7 底图（高德/百度免 Key、OSM、天地图）+ 百度 BD-09 自定义 CRS + 离线瓦片缓存 + QtWebEngine 远程内容修复；安卓设置页菜单化 + 自动保存 + 自动查询 + 日志折叠 + 转到自己位置；共享地图页迁移 |
+| **v3.2.0** | 修复地图「可达却判不可达」误判（瓦片统计按底图/铁路分离，全屏提示只由底图触发）；修复 ORM 铁路图层叠加（两端宿主补 `Referer: https://www.openrailwaymap.org/`，桌面实测 16/16 瓦片成功）；地图弹窗/桌面面板/安卓解码卡自动展示车次·机车信息（等级·担当局·担当段·配属段·车型·区间·机车配属·制造厂）；README/NOTICE/「关于」致谢正式化 |
+| **v3.1** | 桌面工程分目录 `desktop/`；车次编排 2027-01-01 纯自动；地图回退 Leaflet + 7 底图（高德/百度免 Key、OSM、天地图）+ 百度 BD-09 自定义 CRS + 离线瓦片缓存 + QtWebEngine 远程内容修复；安卓设置页菜单化 + 自动保存 + 自动查询 + 日志折叠 + 转到自己位置；共享地图页迁移 |
 | **v3.0.0** | 安卓并入仓库统一版本；共享层 `shared/`；车次/配属查询；地图改 OpenRailwayMap + 11 种底图；安卓界面改版；第三方数据自动更新 |
 | v2.6.1 | 菜单栏即顶栏、详情窗口收窄、USB 直连隐藏主机端口 |
 | v2.6 | 本机 USB 改 librtlsdr 直连、设备自适应参数、自动回退 rtl_tcp |
@@ -256,8 +265,11 @@ CR_LBJ_Receiver/
 想看铁路图层就切「OSM」或「天地图」（先在设置里填 tk 与 Referer 域名）。
 
 **Q：铁路图层开了却什么都没有？**
-两种可能：①当前底图是高德/百度（偏移坐标系），页面已自动关闭铁路图层——换 OSM 或天地图；
-②该地区 OSM 没有铁路数据。状态栏「铁路」一行会写明当前状态。
+先看底图：高德/百度是偏移坐标系，页面会自动暂停铁路图层——换 OSM 或天地图。
+再看版本：OpenRailwayMap 官方瓦片要求 `Referer: https://www.openrailwaymap.org/`
+（**只带 UA 也会 403**），v3.2 起两端宿主已内置；旧版会整层 403、甚至误判「底图不可达」。
+最后看地区：ORM 数据来自 OSM，`signals` / `maxspeed` 在中国普遍稀疏，缺数据属正常。
+状态栏「铁路 N/失败 M」会写明当前状态，详见 [`docs/地图与图源.md`](docs/地图与图源.md) §3.5。
 
 **Q：为什么高德/百度底图下不能叠铁路图层？**
 高德是 GCJ-02、百度是 BD-09，ORM 是 WGS-84，栅格瓦片无法逐块纠偏，叠加会整体错 300–500 m。
@@ -289,11 +301,39 @@ RailGo 是个人托管服务，可能临时不可用；把数据源切到「1230
 
 ## 致谢
 
-感谢 [LBJ_Console](https://github.com/undef-i/LBJ_Console)、[RailGo](https://railgo.dev/)、
+本项目的若干核心数据与实现思路来自开源社区，特此正式致谢：
+
+### LBJ_Console（作者：undef-i）
+
+[LBJ_Console](https://github.com/undef-i/LBJ_Console)（GPL-3.0）是一个优秀的 LBJ
+报文接收与显示项目。**本项目使用或参考了它以下内容**：
+
+| 使用内容 | 说明 |
+|---|---|
+| 机车配属号段表 | `resources` 分支的 `loco_info.csv` → 本仓库 [`shared/data/loco_roster.csv`](shared/data/loco_roster.csv)（16622 行，未改字段），是「机车配属查询」与地图/解码页「配属单位」的数据基础 |
+| 机车类型代号表 | `loco_type_info.csv` 的代号/短型号 → [`shared/data/loco_types.csv`](shared/data/loco_types.csv) 的 `code` / `shortCode` 列 |
+| 安卓端界面骨架 | 五页导航 + 悬浮玻璃 Dock 的视觉结构参考其实现 |
+| 地图图源方案 | OSM 标准瓦片 + OpenRailwayMap 铁路图层的组合方式（其 Flutter 端栅格实现）与本项目共享地图页思路一致 |
+| 铁路图层离线兜底 | 其 PMTiles/本地矢量铁路层的思路 → 本项目的 `rail_local.geojson` 离线铁路图层 |
+
+感谢 **undef-i** 及其贡献者以 GPL-3.0 开放这些数据与代码。
+
+### 其他开源项目与服务
+
+感谢 [RailGo](https://railgo.dev/)、
 [SX1276_Receive_LBJ](https://github.com/undef-i/SX1276_Receive_LBJ)、
 [Scorpio-yzy/LBJReceiver](https://github.com/Scorpio-yzy/LBJReceiver)、
 [Arch-Jason/RailwayPagerDemod](https://github.com/Arch-Jason/RailwayPagerDemod)
-等开源项目提供的思路、数据与先期验证。
+等开源项目提供的思路、数据与先期验证；感谢
+[OpenStreetMap](https://www.openstreetmap.org/) 贡献者（ODbL）、
+[OpenRailwayMap](https://www.openrailwaymap.org/)（CC-BY-SA）、
+[Leaflet](https://leafletjs.com/)（BSD-2-Clause）、
+[天地图](https://www.tianditu.gov.cn/)、
+[高德地图](https://www.amap.com/)、
+[百度地图](https://map.baidu.com/)、
+铁路 12306 公开查询接口提供数据与服务。
+
+完整授权与使用条款见 [`shared/NOTICE.md`](shared/NOTICE.md)。
 
 ## 声明
 

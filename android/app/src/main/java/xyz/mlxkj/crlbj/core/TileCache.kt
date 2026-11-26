@@ -85,6 +85,8 @@ class TileCache private constructor(private val cache: DiskLruCache) {
             host.endsWith("tianditu.gov.cn") ->
                 tdtReferer.ifEmpty { null }?.let { "https://$it/" }
             host.endsWith(".bdimg.com") -> "https://map.baidu.com/"
+            // OpenRailwayMap 官方瓦片缺 Referer 会 403（实测只带 UA 仍 403）
+            host.endsWith("openrailwaymap.org") -> "https://www.openrailwaymap.org/"
             else -> null
         }
 

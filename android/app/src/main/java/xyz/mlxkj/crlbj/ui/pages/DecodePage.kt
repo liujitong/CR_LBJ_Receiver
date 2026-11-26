@@ -340,14 +340,21 @@ private fun CurrentCard(
         }
         // ---- 自动查询内联结果（收到新解码后台查好即显示；失败静默不显示） ----
         trainInfo?.let { ti ->
-            val bits = listOf(ti.category, ti.bureau, ti.carOwner, ti.car)
+            // v3.2：等级 · 担当局 · 担当段/客运段 · 配属段/车辆段 · 车型 · 始发→终到
+            val bits = listOf(ti.category, ti.bureau, ti.runner, ti.carOwner, ti.car)
                 .filter { it.isNotBlank() }
             if (bits.isNotEmpty()) InfoRow("车次", bits.joinToString(" · "))
+            if (ti.start.isNotBlank() || ti.end.isNotBlank()) {
+                InfoRow("区间", "${ti.start.ifBlank { "?" }} → ${ti.end.ifBlank { "?" }}")
+            }
         }
         locoInfo?.let { li ->
             if (li.ok) {
-                val bits = listOf(li.depot.ifEmpty { "配属未知" }, li.maker)
-                    .filter { it.isNotBlank() }
+                val bits = listOf(
+                    li.model,
+                    li.depot.ifEmpty { "配属未知" },
+                    li.maker,
+                ).filter { it.isNotBlank() }
                 if (bits.isNotEmpty()) InfoRow("配属", bits.joinToString(" · "))
             }
         }
