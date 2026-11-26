@@ -91,9 +91,9 @@ def _read(*parts: str) -> str:
 
 def test_version_is_v321():
     init = _read('cr_lbj', '__init__.py')
-    assert "__version__ = '3.2.1'" in init
+    assert "__version__ = '3.2.2'" in init
     main = _read('cr_lbj', 'ui', 'windows', 'main_window.py')
-    assert 'v3.2.1' in main
+    assert 'v3.2.2' in main
     assert 'v3.2.0' not in main
 
 

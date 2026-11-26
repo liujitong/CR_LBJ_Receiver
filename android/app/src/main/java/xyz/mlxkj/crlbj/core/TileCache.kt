@@ -69,8 +69,26 @@ class TileCache private constructor(private val cache: DiskLruCache) {
             MessageDigest.getInstance("SHA-256").digest(url.toByteArray())
                 .joinToString("") { "%02x".format(it) }
 
-        const val UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
+        /**
+         * 瓦片请求的 User-Agent。
+         *
+         * **合规要求（v3.2.2 整改）**：OpenStreetMap 官方瓦片与 OpenRailwayMap 的
+         * 使用政策都要求客户端提供**可识别的 UA**（含应用名 / 版本 / 联系方式），
+         * 伪装成浏览器会被判定为违规并返回 `418 Access blocked`。所以这两家用
+         * [UA_APP]；高德 / 百度 / 天地图对 UA 无此要求，沿用浏览器 UA 更稳。
+         */
+        const val UA_APP = "CR-LBJ-Receiver/3.2.2 " +
+            "(+https://github.com/liujitong/CR_LBJ_Receiver; LBJ train-alert receiver)"
+
+        const val UA_BROWSER = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+
+        /** OSM / ORM：须用可识别 UA，且**禁止批量预取/下载**（其使用政策明文规定） */
+        fun isPolicyStrictHost(host: String): Boolean =
+            host == "tile.openstreetmap.org" || host.endsWith(".openrailwaymap.org")
+
+        fun userAgentFor(host: String): String =
+            if (isPolicyStrictHost(host)) UA_APP else UA_BROWSER
 
         /** 瓦片主机白名单（代拉 + 缓存） */
         fun isTileHost(host: String): Boolean =
@@ -85,23 +103,23 @@ class TileCache private constructor(private val cache: DiskLruCache) {
             host.endsWith("tianditu.gov.cn") ->
                 tdtReferer.ifEmpty { null }?.let { "https://$it/" }
             host.endsWith(".bdimg.com") -> "https://map.baidu.com/"
-            // OpenRailwayMap 官方瓦片缺 Referer 会 403（实测只带 UA 仍 403）
-            host.endsWith("openrailwaymap.org") -> "https://www.openrailwaymap.org/"
+            // ORM 不允许伪造 Referer（其政策要求真实来源），带合规 UA 即可正常取图
             else -> null
         }
 
         /**
-         * 原生代拉：浏览器 UA + 按主机 Referer，10s 连接 / 20s 读取超时。
+         * 原生代拉：按主机选合规 UA + 按主机 Referer，10s 连接 / 20s 读取超时。
          * 非 2xx / 异常返回 null（调用方走 WebView 原路）。
          */
         fun fetch(url: String, tdtReferer: String): Fetched? = runCatching {
             val u = URL(url)
+            val host = u.host ?: ""
             val conn = u.openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
             conn.readTimeout = 20_000
             conn.instanceFollowRedirects = true
-            conn.setRequestProperty("User-Agent", UA)
-            refererFor(u.host ?: "", tdtReferer)?.let { conn.setRequestProperty("Referer", it) }
+            conn.setRequestProperty("User-Agent", userAgentFor(host))
+            refererFor(host, tdtReferer)?.let { conn.setRequestProperty("Referer", it) }
             val code = conn.responseCode
             if (code !in 200..299) {
                 conn.disconnect()

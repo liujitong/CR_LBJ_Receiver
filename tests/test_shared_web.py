@@ -331,16 +331,40 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertIn('bdimg.com', host)
         self.assertIn('map.baidu.com', host)
         self.assertIn('tdtReferer', host)
-        # v3.2：ORM 官方瓦片缺 Referer 会 403，必须注入
+        # v3.2.2 合规整改：OSM / ORM 要求可识别 UA（伪装浏览器会被 418 封禁）
+        self.assertIn('APP_UA', host)
+        self.assertIn("b'User-Agent'", host)
+        self.assertIn('openstreetmap.org', host)
         self.assertIn('openrailwaymap.org', host)
-        self.assertIn('ORM_REFERER', host)
-        self.assertIn("https://www.openrailwaymap.org/", host)
-        # v3.2 踩过的坑：setHttpHeader 的名字必须是 bytes，传 str 静默失效
-        self.assertIn("b'Referer'", host,
-                      'setHttpHeader 的 header 名必须用 bytes，否则 Referer 不生效')
+        # 政策不允许伪造 ORM Referer，已移除
+        self.assertNotIn('ORM_REFERER', host,
+                         'ORM 不允许伪造 Referer（其政策要求真实来源）')
+        # setHttpHeader 的 header 名必须是 bytes（传 str 静默失效，踩过坑）
+        self.assertIn("b'Referer'", host)
         ext = read_ui('config_ext.py')
         self.assertIn("'tdtKey'", ext)
         self.assertIn("'tdtReferer'", ext)
+
+    def test_osm_policy_compliance(self):
+        """v3.2.2：OSM/ORM 使用政策合规（可识别 UA + 禁止批量预取）。"""
+        cache = read_text(os.path.join(
+            ROOT, 'android', 'app', 'src', 'main', 'java', 'xyz', 'mlxkj',
+            'crlbj', 'core', 'TileCache.kt'))
+        self.assertIn('CR-LBJ-Receiver/', cache, '必须用含应用名的可识别 UA')
+        self.assertIn('isPolicyStrictHost', cache, 'OSM/ORM 需要单独判定')
+        self.assertIn('userAgentFor', cache)
+        self.assertNotIn('https://www.openrailwaymap.org/', cache,
+                         '不应再伪造 ORM Referer')
+        mappage = read_text(os.path.join(
+            ROOT, 'android', 'app', 'src', 'main', 'java', 'xyz', 'mlxkj',
+            'crlbj', 'ui', 'pages', 'MapPage.kt'))
+        self.assertIn('isPolicyStrictHost', mappage,
+                      '安卓批量缓存必须过滤 OSM/ORM')
+        html = read_html()
+        self.assertIn('isPolicyStrictSource', html,
+                      '页面「缓存本区域」必须拒绝 OSM/ORM')
+        self.assertIn('onCacheBlocked', html)
+        self.assertIn('禁止预取', html)
 
     def test_tile_stats_split_by_layer(self):
         """v3.2：底图/铁路瓦片统计必须分离，否则铁路全挂会把底图误判成不可达。"""
@@ -357,11 +381,14 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertIn('railTilesTotal', html, 'status() 应暴露铁路瓦片统计')
 
     def test_orm_referer_in_android_cache(self):
+        """v3.2.2：安卓代拉 OSM/ORM 走合规 UA，不再伪造 Referer。"""
         base = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'java',
                             'xyz', 'mlxkj', 'crlbj')
         cache = read_text(os.path.join(base, 'core', 'TileCache.kt'))
-        self.assertIn('https://www.openrailwaymap.org/', cache,
-                      '安卓代拉 ORM 瓦片必须带 Referer')
+        self.assertIn('UA_APP', cache)
+        self.assertIn('CR-LBJ-Receiver/', cache)
+        self.assertNotIn('https://www.openrailwaymap.org/', cache,
+                         '不应伪造 ORM Referer（政策要求真实来源）')
 
     def test_train_info_display_contract(self):
         """v3.2.1：地图页**不再**标注线路/机车/类别/车次信息/车底/配属。
@@ -475,19 +502,19 @@ class DocsVersionTest(unittest.TestCase):
 
     def test_readme_version(self):
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.1', readme, 'README 版本号应为 v3.2.1')
+        self.assertIn('v3.2.2', readme, 'README 版本号应为 v3.2.2')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
-        self.assertNotIn('**版本** v3.2.0', readme)
-        self.assertIn('v3.2.1', readme.split('## 更新记录', 1)[-1],
-                      'README 更新记录表应有 v3.2.1 行')
+        self.assertNotIn('**版本** v3.2.1', readme)
+        self.assertIn('v3.2.2', readme.split('## 更新记录', 1)[-1],
+                      'README 更新记录表应有 v3.2.2 行')
 
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2.1', text, '%s 文首版本号应为 v3.2.1' % name)
+            self.assertIn('v3.2.2', text, '%s 文首版本号应为 v3.2.2' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.1', changelog, 'CHANGELOG 顶部应有 v3.2.1 条目')
+        self.assertIn('## v3.2.2', changelog, 'CHANGELOG 顶部应有 v3.2.2 条目')
 
 
 if __name__ == '__main__':

@@ -922,6 +922,12 @@ private class HostBridge(
 /**
  * 缓存一批瓦片：限并发 4 下载落盘（已缓存的跳过），
  * 进度经 `LBJ.onCacheProgress(done,total)` 回传（每 8 张或完成时，避免刷屏）。
+ *
+ * **合规（v3.2.2）**：OpenStreetMap / OpenRailwayMap 的使用政策明确禁止
+ * 批量预取/下载（bulk download、prefetch），违规会被 418 封禁。所以
+ * 这里把这两类主机的 URL 过滤掉——它们的瓦片只做**浏览时被动缓存**
+ * （`shouldInterceptRequest` 代拉时顺带落盘），不走「缓存本区域」。
+ * 页面侧也会先拦一层并给用户提示。
  */
 private suspend fun runCacheArea(
     ctx: Context,
@@ -930,22 +936,38 @@ private suspend fun runCacheArea(
     vm: ReceiverViewModel,
     onProgress: (Int, Int) -> Unit,
 ) {
-    val arr = runCatching { JSONArray(urlsJson) }.getOrNull() ?: return
-    val total = arr.length()
-    if (total == 0) return
+    val raw = runCatching { JSONArray(urlsJson) }.getOrNull() ?: return
+    // 过滤政策禁止批量下载的图源（OSM / ORM）
+    val allowed = ArrayList<String>(raw.length())
+    var skipped = 0
+    for (i in 0 until raw.length()) {
+        val u = raw.optString(i)
+        if (u.isEmpty()) continue
+        val host = runCatching { java.net.URL(u).host ?: "" }.getOrDefault("")
+        if (TileCache.isPolicyStrictHost(host)) skipped++ else allowed.add(u)
+    }
+    val total = allowed.size
+    if (skipped > 0) {
+        Log.i(TAG, "缓存本区域：跳过 $skipped 张 OSM/ORM 瓦片（政策禁止批量预取）")
+    }
+    if (total == 0) {
+        w.post {
+            w.evaluateJavascript(
+                "window.LBJ&&window.LBJ.onCacheBlocked($skipped)", null)
+        }
+        return
+    }
     val cache = TileCache.get(ctx)
     val referer = vm.settings.value.tdtReferer
     val sem = kotlinx.coroutines.sync.Semaphore(4)
     val done = java.util.concurrent.atomic.AtomicInteger(0)
     kotlinx.coroutines.coroutineScope {
         for (i in 0 until total) {
-            val u = arr.optString(i)
+            val u = allowed[i]
             launch(kotlinx.coroutines.Dispatchers.IO) {
-                if (u.isNotEmpty()) {
-                    sem.withPermit {
-                        if (cache.get(u) == null) {
-                            TileCache.fetch(u, referer)?.let { cache.put(u, it.bytes) }
-                        }
+                sem.withPermit {
+                    if (cache.get(u) == null) {
+                        TileCache.fetch(u, referer)?.let { cache.put(u, it.bytes) }
                     }
                 }
                 val d = done.incrementAndGet()

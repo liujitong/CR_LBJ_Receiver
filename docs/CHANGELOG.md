@@ -15,6 +15,62 @@
 
 ---
 
+## v3.2.2 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.2.2`，安卓 `versionName = 3.2.2` / `versionCode = 322`。
+> 主题：**修复 OpenStreetMap / OpenRailwayMap 瓦片「418 Access blocked」——按两家使用政策做合规整改。**
+
+### 为什么会 418（根因）
+
+真机地图出现 `418`，OSM 返回的正文是：
+
+```
+Access blocked
+App is not following the tile usage policy of OpenStreetMap's volunteer-run servers:
+http://osm.wiki/Blocked
+```
+
+OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服务**，其使用政策明确要求：
+
+1. **必须提供可识别的 User-Agent**（含应用名 / 版本 / 联系方式），不得伪装成浏览器；
+2. **禁止批量预取/下载瓦片**（bulk download、prefetch、离线整片抓取）；
+3. 不得绕过限流、不得伪造 Referer 等来源标识。
+
+本程序此前两点都踩了：代拉瓦片时用了**伪装浏览器的 UA**（`Mozilla/5.0 ... Chrome/128`），
+且 v3.1 上线的「缓存本区域」会对当前视野 **z~z+3 一次预取几百上千张**瓦片 ——
+于是被 OSM 判定违规，返回 **418 封禁**（通常为 IP 级临时封禁，数小时自动解除）。
+另外 ORM 之前为了绕过 403，注入了 `Referer: https://www.openrailwaymap.org/`，
+这属于**伪造来源**，同样违反其政策。
+
+### 修复内容（两端一致）
+
+1. **合规 UA**：OSM / ORM 请求统一使用可识别 UA
+   `CR-LBJ-Receiver/3.2.2 (+https://github.com/liujitong/CR_LBJ_Receiver; ...)`；
+   高德 / 百度 / 天地图仍用浏览器 UA（它们没有此类政策要求）。
+   - 安卓：`core/TileCache.kt` 新增 `UA_APP` / `UA_BROWSER` / `userAgentFor()` / `isPolicyStrictHost()`；
+   - 桌面：`ui/map_host.py` 拦截器对 `*.openstreetmap.org`、`*.openrailwaymap.org` 注入该 UA。
+2. **移除伪造 Referer**：ORM 不再注入官方站点 Referer（带合规 UA 实测 200）。
+3. **禁止批量预取**：
+   - 页面 `railmap.html`：`isPolicyStrictSource()` 判定当前底图/铁路图源，命中 OSM/ORM 时
+     「缓存本区域」直接拒绝并解释原因；新增 `LBJ.onCacheBlocked()` 回传宿主；
+   - 安卓 `MapPage.runCacheArea()`：二次过滤 OSM/ORM 的 URL（`isPolicyStrictHost`），
+     即使页面漏传也不会批量下载；
+   - **浏览时的被动缓存保留**（用户看过的区域仍会缓存，离线可用），这不违反政策。
+4. **底图不可达提示**：OSM 被封时明确解释「需合规 UA、禁止预取，本程序已整改；
+   仍被封通常是临时封禁」；一键换底图改为推荐 **高德 / 天地图**（不再推荐 OSM）。
+5. 文档：`docs/地图与图源.md` 增加「OSM / ORM 使用政策与合规要求」小节；
+   `shared/NOTICE.md` 补充两条政策链接与我们的合规做法。
+
+### 验证
+
+- 本机实测：OSM（合规 UA）200；ORM（合规 UA、**无 Referer**）200 —— 证明去掉伪造 Referer 后仍可用。
+- 桌面 `pytest` **110 passed**（新增合规断言：合规 UA 存在、伪造 ORM Referer 已移除、
+  页面与安卓均过滤批量预取）。
+- 真机（2510DRK44C，无线 adb）复测见交付说明：若该机 IP 仍在 OSM 封禁时效内，
+  需等待解封（本程序已合规，解封后即可恢复）。
+
+---
+
 ## v3.2.1 · 2026-11-26
 
 > 版本号：桌面 `cr_lbj.__version__ = 3.2.1`，安卓 `versionName = 3.2.1` / `versionCode = 321`。

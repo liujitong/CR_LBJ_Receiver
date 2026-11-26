@@ -1,4 +1,4 @@
-# 第三方资源与授权说明（v3.2.1）
+# 第三方资源与授权说明（v3.2.2）
 
 本仓库 `shared/` 目录存放**桌面端与安卓端共用**的地图页与数据文件。以下逐项说明来源与授权，
 分发（尤其是打包成 exe / apk 对外发布）时请保留本文件与各项目自带的 LICENSE。
@@ -51,9 +51,21 @@ v3.1 按用户要求只保留 4 类底图（高德/百度/OSM/天地图），其
 | 高德地图（街道/卫星，免 Key 公开瓦片） | 底图（默认街道） | GCJ-02 | © 高德地图 AutoNavi；公开瓦片为 Web 服务，正式分发/商用请按高德开放平台条款申请 Key 使用 |
 | 百度地图（街道/卫星，免 Key 公开瓦片） | 底图 | BD-09 + 百度自有墨卡托 | © 百度地图；公开瓦片为 Web 服务，正式分发/商用请按百度地图开放平台条款申请 |
 | 天地图（需自备 tk + Referer 白名单） | 底图 | CGCS2000（工程上等同 WGS-84） | 国家地理信息公共服务平台，需注册并按条款使用 |
-| OpenStreetMap 标准瓦片 | 底图 | WGS-84 | 数据 © OpenStreetMap contributors（ODbL）；瓦片服务有使用政策 |
-| **OpenRailwayMap** | **铁路图层** | WGS-84 | 数据 © OpenStreetMap contributors（ODbL），渲染 © OpenRailwayMap（CC-BY-SA）；官方瓦片为**非商业公益服务**，要求应用公开免费、须发唯一 User-Agent、并按官方要求携带 `Referer: https://www.openrailwaymap.org/`（v3.2 起两端宿主已内置），禁止伪造第三方 Referer、预取与批量抓取，官方可无预警封禁 |
+| OpenStreetMap 标准瓦片 | 底图 | WGS-84 | 数据 © OpenStreetMap contributors（ODbL）；**瓦片使用政策**要求可识别 User-Agent、禁止批量预取、禁止绕过限流（[政策原文](https://operations.osmfoundation.org/policies/tiles/)）。本程序 v3.2.2 起按其要求发 `CR-LBJ-Receiver/x.y.z (+仓库地址)` UA，且不对该图源做批量缓存 |
+| **OpenRailwayMap** | **铁路图层** | WGS-84 | 数据 © OpenStreetMap contributors（ODbL），渲染 © OpenRailwayMap（CC-BY-SA）；官方瓦片为**非商业公益服务**，要求应用公开免费、须发唯一 User-Agent、**不得伪造 Referer**、禁止预取与批量抓取，官方可无预警封禁。本程序 v3.2.2 起发合规 UA、不加伪造 Referer、不做批量预取 |
 | 本地铁路线 `rail_local.geojson`（可选，不随仓库分发） | 铁路图层离线兜底 | WGS-84 | 用户自建（Geofabrik/OSM 提取，ODbL），见 `docs/地图与图源.md` |
+
+> ⚠️ **OSM / ORM 合规说明（v3.2.2 整改，必读）**
+>
+> 这两家是志愿者运营的公益瓦片服务，**不是免费 CDN**。我们曾因「伪装浏览器 UA + 缓存本区域
+> 批量预取」被 OSM 返回 **418 `Access blocked`** 封禁（`http://osm.wiki/Blocked`）。
+> 现已整改为：
+>
+> 1. 仅对 OSM/ORM 使用可识别 UA `CR-LBJ-Receiver/x.y.z (+https://github.com/liujitong/CR_LBJ_Receiver)`；
+> 2. 「缓存本区域」对这两个图源**直接禁用**（浏览时的被动缓存保留，属正常使用）；
+> 3. 不再伪造 ORM 的 Referer。
+>
+> 如需整片离线地图，请改用天地图/高德/百度底图做缓存，或自建瓦片。
 
 > ⚠️ OpenRailwayMap 官方瓦片服务器在中国大陆常被 TLS 阻断，且其条款要求「公开免费的应用」。
 > 若用于内部/商用分发，请自建瓦片（见 `docs/地图与图源.md` 的「自建 / 离线铁路图层」一节），

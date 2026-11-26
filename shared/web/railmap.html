@@ -847,13 +847,18 @@
   function showHint(on) {
     var el = document.getElementById('hint');
     if (on) {
-      // 给出可直接点的备选：国内网络下 OSM 可达性波动，高德/百度免 Key 且通常可达。
-      el.innerHTML = '<b>底图瓦片加载失败</b><br>' +
-        '当前网络访问不到「' + escapeHtml((BASE_SOURCES[baseId] || {}).name || baseId) + '」。<br>' +
-        '可换用国内通常可达的两张：高德（免 Key，偏移坐标系）、OSM（WGS-84，可叠铁路图层）。' +
+      var curId = baseId;
+      var curIsOsm = curId === 'osm';
+      var why = curIsOsm
+        ? ('OpenStreetMap 官方瓦片对客户端有使用政策（需可识别 UA、禁止批量预取），' +
+           '违规会返回 418 封禁。<br>本程序已按政策整改（合规 UA、禁用批量缓存），' +
+           '若仍被封通常是<b>临时封禁</b>，数小时内自动解除；期间请换用其他底图。')
+        : ('当前网络访问不到「' + escapeHtml((BASE_SOURCES[baseId] || {}).name || baseId) + '」。');
+      el.innerHTML = '<b>底图瓦片加载失败</b><br>' + why +
+        '<br>可换用国内通常可达的两张：高德（免 Key，偏移坐标系）、天地图（需 tk，WGS-84）。' +
         '<div style="margin-top:8px">' +
         '<button class="hb" data-base="amap">换成高德街道</button>' +
-        '<button class="hb" data-base="osm">换成 OSM</button>' +
+        '<button class="hb" data-base="tdt_vec">换成天地图矢量</button>' +
         '</div>';
       var btns = el.querySelectorAll('button.hb');
       for (var i = 0; i < btns.length; i++) {
@@ -1260,8 +1265,28 @@
     }
     return urls;
   }
+  // 当前底图／铁路图层是否属于「禁止批量预取」的图源（OSM / ORM）
+  function isPolicyStrictSource() {
+    var src = BASE_SOURCES[baseId] || {};
+    var rail = RAIL_SOURCES[railId] || {};
+    var u1 = String(src.url || ''), u2 = String(rail.url || '');
+    return (/openstreetmap\.org/.test(u1) || /openrailwaymap\.org/.test(u1) ||
+            /openstreetmap\.org/.test(u2) || /openrailwaymap\.org/.test(u2));
+  }
+
   function cacheArea() {
     if (CONFIG.cacheEnabled === false) { toast('离线缓存已在配置里关闭。', 4000); return; }
+    // ---------- 合规（v3.2.2）----------
+    // OpenStreetMap 官方瓦片 / OpenRailwayMap 的**使用政策明确禁止**批量预取
+    // （bulk download / prefetch），违规会被 418 封禁（Access blocked）。
+    // 因此这两类底图不提供「缓存本区域」；浏览过程中命中的瓦片仍会**被动缓存**，
+    // 离线时照样能显示看过的区域。
+    if (isPolicyStrictSource()) {
+      toast('<b>该图源不支持批量缓存</b>：OpenStreetMap / OpenRailwayMap 的使用政策' +
+            '禁止预取瓦片，违规会被封禁。<br>浏览过的区域仍会自动缓存到本地，离线可用。' +
+            '<br>需要整片离线地图请改用「天地图 / 高德 / 百度」底图。', 8000);
+      return;
+    }
     var z0 = Math.min(Math.floor(currentZoom()), 16);
     var z1 = Math.min(z0 + (Number(CONFIG.cacheZoomDelta) || 3), 18);
     var urls = tileUrlsForView(z0, z1);
@@ -1312,6 +1337,14 @@
       cacheTotal = 0; cacheDone = 0;
       api.refreshCacheStats();
     }
+  };
+  // 宿主拒绝批量缓存（命中 OSM/ORM 政策限制）：给用户解释，别假装成功
+  api.onCacheBlocked = function (skipped) {
+    cacheTotal = 0; cacheDone = 0;
+    updateCacheLine();
+    toast('<b>该图源不支持批量缓存</b>：OpenStreetMap / OpenRailwayMap 禁止预取瓦片' +
+          (skipped ? '（已跳过 ' + skipped + ' 张）' : '') +
+          '。<br>浏览过的区域仍会自动缓存；需要整片离线请改用天地图 / 高德 / 百度底图。', 8000);
   };
   api.cacheStats = function (json) {
     try { cacheStatsJson = JSON.parse(json); } catch (e) { cacheStatsJson = null; }

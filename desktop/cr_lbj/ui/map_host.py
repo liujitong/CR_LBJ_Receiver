@@ -119,20 +119,25 @@ def _tdt_referer(domain: str) -> str:
 if HAS_WEBENGINE:
 
     class _TdtRefererInterceptor(QWebEngineUrlRequestInterceptor):
-        """给天地图/百度/OpenRailwayMap 瓦片请求补上合法 Referer。
+        """给瓦片请求补上合规的 Referer / User-Agent。
 
-        file:// 页面没有 Referer，而这三家的瓦片服务都按 Referer 校验：
+        file:// 页面没有 Referer，而各家瓦片服务要求不同：
+
         * 天地图「浏览器端」tk → 需要用户登记的白名单域名（tdtReferer，可空）；
         * 百度 bdimg → 缺 Referer 直接 403，固定用 https://map.baidu.com/；
-        * OpenRailwayMap → 缺 Referer 直接 403（实测只给 UA 仍 403），
-          固定用 https://www.openrailwaymap.org/。
+        * OpenStreetMap 官方瓦片 → 使用政策要求**可识别的 User-Agent**
+          （含应用名/版本），伪装浏览器或批量预取会被 418 封禁（`Access blocked`）；
+        * OpenRailwayMap → 政策同样要求唯一 UA，且要求真实来源、**不允许伪造 Referer**，
+          带合规 UA 即可正常取图（实测 200）。
+
         其余请求原样放行。interceptRequest 在 IO 线程被调用，字段是普通字符串读取，安全。
         """
 
         #: 百度瓦片无 Referer 会返回 403，官方站点同源 Referer 可正常取图
         BAIDU_REFERER = 'https://map.baidu.com/'
-        #: ORM 官方瓦片要求 Referer（其使用条款也要求标识来源）
-        ORM_REFERER = 'https://www.openrailwaymap.org/'
+        #: 应用可识别 UA（OSM / ORM 政策要求；见 https://operations.osmfoundation.org/policies/tiles/）
+        APP_UA = ('CR-LBJ-Receiver/3.2.2 '
+                  '(+https://github.com/liujitong/CR_LBJ_Receiver; LBJ train-alert receiver)')
 
         def __init__(self):
             super().__init__()
@@ -146,13 +151,15 @@ if HAS_WEBENGINE:
             # 注意：setHttpHeader 的**名字和值都必须是 bytes**。传 str 时 PySide6
             # 不会报错也不会生效（请求照旧无 Referer → 403），实测踩过这个坑。
             try:
+                # OSM / ORM：合规 UA（这是它们判定是否封禁的依据）
+                if (host == 'tile.openstreetmap.org'
+                        or host.endswith('.openstreetmap.org')
+                        or host.endswith('openrailwaymap.org')):
+                    info.setHttpHeader(b'User-Agent', self.APP_UA.encode('utf-8'))
+                    return
                 if host == 'bdimg.com' or host.endswith('.bdimg.com'):
                     info.setHttpHeader(b'Referer',
                                        self.BAIDU_REFERER.encode('utf-8'))
-                    return
-                if host.endswith('openrailwaymap.org'):
-                    info.setHttpHeader(b'Referer',
-                                       self.ORM_REFERER.encode('utf-8'))
                     return
                 if self.referer and (host == 'tianditu.gov.cn'
                                      or host.endswith('.tianditu.gov.cn')):
