@@ -52,6 +52,7 @@ import xyz.mlxkj.crlbj.data.LocoRoster
 import xyz.mlxkj.crlbj.data.TrainInfoClient
 import xyz.mlxkj.crlbj.engine.DecodeEvent
 import xyz.mlxkj.crlbj.engine.StatusFrame
+import xyz.mlxkj.crlbj.engine.StatusFramePoller
 import xyz.mlxkj.crlbj.ui.components.Chip
 import xyz.mlxkj.crlbj.ui.components.Divider
 import xyz.mlxkj.crlbj.ui.components.EmptyState
@@ -64,6 +65,9 @@ import xyz.mlxkj.crlbj.ui.theme.Dim
 import xyz.mlxkj.crlbj.ui.theme.pal
 import xyz.mlxkj.crlbj.vm.ReceiverViewModel
 import java.util.Locale
+import kotlin.math.ln
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.produceState
 
 /**
  * 解码页：一键开始 + 信号强度（真实 RSSI 历史 + 门限线）+ 当前解码大卡 + 最近列表。
@@ -92,7 +96,7 @@ fun DecodePage(
     val rssi = remember { ArrayDeque<Float>(240) }
     var rssiSnapshot by remember { mutableStateOf(FloatArray(0)) }
     // 频谱瀑布数据：每帧 32 个 bin 存一行（最多 80 行 ≈ 12s），弹层关掉时只留内存不渲染
-    val spectrumRows = remember { ArrayDeque<FloatArray>(140) }
+    val spectrumRows = remember { ArrayDeque<FloatArray>(240) }
     var spectrumSnapshot by remember { mutableStateOf<List<FloatArray>>(emptyList()) }
     LaunchedEffect(Unit) {
         var lastSeq = -1
@@ -105,7 +109,7 @@ fun DecodePage(
                 rssiSnapshot = rssi.toFloatArray()
                 if (f.spectrum.isNotEmpty()) {
                     spectrumRows.addLast(f.spectrum.copyOf())
-                    while (spectrumRows.size > 140) spectrumRows.removeFirst()
+                    while (spectrumRows.size > 240) spectrumRows.removeFirst()
                     spectrumSnapshot = spectrumRows.toList()
                 }
             }
@@ -345,7 +349,7 @@ private fun SignalWaterfallSheet(
             }
             Spacer(Modifier.height(2.dp))
             Text(
-                "$sourceLabel · 每 150 ms 刷新 · " +
+                "$sourceLabel · 每 ${StatusFramePoller.POLL_MS} ms 刷新 · " +
                     if (useSpectrum) "频谱 ${spectrum.firstOrNull()?.size ?: 0} bin × ${spectrum.size} 帧"
                     else "RSSI ${rssi.size} 点（约 ${(rssi.size * 150 / 1000)} s）",
                 color = p.textTertiary, fontSize = 11.sp,
@@ -355,26 +359,37 @@ private fun SignalWaterfallSheet(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(if (useSpectrum) 176.dp else 140.dp)
+                    .height(if (useSpectrum) 200.dp else 140.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(p.bg)
                     .border(1.dp, p.border, RoundedCornerShape(8.dp)),
             ) {
                 if (useSpectrum) {
-                    // v3.2.5：频谱只有 32 bin，逐 bin 画矩形会是一块块马赛克。
-                    // 这里先做**横向线性插值 + smoothstep 色阶**生成位图，再用
-                    // FilterQuality.Medium 平滑拉伸到全宽 → 看起来是连续瀑布。
-                    val waterfall = remember(spectrum, p.bg, p.spectrum, p.warn, p.accent) {
-                        buildWaterfallBitmap(
-                            spectrum.takeLast(140), p.bg, p.spectrum, p.warn, p.accent)
+                    // v3.2.6：频谱只有 32 bin，逐 bin 画矩形就是马赛克。
+                    // 这里做横向+纵向双线性插值 + 对数压缩生成位图，再用
+                    // FilterQuality.Medium 平滑拉伸到全宽 → 连续瀑布。
+                    // **位图必须后台生成**：12 万像素 × 每秒 6~14 次在主线程做，
+                    // 实测主线程每秒掉一百多帧；放到 Dispatchers.Default 后，
+                    // 上一帧没算完会被 produceState 自动取消，不堆积。
+                    val waterfall by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                        initialValue = null,
+                        spectrum, p.bg, p.spectrum, p.warn, p.accent,
+                    ) {
+                        val rows = spectrum.takeLast(240)
+                        if (rows.size < 2) return@produceState
+                        value = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            buildWaterfallBitmap(rows, p.bg, p.spectrum, p.warn, p.accent)
+                        }
                     }
-                    Image(
-                        bitmap = waterfall,
-                        contentDescription = "信号瀑布",
-                        modifier = Modifier.fillMaxSize().padding(3.dp),
-                        contentScale = ContentScale.FillBounds,
-                        filterQuality = FilterQuality.Medium,
-                    )
+                    waterfall?.let { img ->
+                        Image(
+                            bitmap = img,
+                            contentDescription = "信号瀑布",
+                            modifier = Modifier.fillMaxSize().padding(3.dp),
+                            contentScale = ContentScale.FillBounds,
+                            filterQuality = FilterQuality.Medium,
+                        )
+                    }
                 } else {
                     Canvas(Modifier.fillMaxSize().padding(4.dp)) {
                         // RSSI 色条：低于门限用蓝灰，高门限用 CR 红/绿
@@ -468,18 +483,24 @@ private fun heatColor(
 }
 
 /**
- * 频谱帧序列 → 平滑瀑布位图（v3.2.5）。
+ * 频谱帧序列 → 平滑瀑布位图（v3.2.6）。
  *
- * 为什么不是逐 bin 画矩形：窄带频谱固定 **32 bin**，直接铺满手机宽度时每块
- * 30px 宽，视觉上就是马赛克。这里做三件事：
- *  1. **横向线性插值**（每 2 个 bin 之间插 [INTERP] 列），再把位图用
- *     `FilterQuality.Medium` 放大到全宽，边缘自然过渡；
- *  2. **smoothstep** 拉伸对比度（弱信号层次更清楚、强信号更亮）；
- *  3. 一行一帧（旧帧在上、新帧在下），最多 [rows] 帧。
+ * 为什么看着"马赛克"：窄带频谱只有 **32 bin**，纵向又只有一帧一行；
+ * 直接铺满屏就是 30px 见方的色块 + 横向条纹。
+ *
+ * 这一版做四件事（全部在 CPU 上、结果缓存成位图）：
+ *  1. **横向三点平滑** `[0.25, 0.5, 0.25]`：抹掉 bin 之间的台阶；
+ *  2. **双线性插值**：横向每 bin 插 [WATERFALL_INTERP_X] 列、纵向每帧插
+ *     [WATERFALL_INTERP_Y] 行（帧与帧之间也按小数权重混合）——纵向条纹消失；
+ *  3. **对数动态范围压缩**（`ln(1+k·t)/ln(1+k)`）：弱信号层次更丰富，
+ *     不像线性拉伸那样要么全黑要么全亮；
+ *  4. **256 级颜色查找表**：每像素只算一次插值 + 查表，14 fps 重建也不卡。
  *
  * 返回 `ImageBitmap` 供 `Image(..., filterQuality = Medium)` 直接绘制。
  */
-private const val WATERFALL_INTERP = 8
+private const val WATERFALL_INTERP_X = 8
+private const val WATERFALL_INTERP_Y = 2
+private const val WATERFALL_DRC = 4.0f   // 对数压缩强度：越大弱信号越明显
 
 private fun buildWaterfallBitmap(
     rows: List<FloatArray>,
@@ -493,34 +514,64 @@ private fun buildWaterfallBitmap(
         val bmp = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         return bmp.asImageBitmap()
     }
-    // 能量范围（整块瀑布统一，避免逐帧跳色）
+    val h = rows.size
+
+    // 1) 横向三点平滑（先平滑再插值，边界不会出锯齿）
+    val hs = Array(h) { y ->
+        val r = rows[y]
+        FloatArray(bins).also { out ->
+            for (x in 0 until bins) {
+                val a = r[if (x > 0) x - 1 else 0]
+                val b = r[x]
+                val c = r[if (x < bins - 1) x + 1 else bins - 1]
+                out[x] = 0.25f * a + 0.5f * b + 0.25f * c
+            }
+        }
+    }
+
+    // 2) 能量范围（整块瀑布统一，避免逐帧跳色）
     var mn = Float.MAX_VALUE
     var mx = -Float.MAX_VALUE
-    for (row in rows) for (v in row) {
+    for (row in hs) for (v in row) {
         if (v < mn) mn = v
         if (v > mx) mx = v
     }
     val span = (mx - mn).coerceAtLeast(0.001f)
-    val w = (bins - 1).coerceAtLeast(1) * WATERFALL_INTERP + 1
-    val h = rows.size
-    val pixels = IntArray(w * h)
-    for (y in 0 until h) {
-        val row = rows[y]
-        for (x in 0 until w) {
-            val fx = x.toFloat() / WATERFALL_INTERP
-            val i0 = fx.toInt().coerceIn(0, bins - 1)
-            val i1 = (i0 + 1).coerceAtMost(bins - 1)
-            val f = (fx - i0).coerceIn(0f, 1f)
-            // 横向线性插值
-            val v = row[i0] * (1f - f) + row[i1] * f
-            var t = ((v - mn) / span).coerceIn(0f, 1f)
-            // smoothstep：低端压暗、亮部提亮，画面更有层次
-            t = t * t * (3f - 2f * t)
-            pixels[y * w + x] = heatColor(t, low, mid, high, top).toArgb()
+
+    // 3) 颜色查找表（256 级），避免每像素都算 lerp
+    val lut = IntArray(256) { i ->
+        heatColor(i / 255f, low, mid, high, top).toArgb()
+    }
+    val lnMax = ln(1f + WATERFALL_DRC)
+
+    // 4) 双线性插值输出
+    val w = (bins - 1).coerceAtLeast(1) * WATERFALL_INTERP_X + 1
+    val H = h * WATERFALL_INTERP_Y
+    val pixels = IntArray(w * H)
+    for (py in 0 until H) {
+        val fy = py.toFloat() / WATERFALL_INTERP_Y
+        val y0 = fy.toInt().coerceIn(0, h - 1)
+        val y1 = (y0 + 1).coerceAtMost(h - 1)
+        val ty = (fy - y0).coerceIn(0f, 1f)
+        val r0 = hs[y0]
+        val r1 = hs[y1]
+        val base = py * w
+        for (px in 0 until w) {
+            val fx = px.toFloat() / WATERFALL_INTERP_X
+            val x0 = fx.toInt().coerceIn(0, bins - 1)
+            val x1 = (x0 + 1).coerceAtMost(bins - 1)
+            val tx = (fx - x0).coerceIn(0f, 1f)
+            // 双线性：横向 + 纵向同时插值
+            val v = (r0[x0] * (1f - tx) + r0[x1] * tx) * (1f - ty) +
+                    (r1[x0] * (1f - tx) + r1[x1] * tx) * ty
+            val raw = ((v - mn) / span).coerceIn(0f, 1f)
+            // 对数动态范围压缩：弱信号层次更丰富
+            val t = ln(1f + WATERFALL_DRC * raw) / lnMax
+            pixels[base + px] = lut[(t * 255f).toInt().coerceIn(0, 255)]
         }
     }
-    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    bmp.setPixels(pixels, 0, w, 0, 0, w, h)
+    val bmp = Bitmap.createBitmap(w, H, Bitmap.Config.ARGB_8888)
+    bmp.setPixels(pixels, 0, w, 0, 0, w, H)
     return bmp.asImageBitmap()
 }
 

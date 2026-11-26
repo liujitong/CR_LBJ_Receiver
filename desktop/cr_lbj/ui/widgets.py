@@ -457,6 +457,36 @@ def small_button(text: str, primary: bool = False, h: int = 26,
     return b
 
 
+def card_action_button(text: str, tip: str = '') -> QWidget:
+    """卡片标题栏右侧的动作按钮（约 19px 高，不再和正文抢宽度）。
+
+    v3.2.6：`small_button()` 这类 Fluent 按钮**不吃 setFixedHeight**——
+    sizeHint 由它自己的内边距算，实测 h=20 的请求出来仍是 41px，塞进标题栏
+    会把整行撑到 41px，反而更吃卡片正文的高度。这里退回原生按钮，并用实例级
+    样式表（ID 选择器）压掉 TOUCH_STYLE 里的 `QPushButton { min-height: 28px }`，
+    高度、宽度都按小字给定。
+    """
+    b = _QtButton(text)
+    b.setObjectName('cardAction')
+    b.setCursor(Qt.PointingHandCursor)
+    if tip:
+        b.setToolTip(tip)
+    b.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+    b.setStyleSheet(
+        'QPushButton#cardAction { min-height: 0px; max-height: %dpx;'
+        ' padding: %dpx %dpx; border: 1px solid %s; border-radius: 3px;'
+        ' background: transparent; color: %s; font-size: %dpx; }'
+        'QPushButton#cardAction:hover { border-color: %s; color: %s; }'
+        'QPushButton#cardAction:pressed { background-color: %s; }'
+        'QPushButton#cardAction:disabled { color: %s; border-color: %s; }'
+        % (spx(24), spx(3), spx(8),
+           TH.c('border', '#3a4047'), TH.c('dim', '#8b949e'), fontPx(11),
+           TH.c('accent', '#4a9eff'), TH.c('accent', '#4a9eff'),
+           TH.c('panel2', '#23272e'),
+           TH.c('faint', '#5a626b'), TH.c('border', '#3a4047')))
+    return b
+
+
 def tool_button(text: str, parent: QWidget = None) -> QWidget:
     btn = ToolButton(parent) if FLUENT else _QtButton(parent)
     if text:

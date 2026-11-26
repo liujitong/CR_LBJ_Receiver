@@ -62,6 +62,13 @@ fun LbjApp() {
     val vm: ReceiverViewModel = viewModel()
     val p = pal()
     var current by rememberSaveable { mutableIntStateOf(TAB_DECODE) }
+    // v3.2.6：记住上一个标签页。设置页是二级页面——按返回应回到设置菜单、
+    // 再按一次回上一个标签页，而不是直接退出 App（用户反馈这样太反人类）。
+    var lastTab by rememberSaveable { mutableIntStateOf(TAB_DECODE) }
+    fun switchTo(t: Int) {
+        if (t != current) lastTab = current
+        current = t
+    }
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         // 地图页要全屏出血（WebView 铺满），浮层的避让由 MapPage 自己处理；
@@ -82,16 +89,16 @@ fun LbjApp() {
                         vm = vm,
                         onQueryTrain = { train ->
                             vm.requestTrainQuery(train)
-                            current = TAB_SETTINGS
+                            switchTo(TAB_SETTINGS)
                         },
                         onQueryLoco = { model, number ->
                             vm.requestLocoQuery(model, number)
-                            current = TAB_SETTINGS
+                            switchTo(TAB_SETTINGS)
                         },
                     )
                     TAB_HISTORY -> HistoryPage(vm)
                     TAB_STATUS -> StatusPage(vm)
-                    TAB_SETTINGS -> SettingsPage(vm)
+                    TAB_SETTINGS -> SettingsPage(vm, onBack = { switchTo(lastTab) })
                     else -> HistoryPage(vm)
                 }
             }
@@ -100,7 +107,7 @@ fun LbjApp() {
         LbjDock(
             tabs = tabs,
             current = current,
-            onSelect = { current = it },
+            onSelect = { switchTo(it) },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(

@@ -1,5 +1,6 @@
 package xyz.mlxkj.crlbj.ui.pages
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -112,7 +113,7 @@ private val MENU = listOf(
  *  · 草稿提升到子页之外，返回/切换不丢未提交内容；保存失败给轻提示。
  */
 @Composable
-fun SettingsPage(vm: ReceiverViewModel) {
+fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
     val current by vm.settings.collectAsStateWithLifecycle()
     val places by vm.places.collectAsStateWithLifecycle()
     val dataInfo by vm.dataInfo.collectAsStateWithLifecycle()
@@ -123,7 +124,41 @@ fun SettingsPage(vm: ReceiverViewModel) {
     // 草稿在子页之外提升：设置变化（含本页自动保存）时重新快照
     var s by remember(current) { mutableStateOf(current) }
     var sub by rememberSaveable { mutableStateOf<String?>(null) }
-    var usbPrompt by remember { mutableStateOf(false) }
+    // v3.2.6：数据源组改为「草稿 + 显式保存」——编辑只改草稿，返回时询问是否保存
+    var srcDraft by remember { mutableStateOf<ReceiverSettings?>(null) }
+    // 切换数据源类型后弹出的「推荐配置」提示（usb / rtl_tcp / owrx 都有）
+    var recommendType by remember { mutableStateOf<String?>(null) }
+    // 返回时的「是否保存」询问
+    var savePrompt by remember { mutableStateOf(false) }
+    // 另存为新数据源时的名称输入（非空 = 弹窗打开）
+    var namePrompt by remember { mutableStateOf<String?>(null) }
+    var nameText by remember { mutableStateOf("") }
+    // 保存成功的轻提示
+    var saveNotice by remember { mutableStateOf<String?>(null) }
+    // 系统返回键也要走同一套「保存询问」，不能绕过（v3.2.6）
+    // v3.2.6：三级返回——①子页有未保存草稿→保存询问；②子页→设置菜单；
+    // ③设置菜单（首页）→回上一个标签页（不再直接退出 App/回桌面）。
+    BackHandler(enabled = true) {
+        val inSource = sub == "source" || sub == "rf"
+        val draft = srcDraft
+        when {
+            inSource && draft != null && sourceDirty(draft, vm.settings.value) ->
+                savePrompt = true
+            sub != null -> {
+                srcDraft = null
+                sub = null
+            }
+            else -> onBack()
+        }
+    }
+
+    // 进入数据源子页时，把当前生效配置作为草稿
+    LaunchedEffect(sub) {
+        if (sub == "source" || sub == "rf") {
+            srcDraft = vm.settings.value
+            saveNotice = null
+        }
+    }
     var saveErr by remember { mutableStateOf<String?>(null) }
 
     // 自动保存：按变更字段路由到对应保存语义
@@ -150,7 +185,7 @@ fun SettingsPage(vm: ReceiverViewModel) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
         if (sub == null) {
-            PageHeader(title = "设置", subtitle = "v3.2.5 · 更改自动保存")
+            PageHeader(title = "设置", subtitle = "v3.2.6 · 更改自动保存")
             saveErr?.let {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
@@ -176,7 +211,17 @@ fun SettingsPage(vm: ReceiverViewModel) {
                     tint = p.text,
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .clickable { sub = null }
+                        .clickable {
+                            // 与系统返回键同一套逻辑（标题栏箭头 = 返回上一级）
+                            val inSource = sub == "source" || sub == "rf"
+                            val draft = srcDraft
+                            if (inSource && draft != null && sourceDirty(draft, s)) {
+                                savePrompt = true
+                            } else {
+                                srcDraft = null
+                                sub = null
+                            }
+                        }
                         .padding(6.dp)
                         .size(24.dp),
                 )
@@ -190,8 +235,12 @@ fun SettingsPage(vm: ReceiverViewModel) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 when (sub) {
                     // ------------------------------------ 数据源与射频（v3.2.5 合并为一组）
-                    // 兼容旧状态里的 "rf" 子页 id（老版本点过「射频」）
+                    // v3.2.6：本组改为「草稿 + 显式保存」——
+                    //  · 编辑字段只改草稿，不自动落盘；
+                    //  · 切换类型（USB / rtl_tcp / OWRX）弹该类型推荐配置；
+                    //  · 返回时若有修改，询问「保存（覆盖）/ 另存为新数据源 / 放弃」。
                     "source", "rf" -> Column {
+                        val d = srcDraft ?: s
                         // ---- 多数据源列表：点一下切换（切换会重建 DSP 链路）----
                         SectionCard("数据源（点击切换）") {
                             s.sources.forEachIndexed { i, prof ->
@@ -205,7 +254,11 @@ fun SettingsPage(vm: ReceiverViewModel) {
                                             else Color.Transparent)
                                         .let {
                                             if (active) it
-                                            else it.clickable { vm.selectSource(i) }
+                                            else it.clickable {
+                                                // 切换数据源 = 立即生效（并重置草稿到新激活项）
+                                                vm.selectSource(i)
+                                                srcDraft = vm.settings.value.selectSource(i)
+                                            }
                                         }
                                         .padding(horizontal = 8.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -231,7 +284,10 @@ fun SettingsPage(vm: ReceiverViewModel) {
                                             "切换", color = p.accent, fontSize = 12.sp,
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(6.dp))
-                                                .clickable { vm.selectSource(i) }
+                                                .clickable {
+                                                    vm.selectSource(i)
+                                                    srcDraft = vm.settings.value.selectSource(i)
+                                                }
                                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                                         )
                                     }
@@ -241,7 +297,10 @@ fun SettingsPage(vm: ReceiverViewModel) {
                                             modifier = Modifier
                                                 .padding(start = 6.dp)
                                                 .clip(RoundedCornerShape(6.dp))
-                                                .clickable { vm.removeSource(i) }
+                                                .clickable {
+                                                    vm.removeSource(i)
+                                                    srcDraft = vm.settings.value.removeSource(i)
+                                                }
                                                 .padding(horizontal = 6.dp, vertical = 4.dp),
                                         )
                                     }
@@ -250,16 +309,19 @@ fun SettingsPage(vm: ReceiverViewModel) {
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "＋ 把当前配置存为新数据源",
+                                "＋ 把当前配置另存为新数据源",
                                 color = p.accent, fontSize = 12.sp,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .clickable { vm.addSource() }
+                                    .clickable {
+                                        nameText = "数据源 ${s.sources.size + 1}"
+                                        namePrompt = "new"
+                                    }
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
                             )
                         }
 
-                        // ---- 当前数据源的连接参数 + 射频参数 ----
+                        // ---- 当前数据源的连接参数 + 射频参数（草稿，返回时保存）----
                         SectionCard("连接与射频") {
                             ChipRow(
                                 options = listOf(
@@ -267,47 +329,91 @@ fun SettingsPage(vm: ReceiverViewModel) {
                                     "rtl_tcp" to "rtl_tcp",
                                     "owrx" to "OWRX",
                                 ),
-                                selected = s.sourceType,
+                                selected = d.sourceType,
                                 onPick = { id ->
-                                    if (id == "usb" && s.sourceType != "usb") usbPrompt = true
-                                    commit(s.copy(sourceType = id))
+                                    if (id != d.sourceType) {
+                                        // 换类型：先弹该类型推荐配置，用户可采纳/保持
+                                        srcDraft = d.copy(sourceType = id)
+                                        recommendType = id
+                                    }
                                 },
                             )
                             Spacer(Modifier.height(8.dp))
-                            if (s.isUsb) {
+                            if (d.isUsb) {
                                 Text(
                                     "USB 直连：手机 OTG 接 RTL-SDR 电视棒，设备查找与权限由系统弹窗确认。",
                                     color = p.textTertiary, fontSize = 11.sp,
                                 )
                                 Spacer(Modifier.height(6.dp))
                             } else {
-                                Field("主机", s.host) { commit(s.copy(host = it.trim())) }
-                                Field("端口", s.port.toString(), KeyboardType.Number) {
-                                    commit(s.copy(port = it.toIntOrNull() ?: s.port))
+                                Field("主机", d.host) {
+                                    srcDraft = (srcDraft ?: s).copy(host = it.trim())
+                                }
+                                Field("端口", d.port.toString(), KeyboardType.Number) {
+                                    srcDraft = (srcDraft ?: s).copy(
+                                        port = it.toIntOrNull() ?: d.port)
                                 }
                             }
-                            Field("采样率 Hz", s.sampleRate.toString(), KeyboardType.Number) {
-                                commit(s.copy(sampleRate = it.toIntOrNull() ?: s.sampleRate))
+                            Field("采样率 Hz", d.sampleRate.toString(), KeyboardType.Number) {
+                                srcDraft = (srcDraft ?: s).copy(
+                                    sampleRate = it.toIntOrNull() ?: d.sampleRate)
                             }
-                            Field("频率 MHz", fmt(s.freqMhz), KeyboardType.Decimal) {
-                                commit(s.copy(freqMhz = it.toDoubleOrNull() ?: s.freqMhz))
+                            Field("频率 MHz", fmt(d.freqMhz), KeyboardType.Decimal) {
+                                srcDraft = (srcDraft ?: s).copy(
+                                    freqMhz = it.toDoubleOrNull() ?: d.freqMhz)
                             }
-                            Field("增益 dB", fmt(s.gainDb), KeyboardType.Decimal) {
-                                commit(s.copy(gainDb = it.toDoubleOrNull() ?: s.gainDb))
+                            Field("增益 dB", fmt(d.gainDb), KeyboardType.Decimal) {
+                                srcDraft = (srcDraft ?: s).copy(
+                                    gainDb = it.toDoubleOrNull() ?: d.gainDb)
                             }
-                            Field("PPM 校正", fmt(s.ppm), KeyboardType.Decimal) {
-                                commit(s.copy(ppm = it.toDoubleOrNull() ?: s.ppm))
+                            Field("PPM 校正", fmt(d.ppm), KeyboardType.Decimal) {
+                                srcDraft = (srcDraft ?: s).copy(
+                                    ppm = it.toDoubleOrNull() ?: d.ppm)
                             }
-                            Field("信道带宽 kHz", fmt(s.bwKhz), KeyboardType.Decimal) {
-                                commit(s.copy(bwKhz = it.toDoubleOrNull() ?: s.bwKhz))
+                            Field("信道带宽 kHz", fmt(d.bwKhz), KeyboardType.Decimal) {
+                                srcDraft = (srcDraft ?: s).copy(
+                                    bwKhz = it.toDoubleOrNull() ?: d.bwKhz)
                             }
-                            Field("DC 偏移 Hz", fmt(s.dcOffsetHz), KeyboardType.Decimal) {
-                                commit(s.copy(dcOffsetHz = it.toDoubleOrNull() ?: s.dcOffsetHz))
+                            Field("DC 偏移 Hz", fmt(d.dcOffsetHz), KeyboardType.Decimal) {
+                                srcDraft = (srcDraft ?: s).copy(
+                                    dcOffsetHz = it.toDoubleOrNull() ?: d.dcOffsetHz)
                             }
                             Text(
                                 "USB 直连建议 DC 偏移 50000 Hz（让目标频点落在 DDC 之后），OWRX 保持 0。",
                                 color = p.textTertiary, fontSize = 11.sp,
                             )
+                        }
+
+                        // ---- 未保存提示 + 显式保存（覆盖当前数据源）----
+                        if (sourceDirty(d, s)) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(p.warn.copy(alpha = 0.12f))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("未保存的修改", color = p.warn, fontSize = 12.sp)
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    "保存（覆盖「${s.currentSource?.name ?: "当前数据源"}」）",
+                                    color = p.accent, fontSize = 12.sp,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            vm.updateSettings(d.withActiveSnapshot())
+                                            srcDraft = null
+                                            saveNotice = "已保存到「${s.currentSource?.name ?: "当前数据源"}」"
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                        saveNotice?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(it, color = p.ok, fontSize = 12.sp)
                         }
                     }
 
@@ -528,40 +634,137 @@ fun SettingsPage(vm: ReceiverViewModel) {
         }
     }
 
-    // ---- 切到本机 USB：推荐参数弹窗（确认覆盖并自动保存，取消保持不变） ----
-    if (usbPrompt) {
+    // ---- 切换数据源类型：该类型的推荐配置（三种类型都有）----
+    recommendType?.let { type ->
+        val (sr, gain, dc) = recommendFor(type)
         AlertDialog(
-            onDismissRequest = { usbPrompt = false },
+            onDismissRequest = { recommendType = null },
             containerColor = p.surface,
-            title = { Text("USB 推荐参数", color = p.text, fontSize = 17.sp) },
+            title = {
+                Text("${typeLabelOf(type)} 推荐配置", color = p.text, fontSize = 17.sp)
+            },
             text = {
                 Text(
-                    "本机 USB 直连推荐：\n" +
-                        "· 采样率 240 kS/s\n" +
-                        "· 增益 19.7 dB\n" +
-                        "· DC 偏移 50 kHz\n\n" +
-                        "是否采用推荐值？（采用后立即自动保存）",
+                    "该类型推荐参数：\n" +
+                        "· 采样率 ${sr / 1000} kS/s\n" +
+                        "· 增益 $gain dB\n" +
+                        "· DC 偏移 ${(dc / 1000).toInt()} kHz\n\n" +
+                        "是否采用推荐值？\n（采用后仍需点「保存」或返回时保存才会生效）",
                     color = p.textSecondary, fontSize = 13.sp,
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val d = ReceiverSettings.USB_DEFAULTS
-                    commit(s.copy(
-                        sampleRate = d.sampleRate,
-                        gainDb = d.gainDb,
-                        dcOffsetHz = d.dcOffsetHz,
-                    ))
-                    usbPrompt = false
+                    srcDraft = (srcDraft ?: s).copy(
+                        sampleRate = sr, gainDb = gain, dcOffsetHz = dc)
+                    recommendType = null
                 }) { Text("采用推荐值", color = p.accent) }
             },
             dismissButton = {
-                TextButton(onClick = { usbPrompt = false }) {
+                TextButton(onClick = { recommendType = null }) {
                     Text("保持当前", color = p.textSecondary)
                 }
             },
         )
     }
+
+    // ---- 返回时：有未保存修改 → 询问保存 / 另存 / 放弃 ----
+    if (savePrompt) {
+        val d = srcDraft ?: s
+        val curName = s.currentSource?.name ?: "当前数据源"
+        AlertDialog(
+            onDismissRequest = { savePrompt = false },
+            containerColor = p.surface,
+            title = { Text("保存数据源配置？", color = p.text, fontSize = 17.sp) },
+            text = {
+                Text(
+                    "对「$curName」的修改尚未保存。\n\n" +
+                        "· 保存：覆盖「$curName」\n" +
+                        "· 另存为：新建一条数据源（输入名称）\n" +
+                        "· 放弃：丢弃这次修改",
+                    color = p.textSecondary, fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.updateSettings(d.withActiveSnapshot())
+                    savePrompt = false
+                    srcDraft = null
+                    sub = null
+                }) { Text("保存并返回", color = p.accent) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        savePrompt = false
+                        nameText = "数据源 ${s.sources.size + 1}"
+                        namePrompt = "new"
+                    }) { Text("另存为…", color = p.textSecondary) }
+                    TextButton(onClick = {
+                        savePrompt = false
+                        srcDraft = null
+                        sub = null
+                    }) { Text("放弃", color = p.textTertiary) }
+                }
+            },
+        )
+    }
+
+    // ---- 另存为新数据源：输入名称 ----
+    namePrompt?.let {
+        AlertDialog(
+            onDismissRequest = { namePrompt = null },
+            containerColor = p.surface,
+            title = { Text("保存为新数据源", color = p.text, fontSize = 17.sp) },
+            text = {
+                Column {
+                    Text("给这条配置起个名字（保存后可在列表里点它切换）：",
+                        color = p.textSecondary, fontSize = 13.sp)
+                    Spacer(Modifier.height(8.dp))
+                    LbjTextField(
+                        value = nameText,
+                        onValueChange = { nameText = it },
+                        placeholder = "数据源名称",
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val base = srcDraft ?: s
+                    val nm = nameText.trim().ifBlank { "数据源 ${s.sources.size + 1}" }
+                    vm.updateSettings(base.withActiveSnapshot().addSourceFromCurrent(nm))
+                    namePrompt = null
+                    srcDraft = null
+                    sub = null
+                }) { Text("保存", color = p.accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { namePrompt = null }) {
+                    Text("取消", color = p.textSecondary)
+                }
+            },
+        )
+    }
+}
+
+/** 数据源草稿与已保存值是否有差异（只比数据源组涉及的字段，v3.2.6） */
+private fun sourceDirty(a: ReceiverSettings, b: ReceiverSettings): Boolean =
+    a.sourceType != b.sourceType || a.host != b.host || a.port != b.port ||
+        a.sampleRate != b.sampleRate || a.freqMhz != b.freqMhz ||
+        a.gainDb != b.gainDb || a.ppm != b.ppm || a.bwKhz != b.bwKhz ||
+        a.dcOffsetHz != b.dcOffsetHz
+
+/** 各数据源类型的推荐配置：(采样率 Hz, 增益 dB, DC 偏移 Hz) */
+private fun recommendFor(type: String): Triple<Int, Double, Double> = when (type) {
+    "usb" -> Triple(240000, 19.7, 50000.0)     // 手机 OTG 直连：省带宽、避开 DDC 直流
+    "rtl_tcp" -> Triple(960000, 15.7, 50000.0) // 局域网 rtl_tcp：满采样率
+    else -> Triple(960000, 15.7, 0.0)          // OWRX：服务器端已做过 DDC，DC 偏移设 0
+}
+
+private fun typeLabelOf(type: String): String = when (type) {
+    "usb" -> "本机 USB 直连"
+    "rtl_tcp" -> "RTL-TCP 网络源"
+    else -> "OWRX 服务器"
 }
 
 // ------------------------------------------------------------------ 变更路由
@@ -597,7 +800,7 @@ private fun menuSubtitle(id: String, s: ReceiverSettings): String = when (id) {
     "query" -> (when (s.trainQuerySource) {
         "railgo" -> "仅 RailGo"; "12306" -> "仅 12306"; else -> "RailGo→12306"
     }) + " · 配属表自动更新" + if (s.dataAutoUpdate) "开" else "关"
-    else -> "v3.2.5 · 桌面版与安卓版同版本号"
+    else -> "v3.2.6 · 桌面版与安卓版同版本号"
 }
 
 @Composable

@@ -79,10 +79,20 @@ data class StatusFrame(
 }
 
 /**
- * StatusFrame 轮询器：每 150ms 调 nativeReadSpectrum，seq 变化才发布。
+ * StatusFrame 轮询器：每 [POLL_MS] 调 nativeReadSpectrum，seq 变化才发布。
  * native 未启动 / 未跑时保持 null（UI 显示待机）。
+ *
+ * 间隔从 150ms 降到 70ms（v3.2.6）：native 的频谱在每个 DSP 块更新
+ * （blockSize 65536 @ 960k ≈ 68ms 一块），150ms 轮询会丢掉一半帧，
+ * 瀑布看起来发"横条纹"。70ms ≈ 1 块 1 帧，帧率 ~14 fps。
+ * 状态页指标刷新因此也变快，但只是文本刷新，无副作用。
  */
 class StatusFramePoller(private val onFrame: (StatusFrame) -> Unit) {
+
+    companion object {
+        /** 轮询间隔：略小于一个 DSP 块（≈68ms），避免同一帧被读两次/漏帧 */
+        const val POLL_MS = 70L
+    }
 
     private val buffer: ByteBuffer = ByteBuffer.allocateDirect(StatusFrame.BYTES)
     private var lastSeq = -1
@@ -102,7 +112,7 @@ class StatusFramePoller(private val onFrame: (StatusFrame) -> Unit) {
                 } catch (t: Throwable) {
                     Log.e("StatusPoller", "poll failed", t)
                 }
-                delay(150)
+                delay(POLL_MS)
             }
         }
     }

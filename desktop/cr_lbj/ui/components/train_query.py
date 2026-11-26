@@ -122,10 +122,12 @@ class TrainQueryPanel(QWidget):
         self._lastQueryCode = ''
         self._currentData: Optional[dict] = None
 
-        # 横向排：左边结论 + 说明，右边按钮——整行宽度都用得上
-        outer = QHBoxLayout(self)
-        outer.setContentsMargins(spx(10), spx(8), spx(10), spx(6))
-        outer.setSpacing(spx(10))
+        # v3.2.6：「查看时刻表」不再占正文右侧一列（原来 96px 宽 + 10px 间距，
+        #   正文只剩七成宽，区间/担当/配属全在换行），改为挂到卡片标题栏右侧；
+        #   正文独占整卡宽度，只保留上下留白。
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(spx(10), spx(4), spx(10), spx(6))
+        outer.setSpacing(0)
 
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
@@ -155,12 +157,10 @@ class TrainQueryPanel(QWidget):
         col.addStretch(1)
         outer.addLayout(col, 1)
 
-        self.openBtn = QPushButton('查看时刻表')
-        self.openBtn.setToolTip('双击卡片也可打开（RailGo 时刻表 / 12306 兜底）')
+        # 标题栏小按钮（由主窗口塞进 CardBox 的 right 位）；不放进正文布局
+        self.openBtn = K.card_action_button('查看时刻表', '打开时刻表（双击卡片也可）')
         self.openBtn.setEnabled(False)
-        self.openBtn.setMinimumWidth(spx(96))
         self.openBtn.clicked.connect(self._openTimetable)
-        outer.addWidget(self.openBtn, 0, Qt.AlignVCenter)
         self._reset()
 
     # ------------------------------------------------------------------
@@ -199,7 +199,7 @@ class TrainQueryPanel(QWidget):
         self._currentData = None
         self._setLabels(title, hint=hint)
         self.openBtn.setEnabled(False)
-        self.openBtn.setText('暂无可查时刻表')
+        self.openBtn.setText('暂无时刻表')
 
     # ------------------------------------------------------------------
     # 交互
@@ -245,7 +245,7 @@ class TrainQueryPanel(QWidget):
                         hint='正在请求车次数据（RailGo 优先，失败退 12306）',
                         kind='info')
         self.openBtn.setEnabled(False)
-        self.openBtn.setText('暂无可查时刻表')
+        self.openBtn.setText('暂无时刻表')
 
         self._worker = TrainFullQueryWorker(train, prefer or 'auto')
         _keepWorker(self._worker)      # 防止旧线程在运行中被回收
@@ -266,7 +266,7 @@ class TrainQueryPanel(QWidget):
         self._currentData = res if res.get('stops') else None
         canOpen = bool(res.get('stops'))
         self.openBtn.setEnabled(canOpen)
-        self.openBtn.setText('查看时刻表' if canOpen else '暂无可查时刻表')
+        self.openBtn.setText('查看时刻表' if canOpen else '暂无时刻表')
 
         if not disp['ok']:
             err = disp['error'] or 'RailGo / 12306 均未返回数据'
@@ -314,10 +314,12 @@ class LocoInfoPanel(QWidget):
         super().__init__()
         self._last: dict = {}
 
-        # 横向排：左侧机型/配属/参数，右侧「配属查询」按钮
-        outer = QHBoxLayout(self)
-        outer.setContentsMargins(spx(10), spx(8), spx(10), spx(6))
-        outer.setSpacing(spx(10))
+        # v3.2.6：「配属查询」挪到卡片标题栏右侧，正文独占整卡宽度——
+        #   原来按钮吃掉 96px，配属全称（上海局徐州机务段）与牵引参数被挤到
+        #   换行后被卡片下沿截断。
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(spx(10), spx(4), spx(10), spx(6))
+        outer.setSpacing(0)
 
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
@@ -349,18 +351,20 @@ class LocoInfoPanel(QWidget):
             f'color: {CLR("dim")}; font-size: {spx(10)}px; padding: {spx(2)}px;'
             f'background-color: {CLR("panel")}; border-radius: 3px;')
         self.briefLabel.setWordWrap(True)
-        self.briefLabel.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        col.addWidget(self.briefLabel, 0)
+        # 末段（牵引参数 + 简介）留 stretch：QLabel 开了 wordWrap 后 sizeHint
+        # 只按自身宽度估行数，会把「还差一行」低估掉，结果最后一行被卡片下沿
+        # 切一半。给它伸缩权，富余高度先进这块，就不会被裁。
+        self.briefLabel.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        col.addWidget(self.briefLabel, 1)
         col.addStretch(1)
         outer.addLayout(col, 1)
 
-        self.detailBtn = QPushButton('配属查询')
-        self.detailBtn.setToolTip('打开「机车配属查询」，可看号段、制造厂与完整参数')
-        self.detailBtn.setMinimumWidth(spx(96))
+        # 标题栏小按钮（由主窗口塞进 CardBox 的 right 位）；不放进正文布局
+        self.detailBtn = K.card_action_button(
+            '配属查询', '打开「机车配属查询」，可看号段、制造厂与完整参数')
         self.detailBtn.setEnabled(False)
         self.detailBtn.clicked.connect(
             lambda: self.detailRequested.emit(self._last))
-        outer.addWidget(self.detailBtn, 0, Qt.AlignVCenter)
 
     def updateLoco(self, d: dict):
         """根据解码记录更新机车卡片（车型 + 配属 + 参数摘要）。"""

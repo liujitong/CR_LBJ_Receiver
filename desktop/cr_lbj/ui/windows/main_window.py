@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.5')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.6')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -229,8 +229,10 @@ class MainWindow(QMainWindow):
         # ③ 底栏：只有一行文字，不需要卡片标题，压到 34~46 px
         outH = int(min(max(avail * 0.045, spx(34)), spx(46)))
         rest = max(spx(240), avail - outH)
-        # ② 中段（频谱 | 车次 | 机车）：能看清就行，约 24%，夹在 96~180
-        band2H = int(min(max(rest * 0.24, spx(96)), spx(180)))
+        # ② 中段（频谱 | 车次 | 机车）：能看清就行，约 27%，夹在 96~196
+        #    v3.2.6：上限从 180 抬到 196——机车卡有 4 行文字（车型/配属/制造厂/
+        #    参数），180px 时最后一行正好压在下沿被裁掉。
+        band2H = int(min(max(rest * 0.27, spx(96)), spx(196)))
         # ① 上段（地图 + 解码）吃掉剩下的——这一块才是主战场
         band1H = max(spx(180), rest - band2H)
         # 极小逻辑窗（如 200% 缩放下的 400×400 逻辑屏）：中段三张卡片
@@ -264,10 +266,13 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'mapPanel'):
             self.mapPanel.setMinimumWidth(mapMinW)
 
-        # ② 三块比例：频谱 5 : 车次 3 : 机车 3
+        # ② 三块比例：频谱 4 : 车次 3.4 : 机车 3.4
+        #    v3.2.6：原来 5:3:3，两张文字卡只有 27% 宽，配属全称与牵引参数被
+        #    挤到换行后截断；频谱让出一点宽度，文字卡各多约两成。
         if hasattr(self, 'band2'):
-            unit = w / 11.0
-            self.band2.setSizes([int(unit * 5), int(unit * 3), int(unit * 3)])
+            unit = w / 10.8
+            self.band2.setSizes([int(unit * 4), int(unit * 3.4),
+                                 int(unit * 3.4)])
             for card in (getattr(self, 'specCard', None),
                          getattr(self, 'queryCard', None),
                          getattr(self, 'locoCard', None)):
@@ -282,7 +287,7 @@ class MainWindow(QMainWindow):
         for card in (getattr(self, 'queryCard', None), getattr(self, 'locoCard', None)):
             if card is not None:
                 card.setMinimumWidth(
-                    min(spx(168) if narrow else spx(210), maxCardW))
+                    min(spx(190) if narrow else spx(260), maxCardW))
 
         # 地图重绘（尺寸变了，Leaflet 必须收到 resize）
         QTimer.singleShot(0, self._afterFullScreen)
@@ -738,15 +743,20 @@ class MainWindow(QMainWindow):
 
         self.specCard = CardBox('接收频谱', self.spectrumStack,
                                 right=self.spectrumModeCombo)
-        self.queryCard = CardBox('车次信息', self.trainQueryPanel)
-        self.locoCard = CardBox('机车信息', self.locoPanel)
+        # v3.2.6：车次/机车卡的操作按钮挂到标题栏右侧，正文因此拿到整卡宽度
+        self.queryCard = CardBox('车次信息', self.trainQueryPanel,
+                                 right=self.trainQueryPanel.openBtn)
+        self.locoCard = CardBox('机车信息', self.locoPanel,
+                                right=self.locoPanel.detailBtn)
         band2.addWidget(self.specCard)
         band2.addWidget(self.queryCard)
         band2.addWidget(self.locoCard)
-        band2.setStretchFactor(0, 5)
-        band2.setStretchFactor(1, 3)
-        band2.setStretchFactor(2, 3)
-        band2.setSizes([spx(560), spx(320), spx(320)])
+        # 频谱 4 : 车次 3.4 : 机车 3.4（20:17:17）——频谱是曲线，窄一点不掉信息；
+        # 两张文字卡宽度直接决定换行行数
+        band2.setStretchFactor(0, 20)
+        band2.setStretchFactor(1, 17)
+        band2.setStretchFactor(2, 17)
+        band2.setSizes([spx(420), spx(400), spx(400)])
         self.band2 = band2
         mainSplit.addWidget(band2)
 
@@ -1404,7 +1414,7 @@ class MainWindow(QMainWindow):
            if data_update.auto_enabled(self.config) else '关')
 
         group('界面')
-        kv('版本', 'v3.2.5')
+        kv('版本', 'v3.2.6')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(
