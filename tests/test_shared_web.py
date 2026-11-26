@@ -504,10 +504,10 @@ class DocsVersionTest(unittest.TestCase):
         # v3.2.7：README 精简为「入口 + 文档导航」（详细内容下沉 docs/），
         # 不再维护「更新记录表」（版本历史统一在 docs/CHANGELOG.md）。
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.7', readme, 'README 版本号应为 v3.2.7')
+        self.assertIn('v3.2.8', readme, 'README 版本号应为 v3.2.8')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
-        self.assertNotIn('**版本** v3.2.6', readme)
+        self.assertNotIn('**版本** v3.2.7', readme)
         self.assertIn('docs/', readme, 'README 必须给出 docs/ 文档导航')
         for name in ('用户手册.md', '技术参考.md', 'CHANGELOG.md', 'NOTICE.md'):
             self.assertIn(name, readme, 'README 导航缺 %s' % name)
@@ -529,9 +529,9 @@ class DocsVersionTest(unittest.TestCase):
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2.7', text, '%s 文首版本号应为 v3.2.7' % name)
+            self.assertIn('v3.2.8', text, '%s 文首版本号应为 v3.2.8' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.7', changelog, 'CHANGELOG 顶部应有 v3.2.7 条目')
+        self.assertIn('## v3.2.8', changelog, 'CHANGELOG 顶部应有 v3.2.8 条目')
 
 
 if __name__ == '__main__':

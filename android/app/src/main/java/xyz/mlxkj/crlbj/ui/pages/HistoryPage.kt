@@ -2,6 +2,7 @@ package xyz.mlxkj.crlbj.ui.pages
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,10 +23,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,15 +40,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import xyz.mlxkj.crlbj.data.RecordEntity
-import xyz.mlxkj.crlbj.ui.components.Chip
 import xyz.mlxkj.crlbj.ui.components.EmptyState
-import xyz.mlxkj.crlbj.ui.components.InfoRow
-import xyz.mlxkj.crlbj.ui.components.PageHeader
-import xyz.mlxkj.crlbj.ui.components.SectionCard
+import xyz.mlxkj.crlbj.ui.components.LbjTextField
+import xyz.mlxkj.crlbj.ui.components.RecordDetailSheet
 import xyz.mlxkj.crlbj.ui.components.Tone
 import xyz.mlxkj.crlbj.ui.theme.Dim
 import xyz.mlxkj.crlbj.ui.theme.pal
@@ -56,80 +58,111 @@ import java.util.Locale
 private enum class GroupMode(val label: String) { Train("按车次"), Loco("按机车") }
 
 /**
- * 历史页：Room 里的解码记录（uid 去重后的最终记录）。
+ * 历史记录管理（v3.2.8 起从底部页签移入「设置 → 历史记录」）——增删改查全套：
  *
- * v3.0：分组（按车次号 / 按机车号）+ 多选删除 + 卡片列表 + 点开详情底部弹层 + CSV 导出。
+ *  * **增**：解码成功自动入库（按 uid 去重 REPLACE，无需手工）；
+ *  * **查**：实时关键词过滤（车次/机车/线路/备注）+ 按车次/按机车分组；点行看详情
+ *    （RecordDetailSheet 与桌面记录详情一致）；
+ *  * **改**：长按行编辑备注（note 列，Room v2 迁移新增；CSV 不含该列，双端一致）；
+ *  * **删**：多选删除（含全选）+ 删除全部（带确认）；
+ *  * 另：导出 CSV（列与桌面 HistoryDb.exportToCsv 完全一致）、条数统计。
+ *
+ * 嵌在设置页里渲染（外层给全高 Column），原底部「历史」页签已改为「信息」页。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryPage(vm: ReceiverViewModel) {
+fun HistorySection(vm: ReceiverViewModel) {
     val records by vm.records.collectAsStateWithLifecycle()
     val count by vm.recordCount.collectAsStateWithLifecycle()
     val csvMsg by vm.csvMsg.collectAsStateWithLifecycle()
+    val trainInfos by vm.trainInfos.collectAsStateWithLifecycle()
+    val trainErrors by vm.trainInfoErrors.collectAsStateWithLifecycle()
+    val locoInfos by vm.locoInfos.collectAsStateWithLifecycle()
     val p = pal()
 
     var mode by remember { mutableStateOf(GroupMode.Train) }
+    var query by remember { mutableStateOf("") }
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var detail by remember { mutableStateOf<RecordEntity?>(null) }
+    var noteEdit by remember { mutableStateOf<RecordEntity?>(null) }
+    var confirmClear by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri -> uri?.let { vm.exportCsv(it) } }
 
-    val groups: List<Pair<String, List<RecordEntity>>> = remember(records, mode) {
+    val filtered = remember(records, query) {
+        if (query.isBlank()) records
+        else {
+            val q = query.trim()
+            records.filter {
+                it.train.contains(q, true) || it.baseTrain.contains(q, true) ||
+                    it.loco.contains(q, true) || it.route.contains(q, true) ||
+                    it.note.contains(q, true)
+            }
+        }
+    }
+    val groups: List<Pair<String, List<RecordEntity>>> = remember(filtered, mode) {
         when (mode) {
-            GroupMode.Train -> records.groupBy { it.train.ifEmpty { it.baseTrain }.ifEmpty { "未知车次" } }
-            GroupMode.Loco -> records.groupBy { it.loco.ifEmpty { "未知机车" } }
+            GroupMode.Train ->
+                filtered.groupBy { it.train.ifEmpty { it.baseTrain }.ifEmpty { "未知车次" } }
+            GroupMode.Loco -> filtered.groupBy { it.loco.ifEmpty { "未知机车" } }
         }.toList()
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
-        PageHeader(
-            title = "历史",
-            subtitle = "共 $count 条 · ${groups.size} 组",
-            trailing = {
-                Chip(
-                    if (selecting) "已选 ${selected.size}" else "长按可多选",
-                    if (selecting) Tone.Warn else Tone.Neutral,
-                )
-            },
+    Column(Modifier.fillMaxSize()) {
+        // ---- 查询框 ----
+        LbjTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = "搜索 车次 / 机车 / 线路 / 备注",
+            modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(8.dp))
 
         // ---- 工具行 ----
         Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "共 $count 条" + if (query.isNotBlank()) " · 命中 ${filtered.size} 条" else "",
+                color = p.textTertiary, fontSize = 11.sp,
+            )
+            Spacer(Modifier.weight(1f))
             GroupMode.entries.forEach { m ->
                 TogglePill(m.label, mode == m) {
-                    mode = m
-                    selected = emptySet()
+                    mode = m; selected = emptySet()
                 }
                 Spacer(Modifier.width(6.dp))
             }
-            Spacer(Modifier.weight(1f))
             SmallAction(if (selecting) "取消" else "选择") {
                 selecting = !selecting
                 selected = emptySet()
             }
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(2.dp))
             SmallAction("导出") { exportLauncher.launch("lbj_history.csv") }
+            Spacer(Modifier.width(2.dp))
+            SmallAction("删全部", danger = true, enabled = records.isNotEmpty()) {
+                confirmClear = true
+            }
         }
-        Spacer(Modifier.height(Dim.gap))
-
         csvMsg?.let {
-            Text(it, color = p.ok, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
+            Text(it, color = p.ok, fontSize = 11.sp,
+                modifier = Modifier.padding(top = 4.dp))
         }
+        Spacer(Modifier.height(6.dp))
 
-        if (records.isEmpty()) {
-            Box(Modifier.fillMaxSize()) {
+        if (filtered.isEmpty()) {
+            Box(Modifier.weight(1f)) {
                 EmptyState(
-                    title = "暂无历史记录",
-                    hint = "开始接收后，解码成功且去重后的记录会自动入库（按 uid 更新，不是每次原始报文都入库）",
+                    title = if (records.isEmpty()) "暂无历史记录" else "无匹配记录",
+                    hint = if (records.isEmpty())
+                        "开始接收后，解码成功且去重后的记录会自动入库；点行看详情，长按改备注"
+                    else "换个关键词试试（车次/机车/线路/备注）",
                 )
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.weight(1f)) {
                 groups.forEach { (key, list) ->
                     item(key = "hd-$key") {
                         Row(
@@ -162,24 +195,22 @@ fun HistoryPage(vm: ReceiverViewModel) {
                                 }
                             },
                             onLongClick = {
-                                if (!selecting) {
-                                    selecting = true
-                                    selected = setOf(r.uid)
-                                }
+                                // 长按 = 编辑备注（增删改查的「改」）
+                                noteEdit = r
                             },
                         )
                     }
                 }
-                item { Spacer(Modifier.height(Dim.dockSpace)) }
+                item { Spacer(Modifier.height(Dim.dockSpace) ) }
             }
         }
 
-        // ---- 多选工具条（悬浮在 Dock 上方）----
+        // ---- 多选工具条 ----
         if (selecting) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(bottom = Dim.dockSpace)
+                    .padding(top = 6.dp)
                     .clip(RoundedCornerShape(50))
                     .background(p.surfaceAlt)
                     .border(1.dp, p.border, RoundedCornerShape(50))
@@ -188,8 +219,8 @@ fun HistoryPage(vm: ReceiverViewModel) {
             ) {
                 Text("已选 ${selected.size} 条", color = p.text, fontSize = 13.sp)
                 Spacer(Modifier.weight(1f))
-                SmallAction("全选", enabled = selected.size < records.size) {
-                    selected = records.map { it.uid }.toSet()
+                SmallAction("全选", enabled = selected.size < filtered.size) {
+                    selected = filtered.map { it.uid }.toSet()
                 }
                 Spacer(Modifier.width(8.dp))
                 SmallAction("删除", danger = true, enabled = selected.isNotEmpty()) {
@@ -201,19 +232,96 @@ fun HistoryPage(vm: ReceiverViewModel) {
         }
     }
 
+    // ---- 详情（与桌面 RecordDetailDialog 五页签一致）----
     detail?.let { r ->
         ModalBottomSheet(
             onDismissRequest = { detail = null },
             sheetState = sheetState,
             containerColor = p.surface,
         ) {
-            RecordDetail(r)
+            val roster = vm.currentRoster()
+            val short = roster.shortCode(r.locoCode, r.loco).ifEmpty { r.loco.trim() }
+            RecordDetailSheet(
+                r = r,
+                trainInfo = trainInfos[xyz.mlxkj.crlbj.data.TrainInfoClient
+                    .normalizeTrain(r.train)],
+                trainError = trainErrors[xyz.mlxkj.crlbj.data.TrainInfoClient
+                    .normalizeTrain(r.train)],
+                onEnsure = { vm.ensureTrainInfo(r.train) },
+                loco = locoInfos[ReceiverViewModel.locoKey(r.loco, r.locoCode)]
+                    ?: runCatching { roster.lookupLoco(r.loco, r.locoCode) }
+                        .getOrNull()?.takeIf { it.ok },
+                spec = roster.specsFor(short),
+                onClose = { detail = null },
+            )
         }
+    }
+
+    // ---- 编辑备注 ----
+    noteEdit?.let { r ->
+        var text by remember(r.uid) { mutableStateOf(r.note) }
+        AlertDialog(
+            onDismissRequest = { noteEdit = null },
+            containerColor = p.surface,
+            title = { Text("备注 · ${r.train.ifEmpty { "----" }} ${r.timeStr.takeLast(8)}",
+                color = p.text, fontSize = 15.sp) },
+            text = {
+                LbjTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = "给这条记录写点备注（本地保存，不导出 CSV）",
+                    keyboardType = KeyboardType.Text,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.updateNote(r.uid, text)
+                    noteEdit = null
+                }) { Text("保存", color = p.accent) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        vm.updateNote(r.uid, "")
+                        noteEdit = null
+                    }) { Text("清空", color = p.textTertiary) }
+                    TextButton(onClick = { noteEdit = null }) {
+                        Text("取消", color = p.textSecondary)
+                    }
+                }
+            },
+        )
+    }
+
+    // ---- 删除全部确认 ----
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            containerColor = p.surface,
+            title = { Text("删除全部历史记录？", color = p.text, fontSize = 15.sp) },
+            text = {
+                Text("将清空全部 $count 条记录（含备注），不可恢复。建议先「导出」备份。",
+                    color = p.textSecondary, fontSize = 13.sp)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.clearHistory()
+                    confirmClear = false
+                    selecting = false
+                    selected = emptySet()
+                }) { Text("全部删除", color = p.err) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) {
+                    Text("取消", color = p.textSecondary)
+                }
+            },
+        )
     }
 }
 
-/** 一条历史记录（卡片行） */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** 一条历史记录（卡片行；备注非空时显示标注） */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RecordRow(
     r: RecordEntity,
@@ -261,8 +369,10 @@ private fun RecordRow(
                 listOfNotNull(
                     r.loco.takeIf { it.isNotBlank() }?.let { "机车 $it" },
                     r.category.takeIf { it.isNotBlank() },
+                    r.note.takeIf { it.isNotBlank() }?.let { "备注：$it" },
                 ).joinToString(" · "),
-                color = p.textTertiary, fontSize = 11.sp, maxLines = 1,
+                color = if (r.note.isNotBlank()) p.warn else p.textTertiary,
+                fontSize = 11.sp, maxLines = 1,
             )
         }
         Column(horizontalAlignment = Alignment.End) {
@@ -275,57 +385,7 @@ private fun RecordRow(
     }
 }
 
-/** 记录详情（底部弹层） */
-@Composable
-private fun RecordDetail(r: RecordEntity) {
-    val p = pal()
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Dim.pagePad)
-            .padding(bottom = 28.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(r.train.ifEmpty { "----" }, color = p.text, fontSize = 26.sp,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(10.dp))
-            DirectionBadge(r.direction)
-            Spacer(Modifier.weight(1f))
-            Text(r.timeStr, color = p.textTertiary, fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace)
-        }
-        Spacer(Modifier.height(10.dp))
-        SectionCard("解码结果") {
-            InfoRow("类别", r.category)
-            InfoRow("速度", "${r.speed} km/h", mono = true)
-            InfoRow("公里标", r.position, mono = true)
-            InfoRow("线路", r.route.ifEmpty { "未知" })
-            InfoRow("机车", r.loco.ifEmpty { "----" }, mono = true)
-            InfoRow("报文", if (r.isDetailed) "详细长报文" else "基础短报文")
-            InfoRow("BCH 错", if (r.msgTypeError) "有" else "无")
-        }
-        Spacer(Modifier.height(Dim.gap))
-        SectionCard("到达估算") {
-            InfoRow("预计到达", r.etaTime, mono = true)
-            InfoRow("剩余里程", r.etaDistanceKm?.let { "%.1f km".format(Locale.US, it) } ?: "—",
-                mono = true)
-            InfoRow("状态", r.etaStatus)
-        }
-        Spacer(Modifier.height(Dim.gap))
-        SectionCard("链路") {
-            InfoRow("RSSI", "%.1f dB".format(Locale.US, r.rssi), mono = true)
-            InfoRow("AFC", "%.0f Hz".format(Locale.US, r.afcHz), mono = true)
-            r.latitude?.let {
-                InfoRow("坐标", "%.5f, %.5f".format(Locale.US, it, r.longitude ?: 0.0), mono = true)
-            }
-            InfoRow("地址", "0x%X".format(r.rawAddr), mono = true)
-            InfoRow("原始 BCD", r.rawBcd.ifEmpty { "—" }, mono = true)
-            InfoRow("uid", r.uid, mono = true)
-        }
-    }
-}
-
-/** 圆角小开关（分组方式 / 工具动作） */
+/** 圆角小开关（分组方式） */
 @Composable
 private fun TogglePill(text: String, active: Boolean, onClick: () -> Unit) {
     val p = pal()
@@ -345,7 +405,7 @@ private fun TogglePill(text: String, active: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 文字动作（导出/选择/删除…） */
+/** 文字动作（导出/选择/删全部…） */
 @Composable
 private fun SmallAction(
     text: String,

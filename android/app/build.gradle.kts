@@ -58,9 +58,9 @@ android {
         targetSdk = 35
         // 用户指定 NDK r27
         ndkVersion = "27.2.12479018"
-        // v3.2.7：安卓 RTL 型号识别与推荐配置 + 数据源文案统一；versionCode 327
-        versionCode = 327
-        versionName = "3.2.7"
+        // v3.2.8：安卓信息页 + 历史记录增删改查 + 记录详情对齐 PC；versionCode 328
+        versionCode = 328
+        versionName = "3.2.8"
     }
 
     signingConfigs {

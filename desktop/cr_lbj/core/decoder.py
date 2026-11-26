@@ -239,9 +239,8 @@ class CoreConfig:
     mapFollow: bool = True                 # 是否自动跟随最新列车
     mapShowTrail: bool = True              # 是否显示最近列车轨迹点
     mapNight: bool = True                  # 地图夜间模式 (深色底图)
-    # 默认中心：mapCenterAddress 只是显示名（预设城市名），真实位置用经纬度；
+    # 默认中心：v3.2.8 起**只保留经纬度**（与安卓一致，不再存城市名字段）；
     # 离线也能定位，不再依赖地名解析。
-    mapCenterAddress: str = ''
     mapCenterLng: float = 0.0              # 中心经度 (WGS-84)
     mapCenterLat: float = 0.0              # 中心纬度 (WGS-84)
     # --- 地图图源 (v3.0) ---

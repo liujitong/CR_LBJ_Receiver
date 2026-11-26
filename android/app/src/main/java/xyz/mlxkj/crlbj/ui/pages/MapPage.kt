@@ -469,7 +469,7 @@ fun MapPage(vm: ReceiverViewModel) {
                 MapToolItem(icon = Icons.Filled.CenterFocusStrong, label = "回中心",
                     active = false) {
                     web?.evaluateJavascript(
-                        "window.LBJ&&window.LBJ.centerTo('${settings.mapCenterName}')", null)
+                        "window.LBJ&&window.LBJ.centerTo('')", null)   // 中心只用经纬度（v3.2.8 去城市名）
                     vm.updateViewSettings(settings.copy(mapFollow = false))
                 }
                 MapToolItem(

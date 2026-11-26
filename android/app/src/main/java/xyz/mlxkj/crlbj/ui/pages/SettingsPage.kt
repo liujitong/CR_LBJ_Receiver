@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sensors
@@ -105,6 +106,8 @@ private val MENU = listOf(
     MenuGroup("source", "数据源与射频", Icons.Filled.SettingsInputAntenna),
     MenuGroup("gate", "门控·AFC", Icons.Filled.Sensors),
     MenuGroup("decode", "解码", Icons.Filled.GraphicEq),
+    // v3.2.8：历史记录的增删改查移入设置（原 Dock「历史」页签改为「信息」页）
+    MenuGroup("history", "历史记录", Icons.Filled.ManageSearch),
     MenuGroup("map", "地图", Icons.Filled.Map),
     MenuGroup("query", "查询·数据", Icons.Filled.Search),
     MenuGroup("about", "关于", Icons.Filled.Info),
@@ -123,6 +126,8 @@ private val MENU = listOf(
 fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
     val current by vm.settings.collectAsStateWithLifecycle()
     val places by vm.places.collectAsStateWithLifecycle()
+    val recCount by vm.recordCount.collectAsStateWithLifecycle()
+    val gotoHistory by vm.gotoHistory.collectAsStateWithLifecycle()
     val dataInfo by vm.dataInfo.collectAsStateWithLifecycle()
     val update by vm.dataUpdate.collectAsStateWithLifecycle()
     val pending by vm.pendingQuery.collectAsStateWithLifecycle()
@@ -190,6 +195,8 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
     // 解码页「查这趟车 / 查这台机车」→ 查询·数据子页（QuerySection 消费预填）
     LaunchedEffect(pending) { if (pending != null) sub = "query" }
+    // 信息页「历史记录管理」按钮 → 直达本子页（v3.2.8）
+    LaunchedEffect(gotoHistory) { if (gotoHistory) { sub = "history"; vm.consumeGotoHistory() } }
     LaunchedEffect(saveErr) {
         if (saveErr != null) {
             kotlinx.coroutines.delay(3500)
@@ -199,7 +206,7 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
         if (sub == null) {
-            PageHeader(title = "设置", subtitle = "v3.2.7 · 更改自动保存")
+            PageHeader(title = "设置", subtitle = "v3.2.8 · 更改自动保存")
             saveErr?.let {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
@@ -208,7 +215,7 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
                 SectionCard {
                     MENU.forEachIndexed { i, g ->
                         if (i > 0) Divider()
-                        MenuRow(g, menuSubtitle(g.id, s)) { sub = g.id }
+                        MenuRow(g, menuSubtitle(g.id, s, recCount)) { sub = g.id }
                     }
                 }
                 Spacer(Modifier.height(Dim.dockSpace))
@@ -246,6 +253,12 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
             }
+            if (sub == "history") {
+                // HistorySection 内含 LazyColumn，必须给全高、不能嵌在 verticalScroll 里
+                Column(Modifier.weight(1f)) {
+                    HistorySection(vm)
+                }
+            } else
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 when (sub) {
                     // ------------------------------------ 数据源与射频（v3.2.5 合并为一组）
@@ -592,14 +605,21 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
                         )
                         Spacer(Modifier.height(8.dp))
                         if (places.isNotEmpty()) {
+                            // v3.2.8：默认中心字段只保留经纬度（与桌面一致）；
+                            // 选城市 = 把 places.csv 的经纬度回填，名字只在值里顺带显示
+                            val match = places.firstOrNull {
+                                it.lat == s.mapCenterLat && it.lng == s.mapCenterLng
+                            }
                             SelectRow(
                                 label = "默认中心",
-                                value = s.mapCenterName.ifEmpty { "未设置" },
+                                value = "%.4f, %.4f".format(
+                                    Locale.US, s.mapCenterLat, s.mapCenterLng) +
+                                    (match?.let { "（${it.name}）" } ?: ""),
                                 options = places.map { it.name to it.name },
                             ) { name ->
                                 val pl = places.firstOrNull { it.name == name }
                                 if (pl != null) {
-                                    commit(s.copy(mapCenterName = pl.name, mapCenterLat = pl.lat,
+                                    commit(s.copy(mapCenterLat = pl.lat,
                                         mapCenterLng = pl.lng))
                                 }
                             }
@@ -686,9 +706,9 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
                     // ----------------------------------------------------- 关于
                     else -> SectionCard("关于") {
-                        Text("CR 列车预警器 · Android v3.2.5", color = p.text, fontSize = 13.sp)
+                        Text("CR 列车预警器 · Android v3.2.8", color = p.text, fontSize = 13.sp)
                         Text(
-                            "桌面版与安卓版 v3.2.5 同版本号；地图页与桌面端共用 " +
+                            "桌面版与安卓版 v3.2.8 同版本号；地图页与桌面端共用 " +
                                 "shared/web/railmap.html，数据共用 shared/data/*。",
                             color = p.textTertiary, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 4.dp),
@@ -866,23 +886,27 @@ private fun viewChanged(a: ReceiverSettings, b: ReceiverSettings): Boolean =
     a.mapZoom != b.mapZoom || a.mapFollow != b.mapFollow || a.mapNight != b.mapNight ||
     a.mapBase != b.mapBase || a.mapRail != b.mapRail || a.mapRailOpacity != b.mapRailOpacity ||
     a.mapTdtKey != b.mapTdtKey || a.tdtReferer != b.tdtReferer ||
-    a.mapCenterName != b.mapCenterName || a.mapCenterLat != b.mapCenterLat ||
+    a.mapCenterLat != b.mapCenterLat ||
     a.mapCenterLng != b.mapCenterLng
 
 // ------------------------------------------------------------------ 菜单行
 
-private fun menuSubtitle(id: String, s: ReceiverSettings): String = when (id) {
+private fun menuSubtitle(id: String, s: ReceiverSettings, recCount: Int = 0): String = when (id) {
     "source" -> (if (s.isUsb) "本机 USB" else "${s.sourceType} · ${s.host}:${s.port}") +
         " · ${s.sampleRate / 1000} kS/s"
     "rf" -> "${fmt(s.freqMhz)} MHz · 增益 ${fmt(s.gainDb)} dB"
     "gate" -> "门限 ${fmt(s.rssiThresholdDb)} dB · AFC ${if (s.afcEnable) "开" else "关"}"
     "decode" -> "去重 ${fmt(s.dedupeWindow)} s · ETA ≤ ${fmt(s.etaMaxMin)} min"
+    "history" -> {
+        val n = recCount
+        if (n == 0) "暂无记录 · 可删改查" else "$n 条 · 查看/改备注/删/导出"
+    }
     "map" -> (MAP_BASES.firstOrNull { it.first == s.mapBase }?.second ?: s.mapBase) +
         " · " + (MAP_RAILS.firstOrNull { it.first == s.mapRail }?.second ?: s.mapRail)
     "query" -> (when (s.trainQuerySource) {
         "railgo" -> "仅 RailGo"; "12306" -> "仅 12306"; else -> "RailGo→12306"
     }) + " · 配属表自动更新" + if (s.dataAutoUpdate) "开" else "关"
-    else -> "v3.2.7 · 桌面版与安卓版同版本号"
+    else -> "v3.2.8 · 桌面版与安卓版同版本号"
 }
 
 @Composable

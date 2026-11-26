@@ -208,7 +208,7 @@ fun QuerySection(vm: ReceiverViewModel) {
                 sheetState = stopsSheet,
                 containerColor = p.surface,
             ) {
-                StopsSheet(r)
+                TrainStopsSheet(r)
             }
         }
     }
@@ -391,7 +391,7 @@ private fun TrainPanel(
 }
 
 @Composable
-private fun StopRow(s: TrainInfoClient.Stop) {
+internal fun StopRow(s: TrainInfoClient.Stop) {
     val p = pal()
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -429,7 +429,7 @@ private fun StopRow(s: TrainInfoClient.Stop) {
 }
 
 @Composable
-private fun StopsSheet(r: TrainInfoClient.TrainInfo) {
+internal fun TrainStopsSheet(r: TrainInfoClient.TrainInfo) {
     val p = pal()
     Column(Modifier.fillMaxWidth().padding(horizontal = Dim.pagePad)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

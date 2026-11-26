@@ -320,6 +320,14 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { db.recordDao().clear() }
     }
 
+    /** 编辑单条记录备注（v3.2.8 历史记录「改」） */
+    fun updateNote(uid: String, note: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { db.recordDao().updateNote(uid, note.trim()) }
+                .onFailure { _csvMsg.value = "备注保存失败：${it.message}" }
+        }
+    }
+
     /** 历史页多选删除 */
     fun deleteRecords(uids: Collection<String>) {
         if (uids.isEmpty()) return
@@ -331,6 +339,12 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ------------------------------------------------------------ 查询跳转
+    /** 信息页 → 设置「历史记录」子页 的一次性跳转信号（v3.2.8） */
+    private val _gotoHistory = MutableStateFlow(false)
+    val gotoHistory: StateFlow<Boolean> = _gotoHistory
+    fun requestGotoHistory() { _gotoHistory.value = true }
+    fun consumeGotoHistory() { _gotoHistory.value = false }
+
     fun requestLocoQuery(model: String, number: String) {
         _pendingQuery.value = PendingQuery(PendingQuery.Kind.LOCO, model, number)
     }
@@ -424,6 +438,36 @@ class ReceiverViewModel(app: Application) : AndroidViewModel(app) {
     /** 机车配属缓存：locoKey(loco, locoCode) → Lookup */
     private val _locoInfos = MutableStateFlow<Map<String, LocoRoster.Lookup>>(emptyMap())
     val locoInfos: StateFlow<Map<String, LocoRoster.Lookup>> = _locoInfos
+
+    /** RailGo 查询失败缓存（详情/信息页展示"未查询到（原因）"，避免永远查询中） */
+    private val _trainInfoErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val trainInfoErrors: StateFlow<Map<String, String>> = _trainInfoErrors
+
+    /**
+     * 详情/信息页按需触发一次车次查询（v3.2.8）：命中缓存直接返回；
+     * 失败把原因写进 trainInfoErrors（桌面详情同口径：查不到只提示，不阻塞）。
+     */
+    fun ensureTrainInfo(train: String) {
+        val t = TrainInfoClient.normalizeTrain(train)
+        if (t.isEmpty() || t in setOf("----", "未知")) return
+        if (_trainInfos.value.containsKey(t)) return
+        if (_trainInfoErrors.value.containsKey(t)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val r = runCatching {
+                TrainInfoClient.query(t, prefer = _settings.value.trainQuerySource)
+            }.getOrElse {
+                _trainInfoErrors.value = _trainInfoErrors.value +
+                    (t to (it.message ?: "查询异常"))
+                return@launch
+            }
+            if (r != null && r.ok) {
+                _trainInfos.value = _trainInfos.value + (t to r)
+            } else {
+                _trainInfoErrors.value = _trainInfoErrors.value +
+                    (t to (r?.error?.ifEmpty { "未查询到车次信息" } ?: "未查询到车次信息"))
+            }
+        }
+    }
 
     // 去重集合只被 events 收集器这一个 IO 协程读写，无需加锁
     private val queriedTrains = HashSet<String>()

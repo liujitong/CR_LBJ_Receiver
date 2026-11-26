@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
@@ -27,7 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import xyz.mlxkj.crlbj.ui.components.DockTab
 import xyz.mlxkj.crlbj.ui.components.LbjDock
 import xyz.mlxkj.crlbj.ui.pages.DecodePage
-import xyz.mlxkj.crlbj.ui.pages.HistoryPage
+import xyz.mlxkj.crlbj.ui.pages.InfoPage
 import xyz.mlxkj.crlbj.ui.pages.MapPage
 import xyz.mlxkj.crlbj.ui.pages.SettingsPage
 import xyz.mlxkj.crlbj.ui.pages.StatusPage
@@ -37,7 +38,7 @@ import xyz.mlxkj.crlbj.vm.ReceiverViewModel
 private val tabs = listOf(
     DockTab("地图", Icons.Filled.Map),
     DockTab("解码", Icons.Filled.GraphicEq),
-    DockTab("历史", Icons.Filled.History),
+    DockTab("信息", Icons.Filled.Info),
     DockTab("状态", Icons.Filled.Analytics),
     DockTab("设置", Icons.Filled.Settings),
 )
@@ -45,7 +46,7 @@ private val tabs = listOf(
 /** 页签索引常量（跨页跳转用） */
 private const val TAB_MAP = 0
 private const val TAB_DECODE = 1
-private const val TAB_HISTORY = 2
+private const val TAB_INFO = 2
 private const val TAB_STATUS = 3
 private const val TAB_SETTINGS = 4
 
@@ -96,10 +97,10 @@ fun LbjApp() {
                             switchTo(TAB_SETTINGS)
                         },
                     )
-                    TAB_HISTORY -> HistoryPage(vm)
+                    TAB_INFO -> InfoPage(vm)
                     TAB_STATUS -> StatusPage(vm)
                     TAB_SETTINGS -> SettingsPage(vm, onBack = { switchTo(lastTab) })
-                    else -> HistoryPage(vm)
+                    else -> InfoPage(vm)
                 }
             }
         }

@@ -509,24 +509,14 @@ class ConfigPanel(QWidget):
 
         _curLng = float(getattr(config, 'mapCenterLng', 0) or 0)
         _curLat = float(getattr(config, 'mapCenterLat', 0) or 0)
-        self._centerAddress = str(getattr(config, 'mapCenterAddress', '') or '').strip()
-        if abs(_curLng) < 1e-6 and abs(_curLat) < 1e-6 and self._centerAddress:
-            # 老配置只存了地名：按名字在内置城市表里反查一次
-            for _p in self._places:
-                if _p['name'] == self._centerAddress:
-                    _curLat, _curLng = float(_p['lat']), float(_p['lng'])
-                    break
+        # v3.2.8：配置只存经纬度；城市下拉仅作「选择便捷」，当前项按最近城市反查
         self._updating_center = True
         try:
             self.mapCenterLngSpin.setValue(_curLng)
             self.mapCenterLatSpin.setValue(_curLat)
-            _name = self._centerAddress or config_ext.nearest_place(_curLat, _curLng,
-                                                                    self._places) or ''
-            if not _name:
-                _name = config_ext.nearest_place(_curLat, _curLng, self._places) or ''
+            _name = config_ext.nearest_place(_curLat, _curLng, self._places) or ''
             _ci = self.mapCenterCity.findData(_name)
             self.mapCenterCity.setCurrentIndex(_ci if _ci > 0 else 0)
-            self._centerAddress = _name if _ci > 0 else ''
         finally:
             self._updating_center = False
         self.mapCenterCity.currentIndexChanged.connect(self._onCenterCityPicked)
@@ -894,12 +884,11 @@ class ConfigPanel(QWidget):
 
     # ---- 地图默认中心（城市 ↔ 经纬度 双向同步） ----
     def _onCenterCityPicked(self, _index: int):
-        """选预设城市 → 填经纬度；选「自定义」只是清掉城市名，不动坐标。"""
+        """选预设城市 → 只把经纬度填进两个数值框（v3.2.8 不再保存城市名）。"""
         if getattr(self, '_updating_center', False):
             return
         name = str(self.mapCenterCity.currentData() or '')
         if not name:
-            self._centerAddress = ''
             return
         for p in getattr(self, '_places', []):
             if p['name'] == name:
@@ -913,7 +902,7 @@ class ConfigPanel(QWidget):
                 return
 
     def _onCenterSpinChanged(self, _value: float = 0.0):
-        """手改经纬度 → 城市名清空（自定义中心）。"""
+        """手改经纬度 → 下拉切回「自定义」仅作显示（配置里本来就只有经纬度）。"""
         if getattr(self, '_updating_center', False):
             return
         self._updating_center = True
@@ -921,7 +910,6 @@ class ConfigPanel(QWidget):
             self.mapCenterCity.setCurrentIndex(0)
         finally:
             self._updating_center = False
-        self._centerAddress = ''
 
     # ---- 第三方数据更新 ----
     def _checkDataUpdate(self):
@@ -989,8 +977,7 @@ class ConfigPanel(QWidget):
             cfg.mapFollow = self.mapFollowCheck.isChecked()
             cfg.mapShowTrail = self.mapTrailCheck.isChecked()
             cfg.mapNight = self.mapNightCheck.isChecked()
-            # 默认中心：城市名只当标签（页面离线，靠经纬度居中）
-            cfg.mapCenterAddress = str(getattr(self, '_centerAddress', '') or '')
+            # 默认中心：v3.2.8 只保存经纬度（不再写城市名）
             newLng = float(self.mapCenterLngSpin.value())
             newLat = float(self.mapCenterLatSpin.value())
             oldLng = float(getattr(self.config, 'mapCenterLng', 0.0) or 0.0)

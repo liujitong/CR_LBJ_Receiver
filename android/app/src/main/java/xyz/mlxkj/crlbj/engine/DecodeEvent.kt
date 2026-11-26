@@ -41,6 +41,8 @@ data class DecodeEvent(
     val rawIsShort: Boolean = false,
     val rawIsMerged: Boolean = false,
     val rawIsStandalone: Boolean = false,
+    /** BCH(31,21) 纠错后的码字（与桌面 rawCodewords 同名；v3.2.8 起进详情） */
+    val rawCodewords: List<Int> = emptyList(),
     val rssi: Double = -140.0,
     val afcHz: Double = 0.0,
     val afcErrHz: Double = 0.0,
@@ -83,6 +85,9 @@ data class DecodeEvent(
                 rawIsShort = o.optBoolean("rawIsShort", false),
                 rawIsMerged = o.optBoolean("rawIsMerged", false),
                 rawIsStandalone = o.optBoolean("rawIsStandalone", false),
+                rawCodewords = o.optJSONArray("rawCodewords")
+                    ?.let { a -> (0 until a.length()).map { a.getInt(it) } }
+                    ?: emptyList(),
                 rssi = o.optDouble("rssi", -140.0),
                 afcHz = o.optDouble("afcHz", 0.0),
                 afcErrHz = o.optDouble("afcErrHz", 0.0),

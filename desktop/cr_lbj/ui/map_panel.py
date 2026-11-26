@@ -260,7 +260,6 @@ class MapPanel(QWidget):
     # ------------------------------------------------------------------
     def setConfig(self, config):
         """配置更新后同步页面（不重建 —— 重建会丢标记）。"""
-        old_addr = str(getattr(self.config, 'mapCenterAddress', '') or '').strip()
         old_lat = float(getattr(self.config, 'mapCenterLat', 0) or 0)
         old_lng = float(getattr(self.config, 'mapCenterLng', 0) or 0)
         self.config = config_ext.ensure(config)
@@ -278,11 +277,9 @@ class MapPanel(QWidget):
                 config_ext.get(self.config, 'mapBase', 'amap'))
             self._pushed['rail'] = rail
             self._push(force=True)
-            new_addr = str(getattr(self.config, 'mapCenterAddress', '') or '').strip()
             new_lat = float(getattr(self.config, 'mapCenterLat', 0) or 0)
             new_lng = float(getattr(self.config, 'mapCenterLng', 0) or 0)
-            if (new_addr != old_addr
-                    or abs(new_lat - old_lat) > 1e-6
+            if (abs(new_lat - old_lat) > 1e-6
                     or abs(new_lng - old_lng) > 1e-6):
                 self.centerToDefault()
         else:
@@ -536,7 +533,6 @@ class MapPanel(QWidget):
         """把地图挪回默认中心（预设城市/经纬度，页面不加标记）。"""
         lat = float(getattr(self.config, 'mapCenterLat', 0) or 0)
         lng = float(getattr(self.config, 'mapCenterLng', 0) or 0)
-        addr = str(getattr(self.config, 'mapCenterAddress', '') or '').strip()
         # 用户主动看固定中心，就先让开「跟随」；否则下一帧列车一动又被拉走
         if self.followBtn.isChecked():
             self.followBtn.setChecked(False)
@@ -548,9 +544,9 @@ class MapPanel(QWidget):
             return
         # 页面只认 CONFIG.center（离线，不做地名解析）；先推坐标再居中
         self.host.apply_config(self.config)
-        self.host.center_to(addr)
-        self._coord_text = '中心：%s' % (addr or ('%.4f, %.4f' % (lat, lng)
-                                                if lat or lng else '（未设置）'))
+        self.host.center_to('')
+        self._coord_text = '中心：%s' % (('%.4f, %.4f' % (lat, lng))
+                                       if (lat or lng) else '（未设置）')
         self._tile_bad = False
         self._refreshCoordLabel()
 

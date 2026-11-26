@@ -102,8 +102,8 @@ data class ReceiverSettings(
     val mapTdtKey: String = "",
     /** 天地图 Referer 白名单域名（申请浏览器端 tk 时登记）；空 = 代拉瓦片时不附加 Referer */
     val tdtReferer: String = "",
-    /** 默认中心：预设城市名（仅显示用，来自 shared/data/places.csv） */
-    val mapCenterName: String = "南昌",
+    /** 默认中心：v3.2.8 起**只保留经纬度**（与桌面一致）。
+     *  旧版 mapCenterName 字段已废弃删除；设置页选城市只是把 places.csv 的经纬度回填。 */
     val mapCenterLat: Double = 28.68,
     val mapCenterLng: Double = 115.86,
     // 查询
@@ -265,7 +265,6 @@ data class ReceiverSettings(
                     sp.getLong("mapRailOpacity", d.mapRailOpacity.toRawBits())),
                 mapTdtKey = sp.getString("mapTdtKey", d.mapTdtKey) ?: d.mapTdtKey,
                 tdtReferer = sp.getString("tdtReferer", d.tdtReferer) ?: d.tdtReferer,
-                mapCenterName = sp.getString("mapCenterName", d.mapCenterName) ?: d.mapCenterName,
                 mapCenterLat = Double.fromBits(
                     sp.getLong("mapCenterLat", d.mapCenterLat.toRawBits())),
                 mapCenterLng = Double.fromBits(
@@ -355,7 +354,6 @@ data class ReceiverSettings(
             e.putLong("mapRailOpacity", s.mapRailOpacity.toRawBits())
             e.putString("mapTdtKey", s.mapTdtKey)
             e.putString("tdtReferer", s.tdtReferer)
-            e.putString("mapCenterName", s.mapCenterName)
             e.putLong("mapCenterLat", s.mapCenterLat.toRawBits())
             e.putLong("mapCenterLng", s.mapCenterLng.toRawBits())
             e.putString("trainQuerySource", s.trainQuerySource)

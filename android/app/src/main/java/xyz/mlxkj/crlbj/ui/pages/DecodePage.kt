@@ -58,6 +58,7 @@ import xyz.mlxkj.crlbj.ui.components.Divider
 import xyz.mlxkj.crlbj.ui.components.EmptyState
 import xyz.mlxkj.crlbj.ui.components.InfoRow
 import xyz.mlxkj.crlbj.ui.components.PageHeader
+import xyz.mlxkj.crlbj.ui.components.RecordDetailSheet
 import xyz.mlxkj.crlbj.ui.components.SectionCard
 import xyz.mlxkj.crlbj.ui.components.StatusCapsule
 import xyz.mlxkj.crlbj.ui.components.Tone
@@ -90,6 +91,7 @@ fun DecodePage(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val trainInfos by vm.trainInfos.collectAsStateWithLifecycle()
     val locoInfos by vm.locoInfos.collectAsStateWithLifecycle()
+    val trainErrors by vm.trainInfoErrors.collectAsStateWithLifecycle()
     val p = pal()
 
     // 信号历史环形缓冲（轮询帧驱动，最多 240 点 ≈ 36s）
@@ -221,10 +223,20 @@ fun DecodePage(
             sheetState = sheetState,
             containerColor = p.surface,
         ) {
-            DecodeDetailSheet(
-                ev = ev,
-                onQueryTrain = { onQueryTrain(it); detail = null },
-                onQueryLoco = { m, n -> onQueryLoco(m, n); detail = null },
+            // v3.2.8：与桌面双击记录详情完全一致（五页签 + RailGo + 机车详情）
+            val roster = vm.currentRoster()
+            val rec = xyz.mlxkj.crlbj.data.RecordEntity.fromEvent(ev)
+            val short = roster.shortCode(ev.locoCode, ev.loco)
+            RecordDetailSheet(
+                r = rec,
+                trainInfo = trainInfos[TrainInfoClient.normalizeTrain(ev.train)],
+                trainError = trainErrors[TrainInfoClient.normalizeTrain(ev.train)],
+                onEnsure = { vm.ensureTrainInfo(ev.train) },
+                loco = locoInfos[ReceiverViewModel.locoKey(ev.loco, ev.locoCode)]
+                    ?: runCatching { roster.lookupLoco(ev.loco, ev.locoCode) }
+                        .getOrNull()?.takeIf { it.ok },
+                spec = roster.specsFor(short.ifEmpty { ev.loco.trim() }),
+                onClose = { detail = null },
             )
         }
     }
@@ -770,86 +782,6 @@ private fun BigMetric(label: String, value: String, unit: String, modifier: Modi
 @Composable
 private fun BigMetric(pair: Pair<String, String>, unit: String, modifier: Modifier) {
     BigMetric(pair.first, pair.second, unit, modifier)
-}/** 解码记录详情（底部弹层，不做整页跳转） */
-@Composable
-private fun DecodeDetailSheet(
-    ev: DecodeEvent,
-    onQueryTrain: (String) -> Unit,
-    onQueryLoco: (String, String) -> Unit,
-) {
-    val p = pal()
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Dim.pagePad)
-            .padding(bottom = 28.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(ev.train.ifEmpty { "----" }, color = p.text, fontSize = 26.sp,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(10.dp))
-            DirectionBadge(ev.direction)
-            Spacer(Modifier.weight(1f))
-            Text(ev.timeStr, color = p.textTertiary, fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace)
-        }
-        Spacer(Modifier.height(10.dp))
-        SectionCard("基本") {
-            InfoRow("类别", ev.category)
-            InfoRow("速度", "${ev.speed} km/h", mono = true)
-            InfoRow("公里标", ev.position, mono = true)
-            InfoRow("线路", ev.route.ifEmpty { "未知" })
-            InfoRow("机车", ev.loco.ifEmpty { "----" }, mono = true)
-            InfoRow("机车代号", ev.locoCode.ifEmpty { "----" }, mono = true)
-            InfoRow("报文类型", if (ev.isDetailed) "详细长报文" else "基础短报文")
-        }
-        Spacer(Modifier.height(Dim.gap))
-        SectionCard("到达估算") {
-            InfoRow("预计到达", ev.etaTime, mono = true)
-            InfoRow("剩余里程", ev.etaDistanceKm?.let { "%.1f km".format(Locale.US, it) } ?: "—",
-                mono = true)
-            InfoRow("状态", ev.etaStatus)
-            InfoRow("剩余秒数", ev.etaSeconds?.let { "%.0f s".format(Locale.US, it) } ?: "—",
-                mono = true)
-        }
-        Spacer(Modifier.height(Dim.gap))
-        SectionCard("链路") {
-            InfoRow("RSSI", "%.1f dB".format(Locale.US, ev.rssi), mono = true)
-            InfoRow("AFC", "%.0f Hz（评分 %.2f）".format(Locale.US, ev.afcHz, ev.afcScore), mono = true)
-            ev.latitude?.let {
-                InfoRow("坐标", "%.5f, %.5f".format(Locale.US, it, ev.longitude ?: 0.0), mono = true)
-            }
-            InfoRow("BCH 错", if (ev.msgTypeError) "有" else "无")
-            InfoRow("原始 BCD", ev.rawBcd.ifEmpty { "—" }, mono = true)
-            InfoRow("地址", "0x%X".format(ev.rawAddr), mono = true)
-            InfoRow("合并/独立", listOfNotNull(
-                "合并".takeIf { ev.rawIsMerged },
-                "独立".takeIf { ev.rawIsStandalone },
-                "短报文".takeIf { ev.rawIsShort },
-            ).joinToString(" / ").ifEmpty { "—" })
-        }
-        Spacer(Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(Dim.gap)) {
-            Button(
-                onClick = { if (ev.train.isNotBlank()) onQueryTrain(ev.train) },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(containerColor = p.accent),
-            ) { Text("查这趟车", fontSize = 13.sp) }
-            Button(
-                onClick = {
-                    if (ev.loco.isNotBlank()) {
-                        val (m, n) = xyz.mlxkj.crlbj.data.LocoRoster.parseLocoText(ev.loco)
-                        onQueryLoco(m, n ?: "")
-                    }
-                },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = p.surfaceAlt, contentColor = p.text),
-            ) { Text("查这台机车", fontSize = 13.sp) }
-        }
-    }
 }
 
 /** 数据源显示名（与地图页同一套文案） */
