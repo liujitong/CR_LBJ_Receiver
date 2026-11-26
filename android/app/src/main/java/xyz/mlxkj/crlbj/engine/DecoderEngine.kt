@@ -50,6 +50,9 @@ class DecoderEngine(private val context: Context) {
 
     fun log(msg: String) {
         _logs.value = (_logs.value + msg).takeLast(300)
+        // 同时写一份到 logcat：无 USB 数据线时也能用无线 adb 远程排查
+        // （adb logcat -s LBJ:* 即可看到启动/错误/底层流程）
+        android.util.Log.i("LBJ", msg)
     }
 
     private fun postEvent(json: String) {
@@ -115,7 +118,13 @@ class DecoderEngine(private val context: Context) {
             poller?.stop()
             poller = StatusFramePoller { _status.value = it }.also { it.start() }
             _state.value = EngineState.RUNNING
-            log("[启动] ${settings.sourceType} ${settings.host}:${settings.port} " +
+            // USB / pipe 两种源的描述不同：USB 没有"主机:端口"概念，
+            // 之前把网络源的 host:port 拼进 USB 日志，既误导又可能带出旧配置里的地址。
+            val where = when (mode) {
+                0 -> "USB 直连"
+                else -> "${settings.host}:${settings.port}"
+            }
+            log("[启动] ${settings.sourceType} · $where · " +
                 "采样率 ${settings.sampleRate / 1000}k 频率 ${settings.freqMhz} MHz")
             true
         } catch (t: Throwable) {

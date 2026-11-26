@@ -150,7 +150,7 @@ fun SettingsPage(vm: ReceiverViewModel) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
         if (sub == null) {
-            PageHeader(title = "设置", subtitle = "v3.2.2 · 更改自动保存")
+            PageHeader(title = "设置", subtitle = "v3.2.3 · 更改自动保存")
             saveErr?.let {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
@@ -422,9 +422,9 @@ fun SettingsPage(vm: ReceiverViewModel) {
 
                     // ----------------------------------------------------- 关于
                     else -> SectionCard("关于") {
-                        Text("CR 列车预警器 · Android v3.2.2", color = p.text, fontSize = 13.sp)
+                        Text("CR 列车预警器 · Android v3.2.3", color = p.text, fontSize = 13.sp)
                         Text(
-                            "桌面版与安卓版 v3.2.2 同版本号；地图页与桌面端共用 " +
+                            "桌面版与安卓版 v3.2.3 同版本号；地图页与桌面端共用 " +
                                 "shared/web/railmap.html，数据共用 shared/data/*。",
                             color = p.textTertiary, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 4.dp),
@@ -526,7 +526,7 @@ private fun menuSubtitle(id: String, s: ReceiverSettings): String = when (id) {
     "query" -> (when (s.trainQuerySource) {
         "railgo" -> "仅 RailGo"; "12306" -> "仅 12306"; else -> "RailGo→12306"
     }) + " · 配属表自动更新" + if (s.dataAutoUpdate) "开" else "关"
-    else -> "v3.2.2 · 桌面版与安卓版同版本号"
+    else -> "v3.2.3 · 桌面版与安卓版同版本号"
 }
 
 @Composable

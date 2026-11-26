@@ -15,7 +15,63 @@
 
 ---
 
-## v3.2.2 · 2026-11-26
+## v3.2.3 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.2.3`，安卓 `versionName = 3.2.3` / `versionCode = 323`。
+> 主题：**修复安卓 USB 直连（OTG 接 RTL-SDR）打不开设备：`rtlsdr_open_fd 失败 rc=-1`。**
+
+### 根因（真机 SELinux 日志为证）
+
+真机（Xiaomi 2510DRK44C / Android 17，OTG 接 RTL2832U）点「一键开始」报：
+
+```
+[usb] rtlsdr_open_fd 失败 rc=-1
+native start 失败 rc=-1
+```
+
+`adb logcat` 里能看到 App 进程（域 `untrusted_app_34`）被 SELinux 拒绝：
+
+```
+avc: denied { read }    name="usb"  tcontext=u:object_r:usb_device:s0        tclass=dir
+avc: denied { search }  name="usb1" tcontext=u:object_r:vendor_sysfs_usb_node:s0
+comm="DefaultDispatch"
+```
+
+原因：`rtlsdr_open_fd()`（本项目补丁）里直接调 `libusb_init()`。**libusb 初始化默认会扫描
+`/dev/bus/usb` 与 sysfs 做设备枚举**，而 Android 的普通 App 域没有这个权限（SELinux 直接拒绝）。
+在 Android 上用「Java 传 fd + `libusb_wrap_sys_device`」的模式，必须显式关闭设备发现，
+否则初始化/包装阶段就会失败，最终表现为 `rtlsdr_open_fd rc=-1`。
+
+### 修复（`android/app/src/main/cpp/thirdparty/librtlsdr/src/librtlsdr.c`）
+
+1. **Android 下用 `libusb_init_context()` + `LIBUSB_OPTION_NO_DEVICE_DISCOVERY`**
+   （libusb 1.0.27 官方推荐搭配 `libusb_wrap_sys_device` 的用法），不再枚举 USB 设备；
+2. **`libusb_claim_interface` 失败时先 `libusb_detach_kernel_driver` 再重试一次**
+   （RTL2832U 可能被内核 DVB 驱动 `dvb_usb_rtx28xxu` 自动绑定，或上次会话未干净释放）；
+3. **诊断可观测**：新增 `RTLSDR_LOGE` 宏，Android 下把关键错误写到 logcat
+   （tag `librtlsdr`，如 `libusb_wrap_sys_device error N (fd=M)`、
+   `usb_claim_interface error N`），native 的 `stderr` 默认不进 logcat，之前完全看不到原因；
+4. `fd < 0` 提前拦截并报错（避免拿无效 fd 进 libusb）。
+
+### 顺带修的两处日志/配置问题
+
+5. **USB 启动日志不再拼接 `host:port`**：之前 `[启动] usb 主机:端口 …` 会把网络源的
+   服务器地址打进 USB 日志（用户设备上还残留着旧配置里的地址，看起来像「USB 连到了
+   某域名」）。现在 USB 源显示 `USB 直连`，只有网络源才显示 `host:port`。
+6. **旧配置残留归一化**：`ReceiverSettings.load()` 在 `sourceType == usb` 时把
+   `host/port` 归一化回默认值（USB 本来就不用这两个字段）。旧版本在设备
+   SharedPreferences 里留下的网络服务器地址不会再出现在设置页/日志里（隐私清理）。
+   注意：**这是设备上的历史配置残留，代码与 APK 里已无该字符串**（发布前已从源码与
+   git 历史中清理，APK dex 校验为 0 命中）。
+
+### 验证
+
+- 4 个 ABI（arm64-v8a / armeabi-v7a / x86 / x86_64）的 CMake 编译全部通过。
+- 真机复测：装 v3.2.3 后点「一键开始」，logcat 里可见 `librtlsdr` 的具体错误或成功路径；
+  若仍失败，日志会直接给出 `wrap` / `claim` 的错误码与 fd，便于进一步定位
+  （如 OTG 供电不足、设备被其他 App 占用）。
+
+---
 
 > 版本号：桌面 `cr_lbj.__version__ = 3.2.2`，安卓 `versionName = 3.2.2` / `versionCode = 322`。
 > 主题：**修复 OpenStreetMap / OpenRailwayMap 瓦片「418 Access blocked」——按两家使用政策做合规整改。**
@@ -70,6 +126,11 @@ OpenStreetMap 官方瓦片与 OpenRailwayMap 都是**志愿者运营的公益服
   需等待解封（本程序已合规，解封后即可恢复）。
 
 ---
+
+## v3.2.2 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.2.2`，安卓 `versionName = 3.2.2` / `versionCode = 322`。
+> 主题：**修复 OpenStreetMap / OpenRailwayMap 瓦片「418 Access blocked」——按两家使用政策做合规整改。**
 
 ## v3.2.1 · 2026-11-26
 

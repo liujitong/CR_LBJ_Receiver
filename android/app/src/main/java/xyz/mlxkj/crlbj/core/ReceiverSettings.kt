@@ -99,7 +99,7 @@ data class ReceiverSettings(
         fun load(ctx: Context): ReceiverSettings {
             val sp: SharedPreferences = ctx.getSharedPreferences("lbj", Context.MODE_PRIVATE)
             val d = OWRX_DEFAULTS
-            return ReceiverSettings(
+            val loaded = ReceiverSettings(
                 sourceType = sp.getString("sourceType", d.sourceType) ?: d.sourceType,
                 host = sp.getString("host", d.host) ?: d.host,
                 port = sp.getInt("port", d.port),
@@ -140,6 +140,13 @@ data class ReceiverSettings(
                     ?: d.trainQuerySource,
                 dataAutoUpdate = sp.getBoolean("dataAutoUpdate", d.dataAutoUpdate),
             )
+            // USB 数据源不使用 host/port：把旧版本残留的网络服务器地址归一化回默认值，
+            // 避免旧地址继续出现在启动日志/设置页里（也顺带做隐私清理）。
+            return if (loaded.isUsb && loaded.host != d.host) {
+                loaded.copy(host = d.host, port = d.port)
+            } else {
+                loaded
+            }
         }
 
         fun save(ctx: Context, s: ReceiverSettings) {

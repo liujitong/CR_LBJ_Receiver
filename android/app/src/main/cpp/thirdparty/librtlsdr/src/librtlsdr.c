@@ -39,6 +39,15 @@ typedef int socklen_t;
 #endif
 
 #include <errno.h>
+#if defined(__ANDROID__)
+/* v3.2.3：Android 上 native 的 stderr 默认不进 logcat，USB 打开失败时看不到原因。
+ * 用统一宏把关键错误同时写到 logcat（tag=librtlsdr），便于真机排查。 */
+#include <android/log.h>
+#define RTLSDR_LOGE(fmt, ...) \
+	__android_log_print(ANDROID_LOG_ERROR, "librtlsdr", fmt, ##__VA_ARGS__)
+#else
+#define RTLSDR_LOGE(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+#endif
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
@@ -89,13 +98,9 @@ typedef int socklen_t;
 #include "tuner_r82xx.h"
 
 #include <errno.h>
+/* RTLSDR_LOGE 宏已在文件开头定义（第一处 #include <errno.h> 之后），此处不重复。 */
 #include <string.h>
 #include <sys/types.h>
-#ifndef _WIN32
-	#include <sys/socket.h>
-	#include <sys/un.h>
-#endif
-#include <signal.h>
 
 #define LOG_API_CALLS			0
 #define LOG_API_SET_FREQ		0
@@ -3455,6 +3460,21 @@ int rtlsdr_open_fd(rtlsdr_dev_t **out_dev, int fd)
 	rtlsdr_dev_t *dev = NULL;
 	uint8_t reg;
 
+#if defined(__ANDROID__)
+	/* Android 关键（v3.2.3 修复）：app 域（untrusted_app）**没有权限**枚举
+	 * /dev/bus/usb 与读 sysfs（SELinux 直接 denied），而 libusb_init() 默认会扫描
+	 * 这些路径。必须用 LIBUSB_OPTION_NO_DEVICE_DISCOVERY 初始化，只用 Java 侧
+	 * UsbManager 打开设备后传来的 fd（libusb_wrap_sys_device）。
+	 * 否则 wrap/claim 会莫名其妙失败，表现为 rtlsdr_open_fd rc=-1。 */
+	struct libusb_init_option opts[1];
+	opts[0].option = LIBUSB_OPTION_NO_DEVICE_DISCOVERY;
+	opts[0].value.ival = 1;
+	if (fd < 0) {
+		RTLSDR_LOGE("rtlsdr_open_fd: invalid fd %d\n", fd);
+		return -1;
+	}
+#endif
+
 	dev = malloc(sizeof(rtlsdr_dev_t));
 	if (NULL == dev)
 		return -ENOMEM;
@@ -3462,8 +3482,13 @@ int rtlsdr_open_fd(rtlsdr_dev_t **out_dev, int fd)
 	memset(dev, 0, sizeof(rtlsdr_dev_t));
 	memcpy(dev->fir, fir_default, sizeof(fir_default));
 
+#if defined(__ANDROID__)
+	r = libusb_init_context(&dev->ctx, opts, 1);
+#else
 	r = libusb_init(&dev->ctx);
+#endif
 	if(r < 0){
+		RTLSDR_LOGE("rtlsdr_open_fd: libusb_init failed %d\n", r);
 		free(dev);
 		return -1;
 	}
@@ -3500,13 +3525,21 @@ int rtlsdr_open_fd(rtlsdr_dev_t **out_dev, int fd)
 	/* 用 Java 侧传来的 fd 构造 libusb 句柄 */
 	r = libusb_wrap_sys_device(dev->ctx, (intptr_t)fd, &dev->devh);
 	if (r < 0) {
-		fprintf(stderr, "libusb_wrap_sys_device error %d\n", r);
+		RTLSDR_LOGE("libusb_wrap_sys_device error %d (fd=%d)\n", r, fd);
 		goto err;
 	}
 
 	r = libusb_claim_interface(dev->devh, 0);
 	if (r < 0) {
-		fprintf(stderr, "usb_claim_interface error %d\n", r);
+		/* RTL2832U 可能已被内核 DVB 驱动（dvb_usb_rtl28xxu）自动绑定，
+		 * 或者上一次 App 没干净释放。先 detach 内核驱动再试一次。 */
+		int dr = libusb_detach_kernel_driver(dev->devh, 0);
+		RTLSDR_LOGE("usb_claim_interface error %d, detach_kernel_driver=%d, retry\n",
+			r, dr);
+		r = libusb_claim_interface(dev->devh, 0);
+	}
+	if (r < 0) {
+		RTLSDR_LOGE("usb_claim_interface error %d (final)\n", r);
 		goto err;
 	}
 
