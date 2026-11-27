@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -59,3 +59,9 @@ _probe_*.py
 
 # 一次性脚本 / 中间稿（agent 调用的临时产物）
 _tmp_*
+android/keystore.properties
+android/keystore/
+
+# v3.2.10：代码签名私钥/证书（pfx 含私钥，绝不入库）
+tools/signing/
+desktop/version_info.txt

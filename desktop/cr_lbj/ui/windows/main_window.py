@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self._lastScreen = None
         self._geomBusy = False
 
-        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.9')
+        self.setWindowTitle('中国铁路 LBJ 列车预警器解码程序  v3.2.10')
         # 最小尺寸不能写死：200% 缩放屏的逻辑可用区可能只有 640×400，
         # 写死 880×560 会把窗口顶出屏幕。按启动屏的可用区收紧。
         self._applyMinSizeForScreen()
@@ -1125,7 +1125,12 @@ class MainWindow(QMainWindow):
             self.logPanel.appendLog('[配置] 已热更新')
 
     def _onMapFollowChanged(self, on: bool):
-        """地图「跟随」被切换（含手动拖图导致自动取消）→ 立即存盘。"""
+        """地图「跟随」开关被用户切换 → 立即存盘。
+
+        v3.2.10：只有**用户主动点「跟随」按钮**才会走到这里；
+        拖动地图 / 回中心 / 定位都只是页面级"暂停"，不再落盘 false
+        （有新车到达时页面会自动恢复跟随并跳过去）。
+        """
         self.config.mapFollow = bool(on)
         try:
             self.config.save(CONFIG_PATH)
@@ -1133,8 +1138,7 @@ class MainWindow(QMainWindow):
             pass
         if not on:
             try:
-                self.logPanel.appendLog('[地图] 检测到手动拖动地图，已暂停自动跟随'
-                                        '（点「跟随」可恢复）')
+                self.logPanel.appendLog('[地图] 已关闭自动跟随（点「跟随」可重新开启）')
             except Exception:
                 pass
 
@@ -1422,7 +1426,7 @@ class MainWindow(QMainWindow):
            if data_update.auto_enabled(self.config) else '关')
 
         group('界面')
-        kv('版本', 'v3.2.9')
+        kv('版本', 'v3.2.10')
         kv('主题', {'dark': '夜间', 'light': '日间'}.get(
             TH.P.get('mode', 'dark'), '-') +
            '（%s）' % {'dark': '夜间', 'light': '日间', 'auto': '跟随系统'}.get(

@@ -485,6 +485,12 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertNotIn(
             "if st.get('locked') and self.followBtn.isChecked():",
             panel, '桌面不应再因拖动地图而取消勾选跟随')
+        # v3.2.10：回中心/定位也只是暂停，不得关跟随（唯一关闭方式=点跟随按钮）
+        center_seg = panel.split('def centerToDefault', 1)[1].split('def setNightMode', 1)[0]
+        self.assertNotIn('mapFollow = False', center_seg,
+                         '回中心不应把 mapFollow 写成 False（新车到达要能恢复跟随）')
+        self.assertNotIn('set_follow(False)', center_seg)
+        self.assertIn('center_to(', center_seg, '回中心仍要真的居中')
 
         # ④ 安卓宿主：拖动（locked）不得再把 mapFollow 置 false
         base = os.path.join(ROOT, 'android', 'app', 'src', 'main', 'java',
@@ -495,6 +501,9 @@ class DesktopHostContractTest(unittest.TestCase):
             mappage, '安卓不应再因拖动地图而关闭 mapFollow')
         self.assertIn('mapLocked.value = st.locked', mappage,
                       '安卓应记录暂停态用于跟随胶囊显示')
+        # 回中心 / 转到自己位置：不再落盘 mapFollow=false
+        self.assertNotIn('copy(mapFollow = false)', mappage,
+                         '回中心/定位不应关闭跟随（v3.2.10）')
 
 
 class MapPageSyntaxTest(unittest.TestCase):
@@ -544,10 +553,10 @@ class DocsVersionTest(unittest.TestCase):
         # v3.2.7：README 精简为「入口 + 文档导航」（详细内容下沉 docs/），
         # 不再维护「更新记录表」（版本历史统一在 docs/CHANGELOG.md）。
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.9', readme, 'README 版本号应为 v3.2.9')
+        self.assertIn('v3.2.10', readme, 'README 版本号应为 v3.2.10')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
-        self.assertNotIn('**版本** v3.2.8', readme)
+        self.assertNotIn('**版本** v3.2.9', readme)
         self.assertIn('docs/', readme, 'README 必须给出 docs/ 文档导航')
         for name in ('用户手册.md', '技术参考.md', 'CHANGELOG.md', 'NOTICE.md'):
             self.assertIn(name, readme, 'README 导航缺 %s' % name)
@@ -569,9 +578,9 @@ class DocsVersionTest(unittest.TestCase):
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2.9', text, '%s 文首版本号应为 v3.2.9' % name)
+            self.assertIn('v3.2.10', text, '%s 文首版本号应为 v3.2.10' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.9', changelog, 'CHANGELOG 顶部应有 v3.2.9 条目')
+        self.assertIn('## v3.2.10', changelog, 'CHANGELOG 顶部应有 v3.2.10 条目')
 
 
 if __name__ == '__main__':

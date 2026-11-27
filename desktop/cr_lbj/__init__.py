@@ -10,4 +10,4 @@
     gui.py       组装层：把各实现模块汇到同一命名空间
     app.py       启动层：参数解析、配置、QApplication、主题与缩放
 """
-__version__ = '3.2.9'
+__version__ = '3.2.10'

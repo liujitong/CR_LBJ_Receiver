@@ -151,14 +151,14 @@ fun MapPage(vm: ReceiverViewModel) {
     // v3.2.9：页面是否处于「用户拖动过地图」的暂停跟随态（仅供跟随胶囊显示"暂停"）
     val mapLocked = remember { mutableStateOf(false) }
 
-    // 居中到本机位置（WGS-84）。centerLatLng 契约：居中 + 停止自动跟随 + 页面 toast；
-    // 接口未就绪时静默跳过（返回 no-api），原生侧仍把 mapFollow 落盘为 false。
+    // 居中到本机位置（WGS-84）。centerLatLng 契约：居中（页面内部会置 userTouched 暂停跟随）。
+    // v3.2.10：**不再把 mapFollow 落盘为 false** —— 按用户要求「只要开了跟随，
+    // 来新车就过去追踪」，临时定位/回中心只是暂停，新车到达页面会自动恢复跟随。
     val centerToGps: (DoubleArray) -> Unit = { g ->
         web?.evaluateJavascript(
             "(function(){if(window.LBJ&&window.LBJ.centerLatLng){window.LBJ.centerLatLng(" +
                 "${g[0]},${g[1]});return 'ok'}return 'no-api'})()",
         ) { r -> Log.i(TAG, "centerLatLng: $r") }
-        vm.updateViewSettings(vm.settings.value.copy(mapFollow = false))
     }
 
     val permLauncher = rememberLauncherForActivityResult(
@@ -479,7 +479,8 @@ fun MapPage(vm: ReceiverViewModel) {
                     active = false) {
                     web?.evaluateJavascript(
                         "window.LBJ&&window.LBJ.centerTo('')", null)   // 中心只用经纬度（v3.2.8 去城市名）
-                    vm.updateViewSettings(settings.copy(mapFollow = false))
+                    // v3.2.10：回中心只暂停（页面 userTouched），不关闭跟随——
+                    // 新车到达会自动恢复跟随并跳转（唯一关闭方式=点「跟随」按钮）
                 }
                 MapToolItem(
                     icon = Icons.Filled.CloudDownload,

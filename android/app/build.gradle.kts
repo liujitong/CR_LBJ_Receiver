@@ -58,9 +58,9 @@ android {
         targetSdk = 35
         // 用户指定 NDK r27
         ndkVersion = "27.2.12479018"
-        // v3.2.9：上下行干扰统计 + 双端解码对齐 + 跟随恢复修复；versionCode 329
-        versionCode = 329
-        versionName = "3.2.9"
+        // v3.2.10：跟随语义统一（暂停不关闭）+ 安卓 CRLBJREC 签名 + Windows 版本资源/签名；versionCode 330
+        versionCode = 330
+        versionName = "3.2.10"
     }
 
     signingConfigs {

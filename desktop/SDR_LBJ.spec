@@ -21,6 +21,54 @@ _DESKTOP = os.path.dirname(os.path.abspath(
     globals().get('SPEC') or globals().get('SPECPATH') or '.'))
 _ROOT = os.path.dirname(_DESKTOP)
 
+# ---------------------------------------------------------------------------
+# Windows 版本资源（v3.2.10）：让 EXE 属性页显示发布者/产品/版权信息。
+#
+# 注意：这里的「发布者」只是**文件属性**，不等同于数字签名的发布者
+# （SmartScreen 读的是 Authenticode 证书主体，见 docs/代码签名.md）。
+# 版本号自动取自 cr_lbj/__init__.py，避免和代码版本脱节。
+# ---------------------------------------------------------------------------
+def _project_version() -> str:
+    try:
+        import re
+        with open(os.path.join(_DESKTOP, 'cr_lbj', '__init__.py'),
+                  'r', encoding='utf-8') as f:
+            m = re.search(r"__version__\s*=\s*'([^']+)'", f.read())
+        return m.group(1) if m else '0.0.0'
+    except Exception:
+        return '0.0.0'
+
+
+_VER = _project_version()
+_VER_PARTS = [int(x) for x in (_VER.split('.') + ['0', '0', '0'])[:4]]
+_VER_TUPLE = tuple(_VER_PARTS)
+_VER_FILE = os.path.join(_DESKTOP, 'version_info.txt')
+with open(_VER_FILE, 'w', encoding='utf-8') as _vf:
+    _vf.write('''# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=%r, prodvers=%r, mask=0x3f, flags=0x0, OS=0x40004,
+    fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([
+      StringTable('080404b0', [
+        StringStruct('CompanyName', '刘纪彤（BG2GBQ）'),
+        StringStruct('FileDescription', '中国铁路 LBJ 列车预警器'),
+        StringStruct('FileVersion', '%s'),
+        StringStruct('InternalName', 'CR-LBJ-Receiver'),
+        StringStruct('LegalCopyright', '© 2026 刘纪彤（BG2GBQ）· GPL-3.0'),
+        StringStruct('OriginalFilename', 'CR-LBJ-Receiver.exe'),
+        StringStruct('ProductName', 'CR-LBJ-Receiver 列车预警器'),
+        StringStruct('ProductVersion', '%s'),
+        StringStruct('Comments', 'bg2gbq@mlxkj.xyz · https://github.com/liujitong/CR_LBJ_Receiver'),
+      ]),
+    ]),
+    VarFileInfo([VarStruct('Translation', [2052, 1200])]),
+  ]
+)
+''' % (_VER_TUPLE, _VER_TUPLE, _VER, _VER))
+print('[spec] 版本资源: %s (filevers=%r)' % (_VER_FILE, _VER_TUPLE))
+
 # 随包附带 RTL-SDR 官方命令行工具（项目内 tools/rtl），实现“插上即用”
 _LOCAL_TOOLS = os.path.join(_ROOT, 'tools', 'rtl')
 _LEGACY_TOOLS = os.path.normpath(os.path.join(_ROOT, '..', '..', 'RTL_TCP_Server'))
@@ -211,6 +259,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=os.path.join(_DESKTOP, '国铁.ico'),
+    version=_VER_FILE,
 )
 
 # ---------------------------------------------------------------------------

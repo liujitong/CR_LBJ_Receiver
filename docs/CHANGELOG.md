@@ -1,6 +1,6 @@
 # 更新记录
 
-> 适用版本：**v3.2.9**（2026-11-26） ｜ 适用端：桌面 / 安卓 ｜ 最后更新：2026-11-26
+> 适用版本：**v3.2.10**（2026-11-26） ｜ 适用端：桌面 / 安卓 ｜ 最后更新：2026-11-26
 >
 > 本文件记录各版本变更，**最新版本在最上方**；历史条目保持发布时的原样，只做格式与链接校正。
 > 当前版本 v3.2.9 的条目由项目维护者在发版时补充（本文不预置）。
@@ -16,6 +16,7 @@
 
 ## 目录
 
+- [v3.2.10 · 2026-11-26](#v3210--2026-11-26)
 - [v3.2.9 · 2026-11-26](#v329--2026-11-26)
 - [v3.2.8 · 2026-11-26](#v328--2026-11-26)
 - [v3.2.7 · 2026-11-26](#v327--2026-11-26)
@@ -29,6 +30,83 @@
 - [v3.1.0 · 2026-11-26](#v310--2026-11-26)
 - [v3.0.0 · 2026-11-26](#v300--2026-11-26)
 - [历史版本（v2.x 桌面端 / v3.0 安卓 M0–M3）](#历史版本v2x-桌面端--v30-安卓-m0m3)
+
+---
+
+## v3.2.10 · 2026-11-26
+
+> 版本号：桌面 `cr_lbj.__version__ = 3.2.10`，安卓 `versionName = 3.2.10` / `versionCode = 330`。
+> 主题：**跟随语义统一（拖图/回中心/定位只暂停，新车到达自动追过去）**、
+> **安卓改用 CN=CRLBJREC 正式签名**、**Windows 产物补齐发布者版本信息与代码签名**。
+
+### 一、跟随语义统一：开了跟随就一直追
+
+用户反馈：「我不是说了，以后只要开了跟随，来新车就过去追踪吗？怎么还有提示？」
+并补充实测要求（"你可以多试试几次"）。
+
+* **旧行为**：拖动地图 / 回中心 / 转到自己位置，宿主都会把 `mapFollow` 写成 `false`
+  并打印「检测到手动拖动地图，已暂停自动跟随」——一旦落盘 false，后续新车**永远不再跟随**。
+* **新语义（两端一致）**：
+  * **唯一关闭跟随的方式** = 用户点「跟随」按钮；
+  * 拖动地图 / 回中心 / 转到自己位置 → 页面仅置 `userTouched=true`（**暂停**），
+    宿主**不写配置、不改按钮**；
+  * **出现新车**（此前没跟过的 id）→ 页面自动清除暂停、焦点切到新车并居中
+    （即"来新车就追过去"）；同一辆车的后续位置更新仍保持暂停，不打扰用户查看。
+* 桌面：`_onMapFollowChanged` 只在用户手动关闭时触发，日志改为
+  「已关闭自动跟随（点「跟随」可重新开启）」；按钮 tooltip 显示暂停原因。
+* 安卓：跟随胶囊在暂停态显示 **「跟随·暂停」**（点击可手动恢复）。
+* **实测证据（真实 GUI，模拟拖动 + 推送新车）**：
+  * 拖动后 `locked=true`、`follow=true`、`mapFollow=true`、无"已暂停"误报日志；
+  * 推送新车 K9999（哈尔滨坐标）后 2.5s：`locked=false`、`follow=true`、
+    `center=[126.628288, 45.759693]` —— **地图确实跳到新车位置**。
+
+### 二、安卓签名：改用 CN=CRLBJREC
+
+用户要求：「安卓签名有 CN=cardwallet 改为 CN=CRLBJREC，要不然区分不开」。
+
+* 新建 `android/keystore/crlbjrelease.jks`：
+  * 主体 `CN=CRLBJREC, OU=Mobile, O=LiuJitong, L=Beijing, ST=Beijing, C=CN`；
+  * RSA 4096 / SHA384withRSA / 有效期 30 年（至 2056）；
+  * SHA-1 `37:05:B5:2D:FE:F9:97:CD:2D:98:97:22:D2:5D:56:05:6C:7C:23:76`；
+  * SHA-256 `14:BB:E3:4D:00:42:17:FA:9E:9F:F5:BD:F1:95:E8:F6:B2:87:EC:BF:14:52:BF:CC:18:9C:7A:40:29:32:3E:AD`。
+* `android/keystore.properties`（**gitignore，含口令，不入库**）指向新 jks；
+  `assembleRelease` 产出已签名 APK，`apksigner` 校验 DN/SHA-1 与上述一致。
+* 与 CardWallet（`CN=CardWallet`）区分开，两个 App 可按证书区分。
+* ⚠️ 签名变更后，旧的 debug 签名安装包**需卸载再装**（签名冲突）。
+
+### 三、Windows：发布者信息 + 代码签名
+
+用户要求：「PC 端有发布者未知的 Windows Defender，发布者用刘纪彤（BG2GBQ），
+bg2gbq@mlxkj.xyz，需要其他字段请告知我」。
+
+* **版本资源**（`desktop/SDR_LBJ.spec` 自动生成 `version_info.txt`，版本号取自
+  `cr_lbj.__version__`，不再与代码脱节）：
+  * `CompanyName` = 刘纪彤（BG2GBQ）
+  * `ProductName` = CR-LBJ-Receiver 列车预警器
+  * `FileDescription` = 中国铁路 LBJ 列车预警器
+  * `LegalCopyright` = © 2026 刘纪彤（BG2GBQ）· GPL-3.0
+  * `Comments` = bg2gbq@mlxkj.xyz · 仓库地址
+  * 实测 `(Get-Item exe).VersionInfo.CompanyName` 已显示「刘纪彤（BG2GBQ）」。
+* **代码签名**（`tools/sign_exe.ps1`）：
+  * 自签名证书 `CN=刘纪彤（BG2GBQ）, O=刘纪彤, OU=BG2GBQ, L=北京, S=北京, C=CN,
+    E=bg2gbq@mlxkj.xyz`（4096-bit RSA / SHA256 / 10 年），已对 exe 签名并加
+    DigiCert 时间戳；`Get-AuthenticodeSignature` 显示
+    `SignerSubject=CN=刘纪彤（BG2GBQ）…`、`TimeStamper=DigiCert`。
+  * **限制说明**：自签名证书链终止于非受信任根，Windows 属性页/ SmartScreen 仍显示
+    「未知发布者」。要让 Windows 认，两种办法：
+    1. 本机运行 `tools/install_codesign_trust.ps1`（管理员）把证书导入
+       「受信任的根证书颁发机构」→ 本机显示发布者「刘纪彤（BG2GBQ）」；
+    2. 购买 **CA 签发的代码签名证书（OV / EV）** → 所有电脑直接显示发布者。
+  * 详见 [`docs/代码签名.md`](代码签名.md)（含购买证书需要提供的字段清单）。
+* **签名材料保护**：私钥 `.pfx` / 口令 / 安卓 `.jks` 全部进 `.gitignore`，不入库。
+
+### 四、验证
+
+* `pytest` **132 passed**（`test_follow_resume_on_new_train` 增补：
+  回中心/定位不得写 `mapFollow=false`，桌面与安卓源码均断言）。
+* 真实 GUI 实测（桌面）：开跟随 → 模拟拖动 → 保持跟随 → 推新车 → 自动跳转（坐标核对通过）。
+* 安卓 `assembleRelease` 通过，`apksigner` 校验签名 `CN=CRLBJREC`。
+* 桌面 `build.py` 通过；exe 版本资源与 Authenticode 签名均已核对。
 
 ---
 

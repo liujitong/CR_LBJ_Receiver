@@ -530,21 +530,20 @@ class MapPanel(QWidget):
         self._push(force=True)
 
     def centerToDefault(self):
-        """把地图挪回默认中心（预设城市/经纬度，页面不加标记）。"""
+        """把地图挪回默认中心（预设城市/经纬度，页面不加标记）。
+
+        v3.2.10：**不关闭跟随**。按用户要求「只要开了跟随，来新车就过去追踪」，
+        临时看别处（拖图 / 回中心 / 定位）都只是**暂停**（页面 userTouched），
+        下一辆新车到达时页面会自动恢复跟随并跳过去；
+        唯一关闭跟随的方式是用户点「跟随」按钮。
+        """
         lat = float(getattr(self.config, 'mapCenterLat', 0) or 0)
         lng = float(getattr(self.config, 'mapCenterLng', 0) or 0)
-        # 用户主动看固定中心，就先让开「跟随」；否则下一帧列车一动又被拉走
-        if self.followBtn.isChecked():
-            self.followBtn.setChecked(False)
-            self.config.mapFollow = False
-            if self.host.ready:
-                self.host.set_follow(False)
-            self.followChanged.emit(False)
         if not self.host.ready:
             return
         # 页面只认 CONFIG.center（离线，不做地名解析）；先推坐标再居中
         self.host.apply_config(self.config)
-        self.host.center_to('')
+        self.host.center_to('')      # 页面内部会置 userTouched（暂停跟随，非关闭）
         self._coord_text = '中心：%s' % (('%.4f, %.4f' % (lat, lng))
                                        if (lat or lng) else '（未设置）')
         self._tile_bad = False
