@@ -1217,16 +1217,33 @@ private fun collectTrains(
     trainInfos: Map<String, TrainInfoClient.TrainInfo> = emptyMap(),
     locoInfos: Map<String, LocoRoster.Lookup> = emptyMap(),
 ): List<TrainPoint> {
-    val seen = HashSet<String>()
-    val out = ArrayList<TrainPoint>(24)
+    // 同一车次只出一个点（用户口径：**同车次就是一个车**，换机车也不算新车）。
+    // 机车号取"最近一条可靠值"：最新报文若是短报文（loco=----），
+    // 用最近一条带机车号的报文补上，避免标记上的机车信息闪成 ----。
+    // events 是"新→旧"顺序，故首次遇到即可作为最新位置 / 最新可靠机车号。
+    val latest = LinkedHashMap<String, DecodeEvent>()
+    val latestLoco = HashMap<String, String>()
     for (e in events) {
-        val lat = e.latitude ?: continue
-        val lon = e.longitude ?: continue
+        if (e.latitude == null || e.longitude == null) continue
         // 地图 id 与页面一致：优先 baseTrain（同车次换端不新增标记）
         val id = e.baseTrain.ifEmpty { e.train }.ifEmpty { e.uid }
-        if (id.isEmpty() || !seen.add(id)) continue
+        if (id.isEmpty()) continue
+        if (!latest.containsKey(id)) {
+            latest[id] = e
+            if (latest.size >= 24) break
+        }
+        val loco = e.loco.trim()
+        if (loco.isNotEmpty() && loco != "----" && !latestLoco.containsKey(id)) {
+            latestLoco[id] = loco
+        }
+    }
+    val out = ArrayList<TrainPoint>(latest.size)
+    for ((id, e) in latest) {
+        val lat = e.latitude ?: continue
+        val lon = e.longitude ?: continue
         val ti = trainInfos[TrainInfoClient.normalizeTrain(e.train)]
-        val li = locoInfos[ReceiverViewModel.locoKey(e.loco, e.locoCode)]
+        val locoText = latestLoco[id] ?: e.loco
+        val li = locoInfos[ReceiverViewModel.locoKey(locoText, e.locoCode)]
         out.add(
             TrainPoint(
                 id = id,
@@ -1236,7 +1253,7 @@ private fun collectTrains(
                 speed = e.speed,
                 position = e.position,
                 route = e.route,
-                loco = e.loco,
+                loco = locoText,
                 direction = e.direction,
                 category = e.category,
                 time = e.timeStr,
@@ -1244,7 +1261,6 @@ private fun collectTrains(
                 info = trainInfoMap(ti, li),
             )
         )
-        if (out.size >= 24) break
     }
     return out
 }

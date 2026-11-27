@@ -690,6 +690,8 @@
     var st = state[id];
     var pos = toMap(Number(d.lat), Number(d.lon));
     if (!isFinite(pos[0]) || !isFinite(pos[1])) return false;
+    // 只有"此前不存在的车（id 未见过）"才算新车事件。
+    // 用户明确：**同一车次就是一个车**，中途换机车（换挂）不算新车，不触发跟随跳转。
     var isNew = !st;
     if (!st) {
       var mk = L.marker(pos, {
@@ -917,11 +919,11 @@
       if (typeof payload.follow === 'boolean') follow = payload.follow;
       if (typeof payload.showTrail === 'boolean') CONFIG.showTrail = payload.showTrail;
       var trains = payload.trains || [];
-      var newest = null, newestTs = -1, sawNew = false;
+      var newest = null, newestTs = -1;
       for (var i = 0; i < trains.length; i++) {
         var d = trains[i];
         if (d == null || d.lat == null || d.lon == null) continue;
-        if (upsertTrain(d)) sawNew = true;
+        upsertTrain(d);
         var ts = Number(d.ts) || 0;
         if (ts > newestTs) { newestTs = ts; newest = d; }
       }
@@ -932,20 +934,15 @@
         lastAuto = null;
         map.setView(st.marker.getLatLng(), Math.max(map.getZoom(), 10), { animate: false });
       } else if (newest && follow) {
+        // v3.2.11（用户口径）：跟随开启时，**任何新信号都要跟过去**——
+        // 同车次的新位置更新、换机车、新车次，一律恢复跟随并跳到该车最新位置。
+        // 拖动地图只是"暂停到下一帧"：下一条报文到达即自动恢复（这是用户明确要求的）。
+        // autoCenter 内部有 30m 阈值，短距离抖动不会反复重设中心。
         var newestId = String(newest.id || newest.train);
-        // v3.2.9 修复：拖动地图只是「暂停」跟随（userTouched），并非关闭跟随意图。
-        // 当出现**新车**（此前没跟过的 id）且跟随仍开启时，自动恢复跟随并跳到新车——
-        // 即用户要的「拖过地图后，新来个车也能直接转过去」。
-        if (sawNew && newestId !== lastFocusId) {
-          userTouched = false;
-          lastAuto = null;
-          lastFocusId = newestId;
-        }
-        if (lastFocusId == null) lastFocusId = newestId;
-        if (newestId === String(lastFocusId)) {
-          var s2 = state[String(lastFocusId)];
-          if (s2) autoCenter(lastFocusId, s2.marker.getLatLng());
-        }
+        userTouched = false;          // 解除拖动暂停
+        lastFocusId = newestId;
+        var s2 = state[newestId];
+        if (s2) autoCenter(newestId, s2.marker.getLatLng());
       }
       scheduleStatus();
     },

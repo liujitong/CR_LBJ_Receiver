@@ -93,10 +93,10 @@ def test_version_is_v321():
     # 版本断言随当前发布版滚动更新（v3.2.5）；旧版本标题/标签不应残留
     # （代码注释里的历史小版本说明允许保留，不算残留）
     init = _read('cr_lbj', '__init__.py')
-    assert "__version__ = '3.2.10'" in init
+    assert "__version__ = '3.2.11'" in init
     main = _read('cr_lbj', 'ui', 'windows', 'main_window.py')
-    assert "v3.2.10'" in main
-    assert "kv('版本', 'v3.2.10')" in main
+    assert "v3.2.11'" in main
+    assert "kv('版本', 'v3.2.11')" in main
     assert "v3.2.4'" not in main
     assert "v3.2.0'" not in main
 

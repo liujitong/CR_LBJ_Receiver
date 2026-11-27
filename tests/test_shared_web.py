@@ -457,28 +457,28 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertIn('shouldInterceptRequest', mappage)
 
     def test_follow_resume_on_new_train(self):
-        """v3.2.9：拖动地图只是「暂停」跟随，新车到达必须自动恢复跟随并跳转。
+        """v3.2.9~v3.2.11：拖动地图只是「暂停」跟随，来新车必须自动恢复跟随并跳转。
 
         回归的 bug：开启跟随后一旦拖动地图，宿主会把 mapFollow 永久关掉，
         之后再来新车也不再自动跟随。修复后：拖动只置页面 userTouched（暂停），
-        跟随意图（follow / mapFollow）保持不变；出现**新车**（此前没跟过的 id）
+        跟随意图（follow / mapFollow）保持不变；出现**新车**或**同车次换挂**
         时页面清除 userTouched、切焦点并跳过去。
         """
         html = read_html()
-        # ① upsertTrain 要回报「是否新车」
+        # ① 同一车次只算一个车：换机车（换挂）不是新车事件
         self.assertIn('var isNew = !st;', html, 'upsertTrain 需判定是否新出现的车')
-        self.assertIn('return isNew;', html, 'upsertTrain 需返回 isNew')
-        # ② api.update 收集 sawNew 并在跟随时因新车恢复跟随
-        self.assertIn('sawNew', html, 'api.update 需统计本批是否有新车')
-        self.assertIn('if (upsertTrain(d)) sawNew = true;', html)
-        # 新车 → 清 userTouched + 切焦点（恢复跟随的关键）
+        self.assertNotIn('locoChanged', html,
+                         '用户口径：同车次就是一个车，换挂不算新车事件')
+        # ② 跟随开启时**任何新信号**都要恢复跟随并跳过去（用户口径）
         seg = html.split('} else if (newest && follow) {', 1)
-        self.assertEqual(len(seg), 2, '应保留 newest&&follow 分支')
+        self.assertEqual(len(seg), 2, '应有 newest&&follow 跟随分支')
         branch = seg[1].split('scheduleStatus();', 1)[0]
-        self.assertIn('sawNew && newestId !== lastFocusId', branch,
-                      '仅在出现新车时恢复跟随')
-        self.assertIn('userTouched = false;', branch, '新车到达要解除拖动暂停')
-        self.assertIn('lastFocusId = newestId;', branch, '焦点切到新车')
+        self.assertIn('userTouched = false;', branch,
+                      'v3.2.11：任何新信号都解除拖动暂停（同车次新信号也要跳）')
+        self.assertIn('lastFocusId = newestId;', branch, '焦点切到最新信号那辆')
+        self.assertIn('autoCenter(', branch, '要真的居中过去')
+        self.assertNotIn('changedPick', html,
+                         '不再区分"只有新车次才跳"——同车次新信号同样跟随')
 
         # ③ 桌面宿主：拖动（locked）不得再自动取消跟随
         panel = read_ui('map_panel.py')
@@ -501,6 +501,13 @@ class DesktopHostContractTest(unittest.TestCase):
             mappage, '安卓不应再因拖动地图而关闭 mapFollow')
         self.assertIn('mapLocked.value = st.locked', mappage,
                       '安卓应记录暂停态用于跟随胶囊显示')
+        # 回中心 / 转到自己位置：不再落盘 mapFollow=false
+        self.assertNotIn('copy(mapFollow = false)', mappage,
+                         '回中心/定位不应关闭跟随（v3.2.10）')
+        # v3.2.11：安卓同车次只出一个点，机车号取最近一条可靠值（仅显示用，
+        # **不参与**"是否新车"判定——同车次换挂不算新车）
+        self.assertIn('latestLoco', mappage,
+                      'collectTrains 需保留最近可靠机车号（标记显示用）')
         # 回中心 / 转到自己位置：不再落盘 mapFollow=false
         self.assertNotIn('copy(mapFollow = false)', mappage,
                          '回中心/定位不应关闭跟随（v3.2.10）')
@@ -553,10 +560,10 @@ class DocsVersionTest(unittest.TestCase):
         # v3.2.7：README 精简为「入口 + 文档导航」（详细内容下沉 docs/），
         # 不再维护「更新记录表」（版本历史统一在 docs/CHANGELOG.md）。
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.10', readme, 'README 版本号应为 v3.2.10')
+        self.assertIn('v3.2.11', readme, 'README 版本号应为 v3.2.11')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
-        self.assertNotIn('**版本** v3.2.9', readme)
+        self.assertNotIn('**版本** v3.2.10', readme)
         self.assertIn('docs/', readme, 'README 必须给出 docs/ 文档导航')
         for name in ('用户手册.md', '技术参考.md', 'CHANGELOG.md', 'NOTICE.md'):
             self.assertIn(name, readme, 'README 导航缺 %s' % name)
@@ -578,9 +585,9 @@ class DocsVersionTest(unittest.TestCase):
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2.10', text, '%s 文首版本号应为 v3.2.10' % name)
+            self.assertIn('v3.2.11', text, '%s 文首版本号应为 v3.2.11' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.10', changelog, 'CHANGELOG 顶部应有 v3.2.10 条目')
+        self.assertIn('## v3.2.11', changelog, 'CHANGELOG 顶部应有 v3.2.11 条目')
 
 
 if __name__ == '__main__':

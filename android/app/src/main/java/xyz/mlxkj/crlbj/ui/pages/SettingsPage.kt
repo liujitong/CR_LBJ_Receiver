@@ -206,7 +206,7 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
         if (sub == null) {
-            PageHeader(title = "设置", subtitle = "v3.2.10 · 更改自动保存")
+            PageHeader(title = "设置", subtitle = "v3.2.11 · 更改自动保存")
             saveErr?.let {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
@@ -706,9 +706,9 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
                     // ----------------------------------------------------- 关于
                     else -> SectionCard("关于") {
-                        Text("CR 列车预警器 · Android v3.2.10", color = p.text, fontSize = 13.sp)
+                        Text("CR 列车预警器 · Android v3.2.11", color = p.text, fontSize = 13.sp)
                         Text(
-                            "桌面版与安卓版 v3.2.10 同版本号；地图页与桌面端共用 " +
+                            "桌面版与安卓版 v3.2.11 同版本号；地图页与桌面端共用 " +
                                 "shared/web/railmap.html，数据共用 shared/data/*。",
                             color = p.textTertiary, fontSize = 11.sp,
                             modifier = Modifier.padding(top = 4.dp),
