@@ -55,25 +55,10 @@ function Find-SignTool {
 }
 
 if ($MakeCert) {
-    New-Item -ItemType Directory -Force -Path $SignDir | Out-Null
-    Write-Host "[cert] 生成自签名代码签名证书：$Subject"
-    $cert = New-SelfSignedCertificate `
-        -Type CodeSigningCert `
-        -Subject $Subject `
-        -FriendlyName 'CR-LBJ-Receiver 代码签名' `
-        -KeyAlgorithm RSA -KeyLength 4096 -HashAlgorithm SHA256 `
-        -CertStoreLocation 'Cert:\CurrentUser\My' `
-        -NotAfter (Get-Date).AddYears(10)
-    $pw = "CRLBJ-$([guid]::NewGuid().ToString('N').Substring(0,12))!"
-    $secure = ConvertTo-SecureString -String $pw -Force -AsPlainText
-    Export-PfxCertificate -Cert $cert -FilePath $Pfx -Password $secure | Out-Null
-    Export-Certificate -Cert $cert -FilePath $Cer | Out-Null
-    Set-Content -Path $PwFile -Value $pw -Encoding UTF8
-    Write-Host "[cert] 已导出: $Pfx"
-    Write-Host "[cert] Thumbprint: $($cert.Thumbprint)"
-    Write-Host "[cert] 提示：要把本机信任该签名，可运行 install-cert 步骤（见 docs/代码签名.md）"
+    # 交给 make_codesign_cert.ps1（OpenSSL 生成，DN 精简为 C/O/CN，避免 SmartScreen 摊开显示）
+    & (Join-Path $PSScriptRoot 'make_codesign_cert.ps1')
+    exit $LASTEXITCODE
 }
-
 if (-not $Exe) { $Exe = Join-Path $RepoRoot 'dist\CR-LBJ-Receiver.exe' }
 if (-not (Test-Path $Exe)) { throw "找不到待签名文件: $Exe" }
 if (-not (Test-Path $Pfx)) {

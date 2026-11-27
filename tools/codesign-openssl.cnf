@@ -1,0 +1,20 @@
+# OpenSSL 配置：生成规范编码的代码签名证书（v3.2.10）
+# 目的：SmartScreen「发行者」只显示 CN，而不是把 7 个 DN 字段全部摊开。
+[req]
+distinguished_name = dn
+x509_extensions = v3_codesign
+prompt = no
+utf8 = yes
+string_mask = utf8only
+
+[dn]
+C = CN
+O = LiuJitong
+CN = 刘纪彤（BG2GBQ）
+
+[v3_codesign]
+basicConstraints = critical, CA:TRUE, pathlen:0
+keyUsage = critical, digitalSignature, nonRepudiation
+extendedKeyUsage = codeSigning
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
