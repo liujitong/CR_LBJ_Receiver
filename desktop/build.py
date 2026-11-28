@@ -39,7 +39,6 @@ EXE_NAME = 'CR-LBJ-Receiver.exe'
 REQUIRED_DOCS = ['用户手册.md', '技术参考.md', '架构说明.md', '地图与图源.md',
                  '车次与配属查询.md', 'USB直连与设备自适应.md', '安卓版说明.md',
                  '安卓构建与环境.md', 'CHANGELOG.md', 'NOTICE.md', '代码签名.md']
-                 '代码签名.md']
 
 
 def log(msg: str) -> None:
