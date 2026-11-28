@@ -76,6 +76,9 @@ class SpectrumPanel(QWidget):
 
         layout.addWidget(self.plot, 1)
 
+
+        self._sampleRate = 960000
+        self._binCount = 256   # v4.0：与核心库一致（32 -> 256 bin）
         # v4.0：曲线下方增加瀑布图（新帧在上、历史向下滚动，SDR# 风格）
         self._wfSep = QFrame()
         self._wfSep.setFrameShape(QFrame.HLine)
@@ -85,9 +88,6 @@ class SpectrumPanel(QWidget):
         layout.addWidget(self._wfSep, 0)
         self.waterfall = WaterfallPanel(bins=self._binCount, rows=220)
         layout.addWidget(self.waterfall, 1)
-
-        self._sampleRate = 960000
-        self._binCount = 32
         self._peak = None
         self._verdictText = '等待数据'
         self._verdictColor = CLR('faint')
