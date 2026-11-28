@@ -376,6 +376,31 @@ class ManualDialog(QDialog):
 # ===========================================================================
 # 关于对话框
 # ===========================================================================
+def about_json_path() -> str:
+    """shared/about.json 的路径（打包后在 _MEIPASS/shared，源码在仓库根 shared/）。"""
+    mei = getattr(sys, '_MEIPASS', None)
+    if mei:
+        return os.path.join(mei, 'shared', 'about.json')
+    here = os.path.dirname(os.path.abspath(__file__))      # desktop/cr_lbj/ui/dialogs
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(here))))  # 仓库根（desktop/cr_lbj/ui/dialogs → 上溯 4 级）
+    return os.path.join(root, 'shared', 'about.json')
+
+
+def load_about() -> dict:
+    """读取共享关于信息；缺失/损坏时返回最小可用字典（不影响程序运行）。"""
+    try:
+        with open(about_json_path(), 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {'name': 'CR-LBJ-Receiver', 'version': '4.0.0',
+            'author': '刘纪彤（BG2GBQ）', 'license': 'GPL-3.0',
+            'summary': '', 'credits': []}
+
+
 class AboutDialog(QDialog):
     """关于对话框。"""
 
@@ -385,67 +410,111 @@ class AboutDialog(QDialog):
         fit_dialog_to_screen(self, 540, 480, 420, 360)    # v3.2.4：改为可缩放 + 按屏收尺寸
         layout = QVBoxLayout(self)
 
-        title = QLabel('中国铁路 LBJ 列车预警器解码程序')
+        info = load_about()
+        # v4.0：关于内容取自 shared/about.json（PC 与安卓共用同一份数据，
+        # 版本号/作者/致谢/协议只维护一处，避免两端不一致）
+        title = QLabel(info.get('displayName') or info.get('name') or 'CR-LBJ-Receiver')
         title.setStyleSheet(f'color: {CLR("accent")}; font-size: 16px; font-weight: bold;')
         title.setWordWrap(True)
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        ver = QLabel('v3.2.11  ·  2026-11')
+        ver = QLabel('v%s   ·   %s' % (info.get('version', '-'),
+                                       info.get('releaseDate', '')))
         ver.setStyleSheet(f'color: {CLR("dim")}; font-size: 12px;')
         ver.setAlignment(Qt.AlignCenter)
         layout.addWidget(ver)
 
-        layout.addWidget(self._sep())
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(0, 0, spx(6), 0)
+        bl.setSpacing(spx(6))
 
-        info = QLabel(
-            '<p>本项目兼容 RTL_TCP 模式与 OpenWebRX 作为数据源，'
-            '对中国铁路机车在 821.2375 MHz 频段发送的 LBJ 列车预警信号'
-            '进行实时接收与解码，可解析车次、机车、线路、公里标、'
-            '方向、速度等报文信息，并支持 ETA 到达时间估算。</p>'
-            '<p>机车参数经中国中车官网、维基百科等公开资料核对。</p>'
-            '<p style="margin-top: 10px;">参考 Sdr-Is-Fun 等 GitHub 上众多 LBJ 解码相关代码，'
-            '并使用 PySide6、Leaflet、OpenRailwayMap 等技术构建界面与地图。</p>'
-            '<p style="margin-top: 12px;"><b>开源致谢</b></p>'
-            '<p>· <b>LBJ_Console</b>（<a href="https://github.com/undef-i/LBJ_Console">'
-            'github.com/undef-i/LBJ_Console</a>，作者 <b>undef-i</b>，GPL-3.0）：'
-            '本项目的<b>机车配属号段表</b>（<code>loco_roster.csv</code>，一万六千余行）与'
-            '<b>机车类型代号表</b>（<code>loco_type_info.csv</code>）直接取自该项目'
-            '（<code>resources</code> 分支），安卓端界面骨架与地图图源思路亦参考其实现，'
-            '特此致谢。</p>'
-            '<p>· <b>OpenStreetMap</b> 贡献者（ODbL）：底图与铁路数据基础；'
-            '<b>OpenRailwayMap</b>（CC-BY-SA）：铁路图层瓦片；'
-            '<b>Leaflet</b>（BSD-2-Clause）：地图渲染引擎；'
-            '<b>RailGo</b> / 中国铁路 12306：车次时刻表查询。</p>'
-            '<p>· 天地图（国家地理信息公共服务平台）、高德地图、百度地图：底图瓦片服务。</p>'
-            '<p style="margin-top: 10px;">特别鸣谢 <b>BI7AIG</b> 对 OWRX 测试提供的帮助。</p>'
-            '<p style="margin-top: 12px;"><b>作者：BG2GBQ</b></p>'
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet('font-size: 13px; line-height: 1.6;')
-        info.setOpenExternalLinks(True)
-        layout.addWidget(info)
+        def _html_rows(rows, key_name, key_author, key_license, key_usage):
+            out = []
+            for c in rows:
+                name = c.get(key_name, '')
+                url = c.get('url', '')
+                label = ('<a href="%s">%s</a>' % (url, name)) if url else name
+                author = c.get(key_author, '')
+                lic = c.get(key_license, '')
+                usage = c.get(key_usage, '')
+                head = '<b>%s</b>' % label
+                if author:
+                    head += '（%s' % author + ('，%s）' % lic if lic else '）')
+                elif lic:
+                    head += '（%s）' % lic
+                out.append('<p style="margin:2px 0;">· %s%s</p>'
+                           % (head, ('：%s' % usage) if usage else ''))
+            return ''.join(out)
 
-        layout.addWidget(self._sep())
+        summary = QLabel('<p>%s</p>' % (info.get('summary', ''),))
+        summary.setWordWrap(True)
+        summary.setStyleSheet('font-size: 13px; line-height: 1.6;')
+        bl.addWidget(summary)
 
-        declTitle = QLabel('声明')
-        declTitle.setStyleSheet(f'color: {CLR("warn")}; font-size: 14px; font-weight: bold;')
-        layout.addWidget(declTitle)
+        author = QLabel('<p style="margin-top:6px;"><b>作者：</b>%s　'
+                        '<b>联系：</b>%s</p>'
+                        '<p><b>仓库：</b><a href="%s">%s</a></p>'
+                        % (info.get('author', ''),
+                           info.get('email', ''),
+                           info.get('repository', ''),
+                           info.get('repository', '')))
+        author.setWordWrap(True)
+        author.setOpenExternalLinks(True)
+        author.setStyleSheet('font-size: 13px;')
+        bl.addWidget(author)
 
-        decl = QLabel(
-            f'<p style="color:{CLR("warn")}"><b>本程序仅供学习与研究使用。</b></p>'
-            '<p>不得用于任何商业或非法用途。</p>'
-        )
+        srcLabel = QLabel('<p style="margin-top:10px;"><b>技术栈与运行平台</b></p>')
+        srcLabel.setStyleSheet('font-size: 13px;')
+        bl.addWidget(srcLabel)
+        plat = QLabel(''.join('<p style="margin:2px 0;">· %s</p>' % s
+                              for s in info.get('platforms', [])))
+        plat.setWordWrap(True)
+        plat.setStyleSheet('font-size: 12px;')
+        bl.addWidget(plat)
+
+        creditsTitle = QLabel('<p style="margin-top:12px;"><b>开源致谢</b></p>')
+        creditsTitle.setStyleSheet('font-size: 13px;')
+        bl.addWidget(creditsTitle)
+        credits = QLabel(_html_rows(info.get('credits', []),
+                                    'name', 'author', 'license', 'usage'))
+        credits.setWordWrap(True)
+        credits.setOpenExternalLinks(True)
+        credits.setStyleSheet('font-size: 12px; line-height: 1.5;')
+        bl.addWidget(credits)
+
+        thanks = info.get('specialThanks', [])
+        if thanks:
+            spTitle = QLabel('<p style="margin-top:10px;"><b>特别鸣谢</b></p>')
+            spTitle.setStyleSheet('font-size: 13px;')
+            bl.addWidget(spTitle)
+            sp = QLabel(''.join('<p style="margin:2px 0;">· <b>%s</b>：%s</p>'
+                                % (x.get('name', ''), x.get('reason', ''))
+                                for x in thanks))
+            sp.setWordWrap(True)
+            sp.setStyleSheet('font-size: 12px;')
+            bl.addWidget(sp)
+
+        decl = QLabel('<p style="margin-top:10px; color:%s;"><b>声明</b></p>'
+                      '<p>%s</p>' % (CLR('warn'), info.get('disclaimer', '')))
         decl.setWordWrap(True)
-        decl.setStyleSheet('font-size: 13px; line-height: 1.6;')
-        layout.addWidget(decl)
+        decl.setStyleSheet('font-size: 12px; line-height: 1.6;')
+        bl.addWidget(decl)
 
-        layout.addWidget(self._sep())
+        lic = QLabel('License: %s ｜ Copyright (C) 2026 %s'
+                     % (info.get('license', 'GPL-3.0'), info.get('author', '')))
+        lic.setStyleSheet(f'color: {CLR("faint")}; font-size: 11px;')
+        lic.setAlignment(Qt.AlignCenter)
+        bl.addWidget(lic)
 
-        license = QLabel('License: GPL v3 | Copyright (C) 2026 BG2GBQ')
-        license.setStyleSheet(f'color: {CLR("faint")}; font-size: 11px;')
-        license.setAlignment(Qt.AlignCenter)
-        layout.addWidget(license)
+        bl.addStretch(1)
+        scroll.setWidget(body)
+        layout.addWidget(scroll, 1)
 
     def _sep(self):
         line = QFrame()

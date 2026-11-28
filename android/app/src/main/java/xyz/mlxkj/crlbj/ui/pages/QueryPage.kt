@@ -154,7 +154,9 @@ fun QuerySection(vm: ReceiverViewModel) {
         }
     }
 
-    Column(Modifier.fillMaxWidth()) {
+    // v4.0：补统一左右内边距（此前根 Column 无 padding，标题/输入区贴着屏幕左边缘，
+    // 和 InfoPage / DecodePage 的 Dim.pagePad 不一致，看起来像整体左偏）
+    Column(Modifier.fillMaxWidth().padding(horizontal = Dim.pagePad)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "车次·配属查询",

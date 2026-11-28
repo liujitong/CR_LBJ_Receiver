@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from cr_lbj.runtime import *  # noqa: F401,F403
+from cr_lbj.ui.components.waterfall import WaterfallPanel
 
 class SpectrumPanel(QWidget):
     """实时频谱（紧凑版）：只回答“现在有没有输出”。
@@ -74,6 +75,16 @@ class SpectrumPanel(QWidget):
         self.plot.addItem(self._thresholdLine)
 
         layout.addWidget(self.plot, 1)
+
+        # v4.0：曲线下方增加瀑布图（新帧在上、历史向下滚动，SDR# 风格）
+        self._wfSep = QFrame()
+        self._wfSep.setFrameShape(QFrame.HLine)
+        self._wfSep.setFrameShadow(QFrame.Plain)
+        self._wfSep.setFixedHeight(1)
+        self._wfSep.setStyleSheet(f'background-color: {CLR("border")}; border: none;')
+        layout.addWidget(self._wfSep, 0)
+        self.waterfall = WaterfallPanel(bins=self._binCount, rows=220)
+        layout.addWidget(self.waterfall, 1)
 
         self._sampleRate = 960000
         self._binCount = 32
@@ -180,6 +191,11 @@ class SpectrumPanel(QWidget):
         except Exception:
             pass
         self._refreshInfo()
+        # v4.0：同一帧同时喂给瀑布（曲线与瀑布严格同步）
+        try:
+            self.waterfall.pushSpectrum(data)
+        except Exception:
+            pass
 
 
 # ===========================================================================
@@ -223,9 +239,9 @@ class TerminalSpectrumPanel(QWidget):
         self._sampleRate = 960000
         self._rssiThresholdDb = DEFAULT_RSSI_THRESHOLD_DB
         self._lastStatus: Dict[str, Any] = {}
-        self._lastData = np.full(32, -120.0, dtype=np.float64)
+        self._lastData = np.full(256, -120.0, dtype=np.float64)
         self._height = 8            # 频谱条形图行数
-        self._bins = 32             # 频谱分箱数 (与核心库一致)
+        self._bins = 256            # 频谱分箱数 (与核心库一致，v4.0: 32->256)
         self._lastRenderT = 0.0     # 渲染节流时间戳
 
     def applyTheme(self):

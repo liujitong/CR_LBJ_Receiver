@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "name": "CR-LBJ-Receiver",
+  "displayName": "中国铁路 LBJ 列车预警器解码程序",
+  "shortName": "CR-LBJ 预警器",
+  "version": "4.0.0",
+  "releaseDate": "2026-11-29",
+  "author": "刘纪彤（BG2GBQ）",
+  "email": "bg2gbq@mlxkj.xyz",
+  "repository": "https://github.com/liujitong/CR_LBJ_Receiver",
+  "license": "GPL-3.0",
+  "licenseUrl": "https://www.gnu.org/licenses/gpl-3.0.txt",
+  "platforms": [
+    "Windows 10/11 x64（桌面端，Python + PySide6）",
+    "Android 8.0+（arm64-v8a / armeabi-v7a / x86_64）"
+  ],
+  "summary": "接收并解码中国铁路 LBJ 列车预警信号（821.2375 MHz），解析车次、机车、线路、公里标、方向、速度与经纬度，提供地图跟踪、历史记录、车次/配属查询与到达时间估算。",
+  "disclaimer": "本程序仅供学习、研究与个人技术验证使用，不得用于任何商业用途或违法违规用途。无线电接收须遵守所在地无线电管理法规；程序不解密、不注入、不发射任何信号，仅接收并解码公开空口报文。",
+  "credits": [
+    {
+      "name": "LBJ_Console",
+      "author": "undef-i",
+      "url": "https://github.com/undef-i/LBJ_Console",
+      "license": "GPL-3.0",
+      "usage": "机车配属号段表（loco_roster.csv）、机车类型代号表（loco_type_info.csv）；瀑布图横向池化与终端频谱渲染思路参考其实现"
+    },
+    {
+      "name": "librtlsdr",
+      "author": "osmocom / Steve Markgraf",
+      "url": "https://github.com/osmocom/rtl-sdr",
+      "license": "GPL-2.0",
+      "usage": "RTL-SDR 驱动与 USB 直连（Android 端内置 1.0.27）"
+    },
+    {
+      "name": "libusb",
+      "author": "libusb project",
+      "url": "https://libusb.info/",
+      "license": "LGPL-2.1",
+      "usage": "Android 端 USB 设备访问（内置 1.0.27）"
+    },
+    {
+      "name": "PySide6 / Qt",
+      "author": "The Qt Company",
+      "url": "https://www.qt.io/qt-for-python",
+      "license": "LGPL-3.0 / GPL-3.0",
+      "usage": "桌面端图形界面与 WebEngine 地图容器"
+    },
+    {
+      "name": "pyqtgraph",
+      "author": "pyqtgraph contributors",
+      "url": "https://www.pyqtgraph.org/",
+      "license": "MIT",
+      "usage": "桌面端实时频谱曲线绘制"
+    },
+    {
+      "name": "NumPy",
+      "author": "NumPy developers",
+      "url": "https://numpy.org/",
+      "license": "BSD-3-Clause",
+      "usage": "桌面端 DSP、FFT 与瀑布图数值计算"
+    },
+    {
+      "name": "SciPy",
+      "author": "SciPy developers",
+      "url": "https://scipy.org/",
+      "license": "BSD-3-Clause",
+      "usage": "桌面端 FIR 滤波器设计与信号处理"
+    },
+    {
+      "name": "PyInstaller",
+      "author": "PyInstaller developers",
+      "url": "https://pyinstaller.org/",
+      "license": "GPL-2.0 with exception",
+      "usage": "桌面端单文件 EXE 打包"
+    },
+    {
+      "name": "Leaflet",
+      "author": "Volodymyr Agafonkin",
+      "url": "https://leafletjs.com/",
+      "license": "BSD-2-Clause",
+      "usage": "桌面与安卓共用的地图渲染引擎"
+    },
+    {
+      "name": "OpenStreetMap",
+      "author": "OpenStreetMap contributors",
+      "url": "https://www.openstreetmap.org/",
+      "license": "ODbL-1.0",
+      "usage": "底图数据"
+    },
+    {
+      "name": "OpenRailwayMap",
+      "author": "OpenRailwayMap contributors",
+      "url": "https://www.openrailwaymap.org/",
+      "license": "CC-BY-SA-4.0",
+      "usage": "铁路线路图层瓦片"
+    },
+    {
+      "name": "Kotlin / Jetpack Compose",
+      "author": "JetBrains / Google",
+      "url": "https://developer.android.com/jetpack/compose",
+      "license": "Apache-2.0",
+      "usage": "Android 端界面与状态管理"
+    },
+    {
+      "name": "AndroidX / Room / DiskLruCache",
+      "author": "Google / Jake Wharton",
+      "url": "https://developer.android.com/jetpack",
+      "license": "Apache-2.0",
+      "usage": "Android 端历史记录数据库、瓦片缓存与生命周期组件"
+    },
+    {
+      "name": "Google Turbo colormap",
+      "author": "Google Research",
+      "url": "https://ai.googleblog.com/2019/08/turbo-improved-rainbow-colormap-for.html",
+      "license": "Apache-2.0",
+      "usage": "瀑布图色标（多项式近似实现）"
+    },
+    {
+      "name": "天地图（国家地理信息公共服务平台）",
+      "author": "国家基础地理信息中心",
+      "url": "https://www.tianditu.gov.cn/",
+      "license": "服务条款",
+      "usage": "矢量/影像底图与注记瓦片"
+    },
+    {
+      "name": "高德地图 / 百度地图",
+      "author": "高德软件 / 百度公司",
+      "url": "https://lbs.amap.com/",
+      "license": "服务条款",
+      "usage": "免 Key 公众底图瓦片（含 GCJ-02 / BD-09 坐标纠偏）"
+    },
+    {
+      "name": "中国铁路 12306 / RailGo",
+      "author": "中国国家铁路集团 / RailGo",
+      "url": "https://www.12306.cn/",
+      "license": "公开数据接口",
+      "usage": "车次时刻表与车次信息查询"
+    },
+    {
+      "name": "中国中车及各机车制造企业公开资料",
+      "author": "公开出版物与企业官网",
+      "url": "https://www.crrcgc.cc/",
+      "license": "公开信息",
+      "usage": "机车参数与配属信息核对"
+    }
+  ],
+  "specialThanks": [
+    {
+      "name": "BI7AIG",
+      "reason": "OWRX 联调测试协助"
+    }
+  ]
+}

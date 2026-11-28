@@ -1,26 +1,56 @@
-# CR-LBJ-Receiver · 中国铁路 LBJ 列车预警器（桌面 + 安卓）
+# CR-LBJ-Receiver
 
-> 用一支几十元的 RTL-SDR，接收 **821.2375 MHz** 上的 LBJ 列车防护报警信号，实时解出车次、机车、
-> 线路、公里标、速度与经纬度，并在地图上跟着列车跑。桌面端与安卓端同仓库、同版本号、同数据。
+> **文档由 AI 辅助生成（DeepSeek Harness / deepseek-v4.1-flash），已与代码行为核对；如有出入以程序实际行为为准。**
 
-> 适用版本：**v3.2.11**（2026-11-26） ｜ 适用端：桌面 / 安卓 ｜ 最后更新：2026-11-26
+> 适用版本：**v4.0.0**（2026-11-29） ｜ 适用端：Windows 桌面 / Android ｜ 最后更新：2026-11-29
 
-**平台** Windows 10/11 · Android 8.0+ ｜ **许可** GPL v3 ｜ **作者** BG2GBQ
+中国铁路 LBJ 列车预警信号接收与解码程序，同时提供 **Windows 桌面端** 与 **Android 客户端**。
+
+程序在 821.2375 MHz 频点接收机车发出的 LBJ 预警报文，完成比特同步、BCH 纠错与报文解析，输出车次、机车、线路、公里标、方向、速度与经纬度，并在地图上跟踪列车、估算到达时间、查询车次与机车配属。
 
 ---
 
-## 项目简介
+## 功能
 
-- **RTL-SDR 接收**：桌面支持 USB 直连、RTL-TCP 与 OWRX；安卓支持 OTG 直连（fd 注入）与 RTL-TCP。
-- **报文解码**：POCSAG/FFSK 全链在两端 1:1 实现（桌面 Python、安卓 C++/JNI），对拍 0 差异；
-  输出车次、机车、线路、公里标、速度与经纬度。
-- **共享地图页**：两端共用 `shared/web/railmap.html`（Leaflet 1.9.4 本地化，离线可用）；
-  7 张底图（高德、百度、OSM、天地图）+ OpenRailwayMap 铁路图层 + 离线瓦片缓存。
-- **车次与配属查询**：接 RailGo（失败退 12306）查车次等级/担当/配属/时刻表；内置 16622 行
-  机车号段表查配属与车型参数，结果自动展示在解码卡、地图弹窗与详情窗口。
-- **共享数据**：`shared/` 是两端唯一数据来源，构建时进 APK、打包时进 exe；号段表支持自动更新。
-- **两端差异**：桌面为全景式一屏布局；安卓为五页（地图/解码/历史/状态/设置）+ 前台服务。
-  详细对照见 [用户手册](docs/用户手册.md) 与 [架构说明](docs/架构说明.md)。
+| 能力 | 说明 |
+|---|---|
+| 报文接收 | 支持 RTL-SDR USB 直连、RTL-TCP、OpenWebRX（OWRX）三种数据源，可在运行时切换与保存多套配置 |
+| 信号解调 | 1024 点 FFT 频谱、半带抽取 + 信道 FIR、FM 鉴频、DPLL 位同步、BCH(31,21) 纠错、POCSAG 帧同步 |
+| 报文解析 | 短报文 / 合并报文 / 独立长报文三类；解析车次、方向、速度、公里标、线路名、机车代号与型号、经纬度 |
+| 频谱显示 | 256 点频谱曲线 + 瀑布图（Turbo 色标、自动增益、时间滚动） |
+| 地图跟踪 | Leaflet 地图，7 种底图（天地图 / OSM / 高德 / 百度，免 Key）+ OpenRailwayMap 铁路图层；GCJ-02 / BD-09 坐标适配；离线瓦片缓存；自动跟随与轨迹 |
+| 历史记录 | SQLite 存储，支持搜索、备注、多选删除、导出 CSV；同一车次按质量择优去重 |
+| 车次查询 | RailGo → 12306 双通道，查询时刻表、担当局段、配属、车型 |
+| 机车查询 | 本地号段表 + 车型参数表，支持配属局段与制造厂反查 |
+| 到达估算 | 依据公里标与线路方向估算到达本站时间 |
+| 干扰统计 | 解析不出车次的帧按上行/下行计入干扰，仅记日志、不入库 |
+| 数据更新 | 车次/配属数据可在线检查更新，原子写入用户目录并保留回退快照 |
+
+---
+
+## 技术栈
+
+**桌面端（Windows 10/11 x64）**
+
+- Python 3.14，GUI：PySide6 6.11（Qt 6）
+- 频谱曲线：pyqtgraph；瀑布图：NumPy + QImage 自绘
+- 数值计算：NumPy / SciPy（FIR 设计、FFT、滤波）
+- 打包：PyInstaller（单文件 EXE）
+- 版本资源与 Authenticode 代码签名：Windows SDK signtool
+
+**Android（8.0+，arm64-v8a / armeabi-v7a / x86_64）**
+
+- Kotlin + Jetpack Compose（Material 3）
+- 解码核心：C++17 + JNI，与桌面端 Python 实现逐行对应（同一套参数与算法）
+- USB 直连：librtlsdr 1.0.27 + libusb 1.0.27（内置）
+- 存储：Room（历史记录）、DiskLruCache（地图瓦片）
+- 构建：Gradle + Android Gradle Plugin + CMake / NDK r27
+
+**两端共享**
+
+- 地图页面 `shared/web/railmap.html`（单文件 Leaflet 应用，两端加载同一份）
+- 数据表 `shared/data/*.csv`、`shared/data/loco_specs.json`
+- 关于信息 `shared/about.json`（版本、作者、开源致谢、协议只维护一处）
 
 ---
 
@@ -28,75 +58,67 @@
 
 ### 桌面端
 
-1. **装驱动**（一次性）：用 Zadig 给 RTL2832U 安装 WinUSB 驱动（或使用 RTL-SDR 官方驱动包）。
-2. **选数据源**：`配置 → 数据源与射频`，默认「本机 RTL-SDR（USB 直连）」；也可选 RTL-TCP 或 OWRX。
-3. **开始接收**：点顶栏「▶ 接收」（`Ctrl+R`），收到长报文后地图自动跟随。
+1. 运行 `CR-LBJ-Receiver.exe`。
+2. 「设置 → 数据源与射频」选择数据源：
+   - **USB 直连**：插入 RTL-SDR，程序自动识别 tuner 并推荐采样率/增益；
+   - **RTL-TCP**：填入 `主机:端口`（如 `127.0.0.1:1234`）；
+   - **OWRX**：填入 OWRX 的 `主机:端口` 与 profile。
+3. 频点设为 `821.2375 MHz`，采样率 `960 kS/s`（或 `240 kS/s`），带宽 `35 kHz`。
+4. 点击「开始接收」。
 
-### 安卓端
+配置与历史记录存放于 `%LOCALAPPDATA%\CR-LBJ-Receiver\`，程序目录不产生任何文件。
 
-1. 自行构建并安装 `app-debug.apk`（产物在 `android/app/build/outputs/apk/debug/`，构建步骤见
-   [安卓构建与环境](docs/安卓构建与环境.md)）。
-2. OTG 接 RTL-SDR，或在设置里填局域网 RTL-TCP / OWRX 地址；采样率默认 240 kS/s。
-3. 回「解码」页点 **开始接收**；第一次会申请 USB 与通知权限，地图页默认「高德 街道」底图。
+### Android
 
-### 从源码运行 / 构建
-
-```bash
-# 桌面端：源码运行（仓库根执行，Python 3.13+）
-python -m pip install PySide6 PySide6-Addons PySide6-Fluent-Widgets scipy pyqtgraph
-python desktop/main.py
-
-# 桌面端：一键打包（产物 dist/CR-LBJ-Receiver.exe + README.md + docs/）
-python desktop/build.py
-
-# 测试
-python -m pytest tests -q
-```
-
-安卓端构建命令、本机三处环境坑（CMake / ninja / JDK argfile）见
-[安卓构建与环境](docs/安卓构建与环境.md)。
+1. 安装 APK。
+2. 若使用 USB 直连：OTG 连接 RTL-SDR，首次会请求 USB 访问权限。
+3. 其余步骤与桌面端一致。
+4. 权限：USB 设备访问（必需）；定位（可选，用于「转到自己位置」）；网络（地图、车次查询）。
 
 ---
 
-## 文档导航
+## 目录结构
 
-全部文档位于 **`docs/`** 目录，本 README 只保留入口信息。
+```
+CR_LBJ_Receiver/
+├── desktop/          Windows 桌面端（Python 包 cr_lbj）
+│   ├── cr_lbj/core/      DSP、解码器、数据源、去重、到达估算
+│   ├── cr_lbj/ui/        主窗口、面板、对话框
+│   └── build.py          PyInstaller 打包脚本
+├── android/          Android 客户端（Gradle 工程 + C++ 解码核心）
+├── shared/           两端共享资源
+│   ├── web/railmap.html  地图页面
+│   ├── data/             CSV 数据表
+│   └── about.json        关于信息
+├── docs/             文档
+└── tests/            桌面端单元测试
+```
+
+---
+
+## 文档
 
 | 文档 | 内容 |
 |---|---|
-| [用户手册](docs/用户手册.md) | 界面、数据源、调参、地图、配置、排错、FAQ、术语（以桌面端为主） |
-| [技术参考](docs/技术参考.md) | 线程模型、DSP 链、POCSAG 帧、BCD/长报文字段、数据模型、扩展点、打包 |
-| [架构说明](docs/架构说明.md) | 目录分层、依赖方向、共享层设计、两端对照、历史文件对照 |
-| [地图与图源](docs/地图与图源.md) | 底图清单、ORM 条款、坐标系与偏移、天地图 tk、离线缓存、两端契约 |
-| [车次与配属查询](docs/车次与配属查询.md) | 数据源、字段、匹配规则、自动更新、已知限制 |
-| [USB 直连与设备自适应](docs/USB直连与设备自适应.md) | USB 直连原理、按 tuner 自适应推荐参数、验证记录与风险 |
-| [安卓版说明](docs/安卓版说明.md) | 安卓端功能、权限、与桌面差异、测试与验收 |
-| [安卓构建与环境](docs/安卓构建与环境.md) | JDK/NDK/CMake 版本、中文路径三坑、模拟器调试 |
-| [更新记录](docs/CHANGELOG.md) | 版本规则与各版本变更明细（最新在顶部） |
-| [v3.0 验收记录](docs/验收记录-v3.0.md) | v3.0 交付实际跑过的测试、读数与未验证项（历史存档） |
-| [安卓移植日志](docs/安卓移植日志.md) | 安卓端 M0–M3 移植过程与构建错误记录（历史存档） |
-| [安卓模块划分方案](docs/安卓模块划分方案.md) | v3.0 安卓端开工前的模块/JNI 契约确认稿（历史存档） |
-| [第三方资源与授权](docs/NOTICE.md) | 数据、地图图源、前端库与联网接口的逐项来源与授权条款 |
+| [用户手册](docs/用户手册.md) | 界面操作、参数含义、常见问题 |
+| [技术参考](docs/技术参考.md) | 协议结构、解调算法、报文格式、参数 |
+| [架构说明](docs/架构说明.md) | 模块划分、数据流、线程模型 |
+| [安卓版说明](docs/安卓版说明.md) | 安卓功能、权限、构建与签名 |
+| [地图与图源](docs/地图与图源.md) | 底图清单、坐标系、缓存策略 |
+| [车次与配属查询](docs/车次与配属查询.md) | 查询通道、数据更新 |
+| [USB 直连与设备自适应](docs/USB直连与设备自适应.md) | tuner 识别、增益推荐、OTG |
+| [代码签名](docs/代码签名.md) | Windows / Android 签名流程与材料管理 |
+| [CHANGELOG](docs/CHANGELOG.md) | 版本变更记录 |
+| [NOTICE](docs/NOTICE.md) | 许可与第三方组件 |
 
 ---
 
-## 致谢要点
+## 许可
 
-- **[LBJ_Console](https://github.com/undef-i/LBJ_Console)**（作者 **undef-i**，GPL-3.0）：机车配属号段表
-  （`shared/data/loco_roster.csv`）、机车类型代号表、安卓端五页导航 + 悬浮 Dock 的界面骨架、
-  OSM + OpenRailwayMap 图源组合与离线铁路层思路。
-- 感谢 [RailGo](https://railgo.dev/)、[OpenStreetMap](https://www.openstreetmap.org/) 贡献者（ODbL）、
-  [OpenRailwayMap](https://www.openrailwaymap.org/)（CC-BY-SA）、[Leaflet](https://leafletjs.com/)（BSD-2-Clause）、
-  天地图、高德、百度与铁路 12306 公开查询接口提供数据与服务。
-- 第三方资源的逐项授权与使用条款见 [docs/NOTICE.md](docs/NOTICE.md)。
+GPL-3.0。第三方组件与数据来源的完整清单见 [`shared/about.json`](shared/about.json)。
 
----
+本程序仅接收并解码公开空口报文，不发射、不注入、不解密任何加密内容。使用须遵守所在地无线电管理法规。
 
-## 声明
+## 作者
 
-本项目仅供**铁路爱好者技术研究与学习**使用。接收无线电信号请遵守当地法律法规；解码所得数据
-不得用于行车指挥、运营决策或任何商业用途。因使用本程序产生的一切后果由使用者自行承担。
-
-## License
-
-GPL v3 — 见 [LICENSE](LICENSE)。
+刘纪彤（BG2GBQ） · bg2gbq@mlxkj.xyz · https://github.com/liujitong/CR_LBJ_Receiver

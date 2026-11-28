@@ -20,7 +20,7 @@ constexpr double kDefaultAfcMaxHz = 8000.0;
 constexpr double kDefaultRssiThresholdDb = -55.0;
 constexpr double kDefaultRssiHystDb = 4.0;
 constexpr double kDefaultRssiHoldMs = 700.0;
-constexpr int    kSpectrumBins = 32;
+constexpr int    kSpectrumBins = 256;
 constexpr int    kNfft = 1024;
 
 // numpy complex64 乘法（float32 分量运算，不经 double 中介）

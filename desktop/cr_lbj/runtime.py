@@ -98,16 +98,19 @@ def themeColors() -> dict:
     }
 
 # PySide6
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QUrl, QObject
+from PySide6.QtCore import (Qt, QThread, Signal, QTimer, QSize, QUrl, QObject,
+                            QRect, QPoint, QRectF, QPointF)
 from PySide6.QtGui import (QColor, QBrush, QFont, QFontMetrics, QTextCursor,
                            QIcon, QAction, QDesktopServices,
-                           QCursor, QGuiApplication)
+                           QCursor, QGuiApplication,
+                           QImage, QPainter, QPixmap, QPen)
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QTableWidget, QTableWidgetItem,
     QTextEdit, QTabWidget, QGroupBox, QFormLayout, QStatusBar,
     QDialog, QHeaderView, QMessageBox, QInputDialog, QFrame, QFileDialog,
     QMenu, QMenuBar, QStackedWidget, QScrollArea, QSizePolicy,
+    QAbstractScrollArea,
 )
 
 # 控件统一由 ui_kit（Fluent）提供，名字保持原样，界面代码无需改动
@@ -231,9 +234,36 @@ QComboBox::drop-down { width: 26px; }
 # ---------------------------------------------------------------------------
 SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+
+
+def _user_data_base() -> str:
+    """用户数据根目录（v4.0）。
+
+    打包后配置与历史库**不再写在 exe 同级**（以前 exe 旁边会出现
+    lbj_config.json / history.db，任何人打开程序目录都能看到），
+    统一放到 `%LOCALAPPDATA%\\CR-LBJ-Receiver\\`：
+      * Windows 规范位置，不污染程序目录；
+      * 普通用户可写（Program Files 下也能正常保存）；
+      * 卸载程序目录不会误删历史记录。
+    可用环境变量 `CRLBJ_DATA_DIR` 覆盖（便携模式/测试）。
+    """
+    override = os.environ.get('CRLBJ_DATA_DIR', '').strip()
+    if override:
+        d = override
+    else:
+        base = (os.environ.get('LOCALAPPDATA')
+                or os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
+        d = os.path.join(base, 'CR-LBJ-Receiver')
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return d
+
+
 if getattr(sys, 'frozen', False):
     DATA_DIR = sys._MEIPASS
-    USER_DIR = EXE_DIR
+    USER_DIR = _user_data_base() if os.environ.get('CRLBJ_PORTABLE', '').strip() != '1' else EXE_DIR
 else:
     DATA_DIR = SRC_DIR
     USER_DIR = SRC_DIR
@@ -241,6 +271,20 @@ else:
 CONFIG_PATH = os.path.join(USER_DIR, 'lbj_config.json')
 DB_PATH = os.path.join(USER_DIR, 'history.db')
 ICON_PATH = os.path.join(DATA_DIR, '国铁.ico')
+
+# v4.0：老版本把 lbj_config.json / history.db 写在 exe 同级。
+# 首次升级到这里时把旧文件**复制**过去（不删除原文件，避免用户数据丢失），
+# 之后一律写用户数据目录。
+if getattr(sys, 'frozen', False) and os.path.abspath(USER_DIR) != os.path.abspath(EXE_DIR):
+    import shutil as _shutil
+    for _name in ('lbj_config.json', 'history.db'):
+        _old = os.path.join(EXE_DIR, _name)
+        _new = os.path.join(USER_DIR, _name)
+        if os.path.exists(_old) and not os.path.exists(_new):
+            try:
+                _shutil.copy2(_old, _new)
+            except OSError:
+                pass
 
 # 离屏冒烟 / 自动化测试专用：用环境变量把配置与历史库指到临时目录，
 # 免得测试把仓库里受版本控制的 lbj_config.json 模板写脏（踩过两次）。

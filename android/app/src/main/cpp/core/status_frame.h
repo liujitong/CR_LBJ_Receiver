@@ -19,8 +19,8 @@
 //  [16] int32 running      (0/1)
 //  [17] int32 linkMode     (0=usb 1=pipe)
 //  [18] int32 errorState   (0=ok 1=streamBroken)
-//  [20..51] float spectrum[32]
-//  共 52 * 4 = 208 字节
+//  [20..275] float spectrum[256]  (v4.0: 32 -> 256 bin，瀑布更细腻)
+//  共 276 * 4 = 1104 字节
 #pragma once
 #include <cstdint>
 #include <cstring>
@@ -28,7 +28,7 @@
 
 namespace lbj {
 
-constexpr int kStatusFrameWords = 52;
+constexpr int kStatusFrameWords = 276;
 
 class StatusFrameWriter {
 public:

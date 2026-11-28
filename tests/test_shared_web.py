@@ -457,7 +457,7 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertIn('shouldInterceptRequest', mappage)
 
     def test_follow_resume_on_new_train(self):
-        """v3.2.9~v3.2.11：拖动地图只是「暂停」跟随，来新车必须自动恢复跟随并跳转。
+        """v3.2.9~v4.0.0：拖动地图只是「暂停」跟随，来新车必须自动恢复跟随并跳转。
 
         回归的 bug：开启跟随后一旦拖动地图，宿主会把 mapFollow 永久关掉，
         之后再来新车也不再自动跟随。修复后：拖动只置页面 userTouched（暂停），
@@ -474,7 +474,7 @@ class DesktopHostContractTest(unittest.TestCase):
         self.assertEqual(len(seg), 2, '应有 newest&&follow 跟随分支')
         branch = seg[1].split('scheduleStatus();', 1)[0]
         self.assertIn('userTouched = false;', branch,
-                      'v3.2.11：任何新信号都解除拖动暂停（同车次新信号也要跳）')
+                      'v4.0.0：任何新信号都解除拖动暂停（同车次新信号也要跳）')
         self.assertIn('lastFocusId = newestId;', branch, '焦点切到最新信号那辆')
         self.assertIn('autoCenter(', branch, '要真的居中过去')
         self.assertNotIn('changedPick', html,
@@ -504,7 +504,7 @@ class DesktopHostContractTest(unittest.TestCase):
         # 回中心 / 转到自己位置：不再落盘 mapFollow=false
         self.assertNotIn('copy(mapFollow = false)', mappage,
                          '回中心/定位不应关闭跟随（v3.2.10）')
-        # v3.2.11：安卓同车次只出一个点，机车号取最近一条可靠值（仅显示用，
+        # v4.0.0：安卓同车次只出一个点，机车号取最近一条可靠值（仅显示用，
         # **不参与**"是否新车"判定——同车次换挂不算新车）
         self.assertIn('latestLoco', mappage,
                       'collectTrains 需保留最近可靠机车号（标记显示用）')
@@ -560,7 +560,7 @@ class DocsVersionTest(unittest.TestCase):
         # v3.2.7：README 精简为「入口 + 文档导航」（详细内容下沉 docs/），
         # 不再维护「更新记录表」（版本历史统一在 docs/CHANGELOG.md）。
         readme = read_text(os.path.join(ROOT, 'README.md'))
-        self.assertIn('v3.2.11', readme, 'README 版本号应为 v3.2.11')
+        self.assertIn('v4.0.0', readme, 'README 版本号应为 v4.0.0')
         self.assertNotIn('**版本** v3.0.0', readme)
         self.assertNotIn('**版本** v3.1.0', readme)
         self.assertNotIn('**版本** v3.2.10', readme)
@@ -585,9 +585,9 @@ class DocsVersionTest(unittest.TestCase):
     def test_docs_version(self):
         for name in ('地图与图源.md', '技术参考.md', '用户手册.md', '架构说明.md'):
             text = read_text(os.path.join(DOCS, name))
-            self.assertIn('v3.2.11', text, '%s 文首版本号应为 v3.2.11' % name)
+            self.assertIn('v4.0.0', text, '%s 文首版本号应为 v4.0.0' % name)
         changelog = read_text(os.path.join(DOCS, 'CHANGELOG.md'))
-        self.assertIn('## v3.2.11', changelog, 'CHANGELOG 顶部应有 v3.2.11 条目')
+        self.assertIn('## v4.0.0', changelog, 'CHANGELOG 顶部应有 v4.0.0 条目')
 
 
 if __name__ == '__main__':

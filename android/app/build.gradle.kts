@@ -58,9 +58,9 @@ android {
         targetSdk = 35
         // 用户指定 NDK r27
         ndkVersion = "27.2.12479018"
-        // v3.2.11：跟随语义定稿（任何新信号都追）+ 解码对拍复核；versionCode 331
-        versionCode = 331
-        versionName = "3.2.11"
+        // v4.0.0：频谱/瀑布重构（256 bin + Turbo 色标）+ 共享关于页 + 多 ABI；versionCode 400
+        versionCode = 400
+        versionName = "4.0.0"
     }
 
     signingConfigs {
@@ -83,7 +83,9 @@ android {
         release {
             isMinifyEnabled = false
             // release 只打 arm：arm64 覆盖现代手机，v7a 兜底老机器
-            ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a") }
+            // v4.0：release 同时产出 x86_64（模拟器/ChromeOS/x86 平板），
+            // 与 arm 使用**同一份** Kotlin/C++ 代码，不裁剪任何功能。
+            ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")

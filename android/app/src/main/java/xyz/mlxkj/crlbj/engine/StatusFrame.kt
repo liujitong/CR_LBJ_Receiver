@@ -12,14 +12,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * StatusFrame（native 双缓冲共享帧，208 字节 / 52 word，小端）。
+ * StatusFrame（native 双缓冲共享帧，1104 字节 / 276 word，小端）。
  * 布局与 cpp/core/status_frame.h 严格一致：
  *  [0]seq [1]gateState [2]rssi [3]afcHz [4]afcErrHz [5]afcScore
  *  [6]tunerTypeId [7]appliedGainCentiDb [8]actualSampleRate [9]hwFreqHz
  *  [10]blocksPerSec [11]totalBlocks [12]droppedBlocks [13]reconnectCount
  *  [14]decodeCpuPct [15]bufferLevel [16]running [17]linkMode [18]errorState
  *  [19]interference(低16=上行, 高16=下行；v3.2.9 解析不出车次的干扰帧数)
- *  [20..51]spectrum[32]
+ *  [20..275]spectrum[256]  (v4.0: 32->256 bin)
  */
 data class StatusFrame(
     val seq: Int = 0,
@@ -55,13 +55,14 @@ data class StatusFrame(
     val interferenceDown: Int get() = (interferenceRaw ushr 16) and 0xFFFF
 
     companion object {
-        const val WORDS = 52
+        const val WORDS = 276          // 20 头 + 256 频谱 bin（v4.0）
+        const val SPECTRUM_BINS = 256
         const val BYTES = WORDS * 4
 
         fun parse(bb: ByteBuffer): StatusFrame {
             bb.order(ByteOrder.LITTLE_ENDIAN)
-            val spec = FloatArray(32)
-            for (i in 0 until 32) spec[i] = bb.getFloat((20 + i) * 4)
+            val spec = FloatArray(SPECTRUM_BINS)
+            for (i in 0 until SPECTRUM_BINS) spec[i] = bb.getFloat((20 + i) * 4)
             return StatusFrame(
                 seq = bb.getInt(0),
                 gateState = bb.getInt(4),
@@ -102,7 +103,7 @@ class StatusFramePoller(private val onFrame: (StatusFrame) -> Unit) {
 
     companion object {
         /** 轮询间隔：略小于一个 DSP 块（≈68ms），避免同一帧被读两次/漏帧 */
-        const val POLL_MS = 70L
+        const val POLL_MS = 40L     // v4.0: 70->40ms（约 25fps，瀑布更连贯）
     }
 
     private val buffer: ByteBuffer = ByteBuffer.allocateDirect(StatusFrame.BYTES)

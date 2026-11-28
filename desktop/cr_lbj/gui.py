@@ -18,6 +18,7 @@ from cr_lbj.runtime import *  # noqa: F401,F403
 from cr_lbj.core.bridge import *  # noqa: F401,F403
 from cr_lbj.ui.components.spectrum import *  # noqa: F401,F403
 from cr_lbj.ui.components.basics import *  # noqa: F401,F403
+from cr_lbj.ui.components.waterfall import *  # noqa: F401,F403  （v4.0 瀑布图）
 from cr_lbj.ui.components.info_panels import *  # noqa: F401,F403
 from cr_lbj.data.history import *  # noqa: F401,F403
 from cr_lbj.ui.dialogs.detail_dialogs import *  # noqa: F401,F403

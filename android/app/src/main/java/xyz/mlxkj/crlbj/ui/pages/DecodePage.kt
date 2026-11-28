@@ -489,20 +489,24 @@ private fun gateLabel(gate: Int): String = when (gate) {
  * 低端对比度不足、窄峰看起来"糊"；换成经典瀑布色阶后弱信号层次明显更清楚。
  */
 private fun spectrumColor(t: Float): androidx.compose.ui.graphics.Color {
+    // v4.0：改用 Google Turbo 色标（多项式近似，与 PC 端 waterfall.py 同一套）。
+    // 原来的彩虹(red-blue)在等 dB 间隔下有明显色带/台阶，Turbo 单调且过渡平滑。
     val x = t.coerceIn(0f, 1f)
-    val dark = androidx.compose.ui.graphics.Color(0xFF000033)
-    val blue = androidx.compose.ui.graphics.Color(0xFF0000FF)
-    val cyan = androidx.compose.ui.graphics.Color(0xFF00FFFF)
-    val green = androidx.compose.ui.graphics.Color(0xFF00FF00)
-    val yellow = androidx.compose.ui.graphics.Color(0xFFFFFF00)
-    val red = androidx.compose.ui.graphics.Color(0xFFFF0000)
-    return when {
-        x < 0.2f -> lerp(dark, blue, x / 0.2f)
-        x < 0.4f -> lerp(blue, cyan, (x - 0.2f) / 0.2f)
-        x < 0.6f -> lerp(cyan, green, (x - 0.4f) / 0.2f)
-        x < 0.8f -> lerp(green, yellow, (x - 0.6f) / 0.2f)
-        else -> lerp(yellow, red, (x - 0.8f) / 0.2f)
-    }
+    val r = 0.13572138f + 4.61539260f * x - 42.66032258f * x * x +
+        132.13108234f * x * x * x - 152.94239396f * x * x * x * x +
+        59.28637943f * x * x * x * x * x
+    val g = 0.09140261f + 2.19418839f * x + 4.84296658f * x * x -
+        14.18503333f * x * x * x + 4.27729857f * x * x * x * x +
+        2.82956604f * x * x * x * x * x
+    val b = 0.10667330f + 12.64194608f * x - 60.58204836f * x * x +
+        110.36276771f * x * x * x - 89.90310912f * x * x * x * x +
+        27.34824973f * x * x * x * x * x
+    return androidx.compose.ui.graphics.Color(
+        red = r.coerceIn(0f, 1f),
+        green = g.coerceIn(0f, 1f),
+        blue = b.coerceIn(0f, 1f),
+        alpha = 1f,
+    )
 }
 
 /**
@@ -539,14 +543,19 @@ private fun buildWaterfallBitmap(
     }
     val h = rows.size
 
-    // 1) 能量范围（整块瀑布统一，避免逐帧跳色）
-    var mn = Float.MAX_VALUE
-    var mx = -Float.MAX_VALUE
-    for (row in rows) for (v in row) {
-        if (v < mn) mn = v
-        if (v > mx) mx = v
+    // 1) 能量范围（v4.0：分位裁剪，参照 SDR# 的 Auto Gain——
+    //    取 5% / 99.5% 分位而不是 min/max，单点尖峰不会把整幅图压暗，
+    //    噪声底更稳、弱信号层次更清楚）
+    val flat = ArrayList<Float>(rows.size * bins / 2)
+    for (row in rows) {
+        var i = 0
+        while (i < row.size) { flat.add(row[i]); i += 2 }   // 隔点采样，省一半 CPU
     }
-    val span = (mx - mn).coerceAtLeast(0.001f)
+    flat.sort()
+    val n = flat.size
+    val mn = if (n == 0) -120f else flat[(n * 0.05f).toInt().coerceIn(0, n - 1)]
+    val mx = if (n == 0) -40f else flat[(n * 0.995f).toInt().coerceIn(0, n - 1)]
+    val span = (mx - mn).coerceAtLeast(6.0f)   // 全静噪时避免把噪声放大成雪花
 
     // 2) 颜色查找表（256 级光谱色阶，与 LBJ_Console 同款；每像素只查表）
     val lut = IntArray(256) { i -> spectrumColor(i / 255f).toArgb() }

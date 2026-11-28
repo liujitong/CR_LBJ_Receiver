@@ -59,6 +59,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import xyz.mlxkj.crlbj.core.AboutInfo
 import xyz.mlxkj.crlbj.core.ReceiverSettings
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
@@ -206,7 +207,7 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = Dim.pagePad)) {
         if (sub == null) {
-            PageHeader(title = "设置", subtitle = "v3.2.11 · 更改自动保存")
+            PageHeader(title = "设置", subtitle = "v4.0.0 · 更改自动保存")
             saveErr?.let {
                 Text(it, color = p.err, fontSize = 12.sp,
                     modifier = Modifier.padding(bottom = 4.dp))
@@ -705,35 +706,85 @@ fun SettingsPage(vm: ReceiverViewModel, onBack: () -> Unit = {}) {
                     }
 
                     // ----------------------------------------------------- 关于
-                    else -> SectionCard("关于") {
-                        Text("CR 列车预警器 · Android v3.2.11", color = p.text, fontSize = 13.sp)
-                        Text(
-                            "桌面版与安卓版 v3.2.11 同版本号；地图页与桌面端共用 " +
-                                "shared/web/railmap.html，数据共用 shared/data/*。",
-                            color = p.textTertiary, fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        Text(
-                            "配属号段表来源 LBJ_Console（GPL-3.0）；参数表来源 trainfanz.com 公开资料。",
-                            color = p.textTertiary, fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                        Text(
-                            "开源致谢",
-                            color = p.text, fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 10.dp),
-                        )
-                        Text(
-                            "· LBJ_Console（github.com/undef-i/LBJ_Console，作者 undef-i，GPL-3.0）：" +
-                                "机车配属号段表、机车类型代号表取自该项目 resources 分支；" +
-                                "界面骨架与地图图源方案亦参考其实现，特此致谢。\n" +
-                                "· OpenStreetMap 贡献者（ODbL）、OpenRailwayMap（CC-BY-SA）、" +
-                                "Leaflet（BSD-2-Clause）：地图与铁路图层。\n" +
-                                "· RailGo / 中国铁路 12306：车次时刻表查询。\n" +
-                                "· 天地图、高德地图、百度地图：底图瓦片服务。",
-                            color = p.textTertiary, fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
+                    // v4.0：内容取自 shared/about.json（与桌面端同一份），
+                    // 版本号/作者/致谢/协议只维护一处
+                    else -> {
+                        val about = remember {
+                            runCatching { AboutInfo.load(ctxApp) }.getOrElse { AboutInfo() }
+                        }
+                        Column(Modifier.fillMaxWidth()) {
+                            SectionCard(about.displayName) {
+                                Text(
+                                    "版本 v${about.version}   ·   ${about.releaseDate}",
+                                    color = p.text, fontSize = 13.sp,
+                                )
+                                Text(
+                                    "作者：${about.author}    联系：${about.email}",
+                                    color = p.textSecondary, fontSize = 12.sp,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                                Text(
+                                    about.repository,
+                                    color = p.accent, fontSize = 11.sp,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            SectionCard("简介") {
+                                Text(about.summary, color = p.textSecondary, fontSize = 12.sp)
+                            }
+                            SectionCard("技术栈与运行平台") {
+                                about.platforms.forEach { s ->
+                                    Text(
+                                        "· $s", color = p.textTertiary, fontSize = 11.sp,
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    )
+                                }
+                            }
+                            SectionCard("开源致谢") {
+                                about.credits.forEach { c ->
+                                    val head = buildString {
+                                        append("· ")
+                                        append(c.name)
+                                        if (c.author.isNotBlank()) append("（${c.author}")
+                                        if (c.license.isNotBlank()) {
+                                            append(if (c.author.isNotBlank()) "，" else "（")
+                                            append(c.license)
+                                        }
+                                        if (c.author.isNotBlank() || c.license.isNotBlank()) append("）")
+                                        if (c.usage.isNotBlank()) append("：${c.usage}")
+                                    }
+                                    Text(
+                                        head, color = p.textTertiary, fontSize = 11.sp,
+                                        modifier = Modifier.padding(top = 3.dp),
+                                    )
+                                }
+                                if (about.specialThanks.isNotEmpty()) {
+                                    Text(
+                                        "特别鸣谢", color = p.text, fontSize = 12.sp,
+                                        modifier = Modifier.padding(top = 8.dp),
+                                    )
+                                    about.specialThanks.forEach { (n, r) ->
+                                        Text(
+                                            "· $n：$r", color = p.textTertiary,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.padding(top = 2.dp),
+                                        )
+                                    }
+                                }
+                            }
+                            SectionCard("声明") {
+                                Text(
+                                    about.disclaimer,
+                                    color = p.warn, fontSize = 11.sp,
+                                )
+                            }
+                            SectionCard("许可协议") {
+                                Text(
+                                    "License: ${about.license} ｜ Copyright (C) 2026 ${about.author}",
+                                    color = p.textTertiary, fontSize = 11.sp,
+                                )
+                            }
+                        }
                     }
                 }
                 Spacer(Modifier.height(Dim.dockSpace))

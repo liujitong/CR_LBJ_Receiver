@@ -2264,8 +2264,8 @@ class LbjCore:
         self.afcErrHz = 0.0
         self.afcScore = 0.0
         # 频谱缓存 (32 个 bin，-120 dB 底噪)
-        self._spectrumBins = 32
-        self.spectrumSmoothed = np.full(32, -120.0, dtype=np.float64)
+        self._spectrumBins = 256
+        self.spectrumSmoothed = np.full(256, -120.0, dtype=np.float64)
         # 统计
         self._bytesRecv = 0
         self._reconnectCount = 0
@@ -2434,7 +2434,7 @@ class LbjCore:
                 self._log(f'[DSP错误] {e}')
                 continue
 
-            # ---- FFT 频谱 (32 bin) ----
+            # ---- FFT 频谱 (256 bin, v4.0) ----
             try:
                 nfft = 1024
                 seg = iq[:nfft] * np.hanning(nfft)
